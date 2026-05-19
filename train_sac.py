@@ -10,9 +10,12 @@ SAC 训练脚本 — train_sac.py
 """
 
 import argparse
+import logging
 import os
 import sys
 import numpy as np
+
+logger = logging.getLogger("train_sac")
 
 # Windows 键盘检测
 if os.name == "nt":
@@ -31,7 +34,7 @@ try:
     )
     from stable_baselines3.common.monitor import Monitor
 except ImportError:
-    print("[ERROR] 请安装 stable-baselines3: pip install stable-baselines3")
+    logger.error("请安装 stable-baselines3: pip install stable-baselines3")
     sys.exit(1)
 
 
@@ -41,7 +44,7 @@ class KeyboardStopCallback(BaseCallback):
         if msvcrt is not None and msvcrt.kbhit():
             key = msvcrt.getch()
             if key in (b"q", b"Q", b"\x1b"):
-                print("\n[检测到按键，正在优雅停止...]")
+                logger.info("检测到按键，正在优雅停止...")
                 return False
         return True
 
@@ -80,6 +83,20 @@ if __name__ == "__main__":
     rl_logs_dir = os.path.join(os.path.dirname(__file__), "rl_logs")
     os.makedirs(rl_logs_dir, exist_ok=True)
 
+    # 日志配置：控制台输出 INFO，文件只记录 ERROR
+    log_fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%H:%M:%S")
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(log_fmt)
+    file_handler = logging.FileHandler(
+        os.path.join(rl_logs_dir, "train_error.log"), encoding="utf-8"
+    )
+    file_handler.setLevel(logging.ERROR)
+    file_handler.setFormatter(log_fmt)
+    logger.setLevel(logging.INFO)
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
     # 阶段名映射到简写
     stage_short = args.stage
     full_to_short = {
@@ -91,10 +108,10 @@ if __name__ == "__main__":
         stage_short = full_to_short[args.stage]
     model_tag = stage_short.lower()
 
-    print("=" * 60)
-    print(f"SAC 训练 - 生育阶段: {args.stage} (简写: {stage_short})")
-    print(f"总步数: {args.timesteps}")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info(f"SAC 训练 - 生育阶段: {args.stage} (简写: {stage_short})")
+    logger.info(f"总步数: {args.timesteps}")
+    logger.info("=" * 60)
 
     # ---- 创建环境（SAC 不需要 VecNormalize） ----
     train_env = make_env(stage_short, obs_noise=0.01)()
@@ -134,16 +151,16 @@ if __name__ == "__main__":
     )
 
     # ---- 训练 ----
-    print(f"\n开始训练... (按 q 键优雅停止)\n")
+    logger.info("开始训练... (按 q 键优雅停止)")
     try:
         model.learn(
             total_timesteps=args.timesteps,
             callback=[keyboard_cb, checkpoint_cb, eval_cb],
         )
     except KeyboardInterrupt:
-        print("\n\n[中断] 用户按下 Ctrl+C，正在保存当前模型...")
+        logger.info("用户按下 Ctrl+C，正在保存当前模型...")
 
     # ---- 保存最终模型（正常结束或中断都会执行） ----
     final_path = os.path.join(args.save_dir, f"sac_{model_tag}_final")
     model.save(final_path)
-    print(f"\n[OK] SAC 模型已保存: {final_path}.zip")
+    logger.info(f"SAC 模型已保存: {final_path}.zip")
