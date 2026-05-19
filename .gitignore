@@ -1,0 +1,20 @@
+# 虚拟环境
+venv/
+env/
+
+# IDE 配置
+.idea/
+.vscode/
+
+# 缓存和日志
+.weather_cache/
+rl_logs/
+__pycache__/
+*.pyc
+
+# 模型和输出
+rl_models/
+pic_output/
+
+# 工具配置
+.claude/
