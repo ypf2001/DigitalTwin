@@ -61,14 +61,8 @@ class _Config:
     def season_comparison(self) -> dict:
         return self._data.get("season_comparison", {})
 
-    def ppo(self) -> dict:
-        return self._data.get("ppo", {})
-
     def sac(self) -> dict:
         return self._data.get("sac", {})
-
-    def onnx(self) -> dict:
-        return self._data.get("onnx", {})
 
     def get(self, key: str, default=None):
         """通用取值，支持点号分隔的嵌套路径。如 cfg.get('soil.K_sat')"""

@@ -3,12 +3,10 @@
 ==============================================
 提供菜单选择不同的运行模式：
   1. 仿真运行（固定策略）
-  2. 仿真运行（PPO 动态控制）
-  3. 仿真运行（SAC 动态控制）
-  4. 评估 PPO 模型
-  5. 训练 SAC 模型
-  6. 导出 ONNX 模型
-  7. 查看训练进度
+  2. 仿真运行（SAC 动态控制）
+  3. 训练 SAC 模型
+  4. 查看训练进度
+  5. 季节仿真 T1 vs T2 对比
 """
 
 import argparse
@@ -42,9 +40,8 @@ except Exception:
 
 _OUTPUT_DIRS = {
     "1": "fixed_policy",
-    "2": "ppo_control",
-    "3": "sac_control",
-    "8": "season_comparison",
+    "2": "sac_control",
+    "5": "season_comparison",
 }
 
 
@@ -75,7 +72,7 @@ def _get_weather_or_default(use_weather: bool):
 
 
 # ============================================================
-#  选项 1-3：仿真运行
+#  选项 1-2：仿真运行
 # ============================================================
 
 def run_simulation(model_type: str = "none", mode: str = "1",
@@ -85,9 +82,9 @@ def run_simulation(model_type: str = "none", mode: str = "1",
     参数
     ----------
     model_type : str
-        "none" = 固定策略, "ppo" = PPO, "sac" = SAC
+        "none" = 固定策略, "sac" = SAC
     mode : str
-        模式编号 "1"~"3"
+        模式编号 "1"~"2"
     use_weather : bool
         是否使用真实天气数据
     """
@@ -101,7 +98,7 @@ def run_simulation(model_type: str = "none", mode: str = "1",
 
     et0_val, rain_val, from_weather = _get_weather_or_default(use_weather)
 
-    use_rl = model_type in ("ppo", "sac")
+    use_rl = model_type == "sac"
     if use_rl:
         env = DigitalTwinGymEnv(
             growth_stage="MID",
@@ -112,16 +109,12 @@ def run_simulation(model_type: str = "none", mode: str = "1",
         )
         obs, _ = env.reset()
 
-        if model_type == "ppo":
-            from stable_baselines3 import PPO as RLModel
-            model_path = "rl_models/ppo_mid_final"
-        else:
-            from stable_baselines3 import SAC as RLModel
-            model_path = "rl_models/sac_mid_final"
+        from stable_baselines3 import SAC as RLModel
+        model_path = "rl_models/sac_mid_final"
 
         if os.path.exists(model_path + ".zip"):
             model = RLModel.load(model_path)
-            print(f"[{model_type.upper()}] 模型加载: {model_path}")
+            print(f"[SAC] 模型加载: {model_path}")
         else:
             print(f"[WARN] 模型 {model_path}.zip 不存在，回退到固定策略")
             model = None
@@ -136,8 +129,8 @@ def run_simulation(model_type: str = "none", mode: str = "1",
         )
         obs = env.reset()
 
-    mode_labels = {"none": "固定策略 [5.0, 1.0]", "ppo": "PPO 动态控制", "sac": "SAC 动态控制"}
-    mode_label_short = {"none": "Fixed", "ppo": "PPO", "sac": "SAC"}
+    mode_labels = {"none": "固定策略 [5.0, 1.0]", "sac": "SAC 动态控制"}
+    mode_label_short = {"none": "Fixed", "sac": "SAC"}
     mode_label = mode_label_short.get(model_type, model_type)
     print(f"Observation dim: {len(obs)}")
     print(f"Control mode: {mode_labels.get(model_type, model_type)}")
@@ -194,7 +187,7 @@ def run_simulation(model_type: str = "none", mode: str = "1",
     if use_rl:
         q_f_arr = np.array(q_f_vals)
         q_a_arr = np.array(q_a_vals)
-        print(f"\n{model_type.upper()} 动作统计:")
+        print(f"\nSAC 动作统计:")
         print(f"  q_f: mean={q_f_arr.mean():.4f}, std={q_f_arr.std():.4f}, "
               f"range=[{q_f_arr.min():.4f}, {q_f_arr.max():.4f}]")
         print(f"  q_a: mean={q_a_arr.mean():.4f}, std={q_a_arr.std():.4f}, "
@@ -265,7 +258,7 @@ def run_simulation(model_type: str = "none", mode: str = "1",
 
 
 # ============================================================
-#  选项 8：季节仿真对比 (T1 vs T2)
+#  选项 5：季节仿真对比 (T1 vs T2)
 # ============================================================
 
 def run_season_comparison(use_weather: bool = False):
@@ -365,7 +358,7 @@ def run_season_comparison(use_weather: bool = False):
     axes[3].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig_path = _make_output_path("8")
+    fig_path = _make_output_path("5")
     plt.savefig(fig_path, dpi=150)
     print(f"\n对比图已保存: {fig_path}")
     plt.close()
@@ -433,17 +426,14 @@ def show_menu():
     print("  马铃薯施肥灌溉数字孪生系统")
     print("=" * 50)
     print("  1. 仿真运行（固定策略）")
-    print("  2. 仿真运行（PPO 动态控制）")
-    print("  3. 仿真运行（SAC 动态控制）")
-    print("  4. 评估 PPO 模型")
-    print("  5. 训练 SAC 模型")
-    print("  6. 导出 ONNX 模型")
-    print("  7. 查看训练进度")
-    print("  8. 季节仿真 T1 vs T2 对比")
+    print("  2. 仿真运行（SAC 动态控制）")
+    print("  3. 训练 SAC 模型")
+    print("  4. 查看训练进度")
+    print("  5. 季节仿真 T1 vs T2 对比")
     print("  0. 退出")
     print("=" * 50)
 
-    choice = input("  请选择 [0-8]: ").strip()
+    choice = input("  请选择 [0-5]: ").strip()
     return choice
 
 
@@ -467,9 +457,9 @@ def run_script(script_name: str, args: list = None):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="数字孪生系统启动器")
-    parser.add_argument("--mode", type=int, choices=range(0, 9),
-                        help="直接指定模式（0=退出, 1=固定, 2=PPO, "
-                             "3=SAC, 4=评估, 5=训练SAC, 6=导出ONNX, 7=查看训练, 8=T1vsT2）")
+    parser.add_argument("--mode", type=int, choices=range(0, 6),
+                        help="直接指定模式（0=退出, 1=固定, 2=SAC, "
+                             "3=训练SAC, 4=查看训练, 5=T1vsT2）")
     parser.add_argument("--weather", action="store_true",
                         help="使用察右中旗真实天气数据 (Open-Meteo)")
     args = parser.parse_args()
@@ -480,18 +470,12 @@ if __name__ == '__main__':
         if mode == "1":
             run_simulation(model_type="none", mode="1", use_weather=args.weather)
         elif mode == "2":
-            run_simulation(model_type="ppo", mode="2", use_weather=args.weather)
+            run_simulation(model_type="sac", mode="2", use_weather=args.weather)
         elif mode == "3":
-            run_simulation(model_type="sac", mode="3", use_weather=args.weather)
-        elif mode == "4":
-            run_script("eval_ppo.py")
-        elif mode == "5":
             run_script("train_sac.py")
-        elif mode == "6":
-            run_script("export_onnx.py")
-        elif mode == "7":
+        elif mode == "4":
             run_script("check_training.py")
-        elif mode == "8":
+        elif mode == "5":
             run_season_comparison(use_weather=args.weather)
         elif mode == "0":
             print("再见！")
@@ -507,18 +491,12 @@ if __name__ == '__main__':
             if mode == "1":
                 run_simulation(model_type="none", mode="1", use_weather=args.weather)
             elif mode == "2":
-                run_simulation(model_type="ppo", mode="2", use_weather=args.weather)
+                run_simulation(model_type="sac", mode="2", use_weather=args.weather)
             elif mode == "3":
-                run_simulation(model_type="sac", mode="3", use_weather=args.weather)
-            elif mode == "4":
-                run_script("eval_ppo.py")
-            elif mode == "5":
                 run_script("train_sac.py")
-            elif mode == "6":
-                run_script("export_onnx.py")
-            elif mode == "7":
+            elif mode == "4":
                 run_script("check_training.py")
-            elif mode == "8":
+            elif mode == "5":
                 run_season_comparison(use_weather=args.weather)
             elif mode == "0":
                 print("再见！")

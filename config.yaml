@@ -133,20 +133,6 @@ season_comparison:
   rain_mm_day: 2.5
   seed: 42
 
-# ---- PPO 训练超参 ----
-ppo:
-  learning_rate: 3.0e-4
-  n_steps: 2048
-  batch_size: 64
-  n_epochs: 10
-  gamma: 0.99
-  gae_lambda: 0.95
-  clip_range: 0.2
-  ent_coef: 0.01
-  vf_coef: 0.5
-  max_grad_norm: 0.5
-  vec_normalize_clip: 10.0
-
 # ---- SAC 训练超参 ----
 sac:
   learning_rate: 3.0e-4
@@ -156,6 +142,3 @@ sac:
   tau: 0.005
   gamma: 0.99
 
-# ---- ONNX 导出 ----
-onnx:
-  opset_version: 11
