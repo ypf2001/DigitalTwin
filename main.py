@@ -430,18 +430,32 @@ def show_menu():
     print("  3. 训练 SAC 模型（支持断点续训）")
     print("  4. 查看训练进度")
     print("  5. 季节仿真 T1 vs T2 对比")
+    print("  6. SAC 闭环评估（全生育期）")
     print("  0. 退出")
     print("=" * 50)
 
-    choice = input("  请选择 [0-5]: ").strip()
+    choice = input("  请选择 [0-6]: ").strip()
     return choice
 
 
+def _find_python():
+    """优先返回 conda 环境 Python，否则返回当前 Python。"""
+    candidates = [
+        r"C:\Users\Administrator\.conda\envs\digital-twin\python.exe",
+        r"C:\Users\Administrator\miniconda3\envs\digital-twin\python.exe",
+        r"C:\Users\Administrator\anaconda3\envs\digital-twin\python.exe",
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return sys.executable
+
+_PYTHON = _find_python()
+
 def run_script(script_name: str, args: list = None):
     """通过 subprocess 运行另一个 Python 脚本。"""
-    python = sys.executable
     script_path = os.path.join(os.path.dirname(__file__), script_name)
-    cmd = [python, script_path]
+    cmd = [_PYTHON, script_path]
     if args:
         cmd.extend(args)
     print(f"\n>>> 启动: {' '.join(cmd)}\n")
@@ -457,9 +471,9 @@ def run_script(script_name: str, args: list = None):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="数字孪生系统启动器")
-    parser.add_argument("--mode", type=int, choices=range(0, 6),
+    parser.add_argument("--mode", type=int, choices=range(0, 7),
                         help="直接指定模式（0=退出, 1=固定, 2=SAC, "
-                             "3=训练SAC, 4=查看训练, 5=T1vsT2）")
+                             "3=训练SAC, 4=查看训练, 5=T1vsT2, 6=SAC评估）")
     parser.add_argument("--weather", action="store_true",
                         help="使用察右中旗真实天气数据 (Open-Meteo)")
     args = parser.parse_args()
@@ -478,6 +492,8 @@ if __name__ == '__main__':
             run_script("check_training.py")
         elif mode == "5":
             run_season_comparison(use_weather=args.weather)
+        elif mode == "6":
+            run_script("eval_sac.py")
         elif mode == "0":
             print("再见！")
         else:
@@ -500,6 +516,8 @@ if __name__ == '__main__':
                 run_script("check_training.py")
             elif mode == "5":
                 run_season_comparison(use_weather=args.weather)
+            elif mode == "6":
+                run_script("eval_sac.py")
             elif mode == "0":
                 print("再见！")
                 break
