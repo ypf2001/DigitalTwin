@@ -24,6 +24,7 @@ else:
     msvcrt = None
 
 from digital_twin_gym_env import DigitalTwinGymEnv
+from config_loader import load_config
 
 try:
     from stable_baselines3 import SAC
@@ -66,8 +67,10 @@ def make_env(stage_name: str, dt_min: float = 60.0,
 
 
 if __name__ == "__main__":
+    sac_cfg = load_config().sac()
+
     parser = argparse.ArgumentParser(description="SAC 训练")
-    parser.add_argument("--timesteps", type=int, default=200000,
+    parser.add_argument("--timesteps", type=int, default=sac_cfg["total_timesteps"],
                         help="总训练步数")
     parser.add_argument("--stage", type=str, default="BULKING",
                         choices=["INI", "DEV", "MID", "LATE",
@@ -75,6 +78,8 @@ if __name__ == "__main__":
                                  "BULKING", "STARCH_ACCUMULATION", "MATURATION"])
     parser.add_argument("--save-dir", type=str, default="./rl_models")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--resume", action="store_true",
+                        help="从上次保存的模型继续训练")
     args = parser.parse_args()
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -117,25 +122,53 @@ if __name__ == "__main__":
     train_env = make_env(stage_short, obs_noise=0.01)()
     eval_env = make_env(stage_short, obs_noise=0.0)()
 
-    # ---- SAC 模型 ----
-    model = SAC(
-        "MlpPolicy",
-        train_env,
-        learning_rate=3e-4,
-        buffer_size=100000,
-        batch_size=256,
-        learning_starts=1000,
-        tau=0.005,
-        gamma=0.99,
-        ent_coef='auto',
-        verbose=1,
-        seed=args.seed,
-    )
+    # ---- SAC 模型（新建 或 从 checkpoint 恢复） ----
+    final_path = os.path.join(args.save_dir, f"sac_{model_tag}_final")
+    if args.resume and (os.path.exists(final_path + ".zip") or
+                        any(f.startswith(f"sac_{model_tag}_") for f in os.listdir(args.save_dir))):
+        # 优先加载 final，否则找最新的 checkpoint
+        if os.path.exists(final_path + ".zip"):
+            load_path = final_path
+        else:
+            ckpts = sorted(
+                [f for f in os.listdir(args.save_dir)
+                 if f.startswith(f"sac_{model_tag}_") and f.endswith(".zip")],
+                key=lambda x: int(x.split("_")[-1].replace(".zip", "").replace("steps", "")),
+            )
+            load_path = os.path.join(args.save_dir, ckpts[-1].replace(".zip", ""))
+        model = SAC.load(load_path, env=train_env)
+        trained_steps = model.num_timesteps
+        logger.info(f"从 {load_path}.zip 恢复训练 (已训练 {trained_steps} 步)")
+    else:
+        ent_coef = sac_cfg["ent_coef"]
+        if ent_coef != "auto":
+            ent_coef = float(ent_coef)
+        model = SAC(
+            "MlpPolicy",
+            train_env,
+            learning_rate=float(sac_cfg["learning_rate"]),
+            buffer_size=int(sac_cfg["buffer_size"]),
+            batch_size=int(sac_cfg["batch_size"]),
+            learning_starts=int(sac_cfg["learning_starts"]),
+            tau=float(sac_cfg["tau"]),
+            gamma=float(sac_cfg["gamma"]),
+            ent_coef=ent_coef,
+            verbose=1,
+            seed=args.seed,
+        )
+        trained_steps = 0
+        if args.resume:
+            logger.warning("未找到已有模型，将从头训练")
 
     # ---- 回调 ----
+    save_freq = max(5000, args.timesteps // int(sac_cfg["save_freq_div"]))
+    eval_freq = int(sac_cfg["eval_freq"])
+    n_eval_episodes = int(sac_cfg["n_eval_episodes"])
+    log_interval = int(sac_cfg["log_interval"])
+
     keyboard_cb = KeyboardStopCallback()
     checkpoint_cb = CheckpointCallback(
-        save_freq=max(5000, args.timesteps // 20),
+        save_freq=save_freq,
         save_path=args.save_dir,
         name_prefix=f"sac_{model_tag}",
     )
@@ -145,22 +178,23 @@ if __name__ == "__main__":
         eval_env_mon,
         best_model_save_path=args.save_dir,
         log_path=rl_logs_dir,
-        eval_freq=2000,
+        eval_freq=eval_freq,
         deterministic=True,
-        n_eval_episodes=5,
+        n_eval_episodes=n_eval_episodes,
     )
 
     # ---- 训练 ----
-    logger.info("开始训练... (按 q 键优雅停止)")
+    logger.info(f"开始训练... (目标: +{args.timesteps} 步, 已训练: {trained_steps}, 按 q 键优雅停止)")
     try:
         model.learn(
+            log_interval=log_interval,
             total_timesteps=args.timesteps,
+            reset_num_timesteps=(trained_steps == 0),
             callback=[keyboard_cb, checkpoint_cb, eval_cb],
         )
     except KeyboardInterrupt:
         logger.info("用户按下 Ctrl+C，正在保存当前模型...")
 
     # ---- 保存最终模型（正常结束或中断都会执行） ----
-    final_path = os.path.join(args.save_dir, f"sac_{model_tag}_final")
     model.save(final_path)
-    logger.info(f"SAC 模型已保存: {final_path}.zip")
+    logger.info(f"SAC 模型已保存: {final_path}.zip (总步数: {model.num_timesteps})")

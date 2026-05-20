@@ -1,10 +1,10 @@
 """
-配置加载器 — 从 YAML 文件读取参数，提供模块化访问接口。
+配置加载器 — 从 config/ 目录读取 YAML 文件，合并后提供模块化访问。
 
 用法:
     from config_loader import load_config
-    cfg = load_config()            # 加载默认 config.yaml
-    cfg = load_config("my.yaml")   # 加载自定义配置
+    cfg = load_config()            # 加载 config/ 目录下所有 .yaml
+    cfg = load_config("my.yaml")   # 加载单个配置文件
 
     # 按模块获取配置
     soil = cfg.soil()
@@ -14,6 +14,7 @@
 
 import os
 import yaml
+import glob as _glob
 
 
 class _Config:
@@ -82,25 +83,50 @@ class _Config:
 _config = None
 
 
+def _load_dir(config_dir: str) -> dict:
+    """加载目录下所有 .yaml 文件并合并。"""
+    merged = {}
+    yaml_files = sorted(_glob.glob(os.path.join(config_dir, "*.yaml")))
+    if not yaml_files:
+        yaml_files = sorted(_glob.glob(os.path.join(config_dir, "*.yml")))
+    for fp in yaml_files:
+        with open(fp, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        if data:
+            merged.update(data)
+    return merged
+
+
 def load_config(path: str = None) -> _Config:
-    """加载 YAML 配置文件，返回 _Config 对象。
+    """加载配置文件，返回 _Config 对象。
 
     参数
     ----------
     path : str, optional
-        配置文件路径。若为 None，则查找当前目录下的 config.yaml
+        - None: 加载 config/ 目录下所有 .yaml 文件并合并
+        - 文件路径: 加载单个 YAML 文件
 
     返回
     ----------
     _Config
     """
     global _config
-    if path is None:
-        path = os.path.join(os.path.dirname(__file__), "config.yaml")
     if _config is not None:
         return _config
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+
+    if path is None:
+        config_dir = os.path.join(os.path.dirname(__file__), "config")
+        # 新版目录结构优先，回退到单文件
+        if os.path.isdir(config_dir):
+            data = _load_dir(config_dir)
+        else:
+            fp = os.path.join(os.path.dirname(__file__), "config.yaml")
+            with open(fp, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+    else:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+
     _config = _Config(data)
     return _config
 

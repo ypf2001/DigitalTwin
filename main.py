@@ -427,7 +427,7 @@ def show_menu():
     print("=" * 50)
     print("  1. 仿真运行（固定策略）")
     print("  2. 仿真运行（SAC 动态控制）")
-    print("  3. 训练 SAC 模型")
+    print("  3. 训练 SAC 模型（支持断点续训）")
     print("  4. 查看训练进度")
     print("  5. 季节仿真 T1 vs T2 对比")
     print("  0. 退出")
@@ -472,7 +472,8 @@ if __name__ == '__main__':
         elif mode == "2":
             run_simulation(model_type="sac", mode="2", use_weather=args.weather)
         elif mode == "3":
-            run_script("train_sac.py")
+            resume = input("  从上次模型继续训练? [y/N]: ").strip().lower() == "y"
+            run_script("train_sac.py", ["--resume"] if resume else [])
         elif mode == "4":
             run_script("check_training.py")
         elif mode == "5":
@@ -493,7 +494,8 @@ if __name__ == '__main__':
             elif mode == "2":
                 run_simulation(model_type="sac", mode="2", use_weather=args.weather)
             elif mode == "3":
-                run_script("train_sac.py")
+                resume = input("\n  从上次模型继续训练? [y/N]: ").strip().lower() == "y"
+                run_script("train_sac.py", ["--resume"] if resume else [])
             elif mode == "4":
                 run_script("check_training.py")
             elif mode == "5":
