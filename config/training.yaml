@@ -1,0 +1,17 @@
+# ============================================================
+# SAC 训练超参
+# ============================================================
+
+sac:
+  total_timesteps: 120000
+  learning_rate: 3.0e-4
+  buffer_size: 100000
+  batch_size: 256
+  learning_starts: 1000
+  tau: 0.005
+  gamma: 0.99
+  ent_coef: auto
+  eval_freq: 2000
+  n_eval_episodes: 5
+  log_interval: 4
+  save_freq_div: 20

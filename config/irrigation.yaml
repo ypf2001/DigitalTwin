@@ -1,0 +1,29 @@
+# ============================================================
+# 灌溉调度 & 季节仿真对比
+# ============================================================
+
+irrigation:
+  emitters_per_ha: 37037
+  emitter_flow_lph: 2.2
+  schedule:
+    - [5,   emergence,             225, 90]
+    - [15,  emergence,             225, 90]
+    - [24,  tuber_init,           225, 195]
+    - [31,  tuber_init,           225, 195]
+    - [38,  bulking,             225, 345]
+    - [45,  bulking,             225, 345]
+    - [55,  bulking,             225, 345]
+    - [65,  starch_accumulation, 225, 195]
+  rain_mm_day: 2.5
+  area_ha: 0.1
+  dt_min: 15.0
+  initial_theta: null
+  initial_ec: 0.1
+
+season_comparison:
+  area_ha: 0.1
+  dt_min: 15.0
+  ep_len_days: 90.0
+  et0_mm_day: 4.0
+  rain_mm_day: 2.5
+  seed: 42

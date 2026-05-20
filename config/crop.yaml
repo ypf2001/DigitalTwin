@@ -1,0 +1,30 @@
+# ============================================================
+# 作物生育期参数 (马铃薯)
+# ============================================================
+
+crop:
+  stages:
+    emergence:
+      kc: 0.45
+      target_ec: 0.8
+      root_depth: 200
+    vegetative:
+      kc: 0.75
+      target_ec: 1.0
+      root_depth: 250
+    tuber_init:
+      kc: 1.05
+      target_ec: 1.2
+      root_depth: 300
+    bulking:
+      kc: 1.15
+      target_ec: 1.5
+      root_depth: 400
+    starch_accumulation:
+      kc: 0.85
+      target_ec: 1.0
+      root_depth: 300
+    maturation:
+      kc: 0.70
+      target_ec: 0.8
+      root_depth: 300

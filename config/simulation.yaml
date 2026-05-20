@@ -1,0 +1,62 @@
+# ============================================================
+# 仿真环境 & 物理模型参数
+# ============================================================
+
+# ---- 仿真环境 ----
+env:
+  area_ha: 0.1
+  dt_min: 60.0
+  ep_len_days: 5.0
+  et0_mm_day: 5.0
+  q_w: 136.0
+  obs_noise_std: 0.01
+  seed: null
+
+# ---- 日间/夜间设置 ----
+day_night:
+  night_start: 18.0
+  night_end: 6.0
+  day_start: 6.0
+  day_end: 18.0
+  daytime_hours: 12.0
+  et_peak_factor: 2.0
+  et_fluctuation: 0.15
+
+# ---- 土壤物理参数 ----
+soil:
+  theta_sat: 0.43
+  theta_fc: 0.32
+  theta_wp: 0.04
+  theta_init: 0.16
+  ec_soil_init: 0.1
+  K_sat: 15.3
+  beta: 2.0
+  root_depth_default: 300
+
+# ---- 混肥罐参数 ----
+mixing_tank:
+  volume: 50.0
+  ec_conc: 30.0
+  ph_acid: 2.0
+  ph_water: 7.0
+
+# ---- 管道传输参数 ----
+pipe:
+  tau: 5.0
+  T: 2.0
+
+# ---- 动作空间 ----
+action:
+  q_f_min: 0.0
+  q_f_max: 10.0
+  q_a_min: 0.0
+  q_a_max: 4.0
+  fixed_strategy: [5.0, 1.0]
+
+# ---- 观测空间归一化 ----
+obs:
+  history_len: 5
+  etc_norm: 10.0
+  target_ec_norm: 5.0
+  obs_low: [0.04, 0.04, 0.04, 0.04, 0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 2.0, 2.0, 0.0, 0.0, 0.0]
+  obs_high: [0.43, 0.43, 0.43, 0.43, 0.43, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 7.0, 7.0, 7.0, 7.0, 7.0, 1.0, 1.0, 5.0]
