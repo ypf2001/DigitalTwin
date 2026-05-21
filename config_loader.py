@@ -59,6 +59,9 @@ class _Config:
     def irrigation(self) -> dict:
         return self._data.get("irrigation", {})
 
+    def plc(self) -> dict:
+        return self._data.get("plc", {})
+
     def season_comparison(self) -> dict:
         return self._data.get("season_comparison", {})
 
