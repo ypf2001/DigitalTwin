@@ -148,7 +148,8 @@ class DigitalTwinEnv:
             day_frac = (hour - self._day_start) / self._daytime_hours
             solar_factor = np.sin(day_frac * np.pi)
             etc_base_mm_h = self.crop.get_etc(self.current_stage, self.et0_base) / 24.0
-            et_actual = etc_base_mm_h * solar_factor * self._et_peak_factor
+            ks = self.crop.get_ks(self.soil.theta, self.soil.theta_fc, self.soil.theta_wp)
+            et_actual = etc_base_mm_h * solar_factor * self._et_peak_factor * ks
             et_actual *= (1.0 + self._rng.uniform(-self._et_fluctuation, self._et_fluctuation))
         else:
             et_actual = 0.0
@@ -219,9 +220,9 @@ class DigitalTwinEnv:
             - w2*|pH_drip - pH_target|^2
             - w3*total_flow * 0.01
             + w4*WUE_bonus
-            + 烧苗硬惩罚（EC_soil>3.0 或 pH_drip<4.5 → -50）
+            + 烧苗硬惩罚（EC_soil>3.0 或 pH_drip<4.5 → -100）
 
-        返回 (reward, ec_reward, ph_reward) 三元组。
+        返回 (reward, ec_reward, ph_reward, burn) 四元组。
         """
         rw = load_config().reward()
         w1, w2, w3, w4 = rw["w1"], rw["w2"], rw["w3"], rw["w4"]
@@ -249,7 +250,8 @@ class DigitalTwinEnv:
             hard_penalty = rw["hard_penalty"]
 
         reward = ec_reward + ph_reward - flow_penalty + wue_bonus + hard_penalty
-        return reward, ec_reward, ph_reward
+        burn = (hard_penalty < 0.0)
+        return reward, ec_reward, ph_reward, burn
 
     def step(self, action):
         """执行一个仿真步。
@@ -292,7 +294,9 @@ class DigitalTwinEnv:
         self._ph_in_history.append(ph_drip)
 
         # ---- 6. 奖励 ----
-        reward, ec_reward_component, ph_reward_component = self._compute_reward(ec_soil, ph_drip, total_flow_Lmin)
+        reward, ec_reward_component, ph_reward_component, burn = self._compute_reward(ec_soil, ph_drip, total_flow_Lmin)
+        if burn:
+            self._done = True
 
         # ---- 7. 时钟推进 ----
         self._time_min += self.dt_min
@@ -320,6 +324,7 @@ class DigitalTwinEnv:
             'is_night': self._is_nighttime(self._time_min),
             'ec_reward': ec_reward_component,
             'ph_reward': ph_reward_component,
+            'burn': burn,
         }
 
         return obs, reward, self._done, info

@@ -17,6 +17,11 @@ import sys
 from datetime import datetime
 from config_loader import load_config
 from weather_client import get_et0_rain
+from plot_style import (
+    apply_academic_style, style_axis, set_ylim_tight,
+    EC_ACTUAL, EC_TARGET, THETA, QF, QA, ET_COLOR, IRRIGATION,
+    FC_LINE, WP_LINE, T1, T2,
+)
 
 # Windows GBK 编码修复
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -194,55 +199,80 @@ def run_simulation(model_type: str = "none", mode: str = "1",
               f"range=[{q_a_arr.min():.4f}, {q_a_arr.max():.4f}]")
 
     # ====== 绘图 ======
-    fig, axes = plt.subplots(4, 1, figsize=(12, 13), sharex=True)
+    apply_academic_style()
 
     time_hours = np.array(time_hours)
     theta_vals = np.array(theta_vals)
     ec_soil_vals = np.array(ec_soil_vals)
     target_ec_vals = np.array(target_ec_vals)
 
-    # 图1: Soil Moisture
-    ax1 = axes[0]
-    ax1.plot(time_hours, theta_vals, 'b-', linewidth=1.5, label='θ (moisture)')
-    ax1.axhline(y=0.32, color='gray', linestyle='--', alpha=0.7, label='Field Capacity')
-    ax1.axhline(y=0.04, color='r', linestyle=':', alpha=0.5, label='Wilting Point')
-    ax1.set_ylabel('θ (m3/m3)')
-    ax1.set_title(f'Root Zone Soil Moisture [{mode_label}]')
-    ax1.legend(loc='best')
-    ax1.grid(True, alpha=0.3)
-    ax1.set_ylim(0.0, 0.50)
+    fig, axes = plt.subplots(4, 1, figsize=(9, 12), sharex=True)
+    fig.subplots_adjust(hspace=0.38)
 
-    # 图2: EC dynamics
-    ax2 = axes[1]
-    ax2.plot(time_hours, ec_soil_vals, 'r-', linewidth=1.5, label='EC_soil')
-    ax2.plot(time_hours, target_ec_vals, 'g--', linewidth=1.5, label='Target EC')
-    ax2.set_ylabel('EC (dS/m)')
-    ax2.set_title(f'Root Zone EC vs Target [{mode_label}]')
-    ax2.legend(loc='best')
-    ax2.grid(True, alpha=0.3)
+    # -- Subplot 1: Soil Moisture --
+    ax = axes[0]
+    style_axis(ax)
+    ax.plot(time_hours, theta_vals, color=THETA, linewidth=1.5,
+            label='θ (moisture)')
+    ax.axhline(y=0.32, color=FC_LINE, linestyle='--', linewidth=1.0, alpha=0.8,
+               label='Field capacity')
+    ax.axhline(y=0.04, color=WP_LINE, linestyle=':', linewidth=1.0, alpha=0.8,
+               label='Wilting point')
+    set_ylim_tight(ax, theta_vals, pad_pct=5, min_val=0.0)
+    ax.set_ylabel('θ (m³/m³)')
+    ax.set_title(f'Root-zone soil moisture [{mode_label}]')
+    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
+              fontsize=8.5, borderpad=0.5)
 
-    # 图3: Irrigation & ET
-    ax3 = axes[2]
-    ax3.plot(time_hours, irrigation_vals, 'b-', linewidth=1.0, alpha=0.7, label='Irrigation')
-    ax3.plot(time_hours, et_vals, 'orange', linewidth=1.5, label='ET (mm/h)')
-    ax3.set_ylabel('Rate (mm/h)')
-    ax3.set_title(f'Irrigation and Evapotranspiration [{mode_label}]')
-    ax3.legend(loc='best')
-    ax3.grid(True, alpha=0.3)
+    # -- Subplot 2: EC dynamics --
+    ax = axes[1]
+    style_axis(ax)
+    ax.plot(time_hours, ec_soil_vals, color=EC_ACTUAL, linewidth=1.5,
+            label='EC_soil')
+    ax.plot(time_hours, target_ec_vals, color=EC_TARGET, linestyle='--',
+            linewidth=1.8, label='Target EC')
+    ax.fill_between(time_hours, ec_soil_vals, target_ec_vals,
+                    color='#d0d0d0', alpha=0.35, linewidth=0)
+    set_ylim_tight(ax, np.concatenate([ec_soil_vals, target_ec_vals]), pad_pct=8)
+    ax.set_ylabel('EC (dS/m)')
+    ax.set_title(f'Root-zone EC vs target [{mode_label}]')
+    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
+              fontsize=8.5, borderpad=0.5)
 
-    # 图4: 动作变化
-    ax4 = axes[3]
-    ax4.plot(time_hours, q_f_vals, 'g-', linewidth=1.5, label='q_f (母液)')
-    ax4.plot(time_hours, q_a_vals, 'm-', linewidth=1.5, label='q_a (酸液)')
-    ax4.set_xlabel('Time (hours)')
-    ax4.set_ylabel('Flow (L/min)')
-    ax4.set_title(f'Actions over Time [{mode_label}]')
-    ax4.legend(loc='best')
-    ax4.grid(True, alpha=0.3)
+    # -- Subplot 3: Irrigation & ET --
+    ax = axes[2]
+    style_axis(ax)
+    ax.fill_between(time_hours, 0, irrigation_vals, color=IRRIGATION,
+                    alpha=0.30, linewidth=0, label='Irrigation')
+    ax.plot(time_hours, et_vals, color=ET_COLOR, linewidth=2.0, linestyle='--',
+            label='ET (mm/h)')
+    set_ylim_tight(ax, np.concatenate([irrigation_vals, et_vals]),
+                   pad_pct=10, min_val=0.0)
+    ax.set_ylabel('Rate (mm/h)')
+    ax.set_title(f'Irrigation and evapotranspiration [{mode_label}]')
+    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
+              fontsize=8.5, borderpad=0.5)
 
-    plt.tight_layout()
+    # -- Subplot 4: Actions --
+    ax = axes[3]
+    style_axis(ax)
+    n_pts = len(time_hours)
+    mk_every = max(1, n_pts // 40)
+    ax.plot(time_hours, q_f_vals, color=QF, linewidth=1.2,
+            marker='o', markersize=3.0, markevery=mk_every,
+            label='q_f (fertilizer)')
+    ax.plot(time_hours, q_a_vals, color=QA, linewidth=1.2,
+            marker='^', markersize=3.5, markevery=mk_every,
+            label='q_a (acid)')
+    set_ylim_tight(ax, np.concatenate([q_f_vals, q_a_vals]), pad_pct=10)
+    ax.set_xlabel('Time (hours)')
+    ax.set_ylabel('Flow (L/min)')
+    ax.set_title(f'Actions over time [{mode_label}]')
+    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
+              fontsize=8.5, borderpad=0.5)
+
     fig_name = _make_output_path(mode)
-    plt.savefig(fig_name, dpi=150)
+    plt.savefig(fig_name, dpi=300)
     print(f"\nPlot saved to: {fig_name}")
     plt.close()
 
@@ -308,58 +338,97 @@ def run_season_comparison(use_weather: bool = False):
         results[strategy] = res
 
     # ---- 对比绘图 ----
-    fig, axes = plt.subplots(4, 1, figsize=(14, 14), sharex=True)
+    apply_academic_style()
 
-    colors = {"T1": "blue", "T2": "red"}
+    col = {"T1": T1, "T2": T2}
+    label_cn = {"T1": "T1 (equal)", "T2": "T2 (root-zone weighted)"}
 
-    for idx, (label, res) in enumerate(results.items()):
-        c = colors[label]
-        style = "-" if label == "T1" else "--"
+    fig, axes = plt.subplots(4, 1, figsize=(9, 12), sharex=True)
+    fig.subplots_adjust(hspace=0.38)
 
-        # theta
-        axes[0].plot(res["time_day"], res["theta"], color=c, linestyle=style,
-                     linewidth=1.5, alpha=0.8, label=f"{label}")
-        # EC
-        axes[1].plot(res["time_day"], res["ec_soil"], color=c, linestyle=style,
-                     linewidth=1.5, alpha=0.8, label=f"{label} EC_soil")
-        # irrigation
+    for strategy in ["T1", "T2"]:
+        res = results[strategy]
+        c = col[strategy]
+        ls = "-" if strategy == "T1" else "--"
+        lbl = label_cn[strategy]
+
+        # -- Subplot 1: theta --
+        ax = axes[0]
+        ax.plot(res["time_day"], res["theta"], color=c, linestyle=ls,
+                linewidth=1.5, alpha=0.85, label=lbl)
+
+        # -- Subplot 2: EC --
+        ax = axes[1]
+        ax.plot(res["time_day"], res["ec_soil"], color=c, linestyle=ls,
+                linewidth=1.5, alpha=0.85, label=f'{lbl} EC_soil')
+
+        # -- Subplot 3: irrigation events --
+        ax = axes[2]
         event_mask = res["event_marker"] > 0.5
-        axes[2].fill_between(res["time_day"], 0, res["irrigation_mm_h"],
-                             where=event_mask, color=c, alpha=0.3, label=f"{label} 灌溉")
-        axes[2].plot(res["time_day"], res["irrigation_mm_h"], color=c,
-                     linewidth=0.8, alpha=0.6, drawstyle='steps-post')
-        # cumulative
+        ax.fill_between(res["time_day"], 0, res["irrigation_mm_h"],
+                        where=event_mask, color=c, alpha=0.28,
+                        linewidth=0, label=f'{lbl}')
+        ax.plot(res["time_day"], res["irrigation_mm_h"], color=c,
+                linewidth=0.8, alpha=0.55, drawstyle='steps-post')
+
+        # -- Subplot 4: cumulative irrigation --
+        ax = axes[3]
         cum_irr = np.cumsum(res["irrigation_mm_h"]) * (15.0 / 60.0)
-        axes[3].plot(res["time_day"], cum_irr, color=c, linestyle=style,
-                     linewidth=1.5, label=f"{label} 累计灌溉")
+        ax.plot(res["time_day"], cum_irr, color=c, linestyle=ls,
+                linewidth=1.5, label=lbl)
 
-    # 标注
-    axes[0].set_ylabel('theta (m3/m3)')
-    axes[0].set_title('根区含水率 — T1 vs T2')
-    axes[0].legend()
-    axes[0].grid(True, alpha=0.3)
+    # ============================================================
+    # Axis styling & labels
+    # ============================================================
 
-    axes[1].plot(results["T1"]["time_day"], results["T1"]["target_ec"],
-                 'k:', linewidth=1, alpha=0.5, label='Target EC')
-    axes[1].set_ylabel('EC (dS/m)')
-    axes[1].set_title('根区 EC 动态 — T1 vs T2')
-    axes[1].legend()
-    axes[1].grid(True, alpha=0.3)
+    # Subplot 1: theta
+    ax = axes[0]
+    style_axis(ax)
+    ax.axhline(y=0.32, color=FC_LINE, linestyle='--', linewidth=0.8, alpha=0.6)
+    ax.axhline(y=0.04, color=WP_LINE, linestyle=':', linewidth=0.8, alpha=0.6)
+    all_theta = np.concatenate([results["T1"]["theta"], results["T2"]["theta"]])
+    set_ylim_tight(ax, all_theta, pad_pct=5, min_val=0.0)
+    ax.set_ylabel('θ (m³/m³)')
+    ax.set_title('Root-zone soil moisture — T1 vs T2')
+    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
+              fontsize=8.5, borderpad=0.5)
 
-    axes[2].set_ylabel('灌溉 (mm/h)')
-    axes[2].set_title('灌溉事件时序')
-    axes[2].legend()
-    axes[2].grid(True, alpha=0.3)
+    # Subplot 2: EC
+    ax = axes[1]
+    style_axis(ax)
+    t1 = results["T1"]
+    ax.plot(t1["time_day"], t1["target_ec"], color='#333333', linestyle=':',
+            linewidth=1.2, alpha=0.7, label='Target EC')
+    all_ec = np.concatenate([results["T1"]["ec_soil"], results["T2"]["ec_soil"],
+                             t1["target_ec"]])
+    set_ylim_tight(ax, all_ec, pad_pct=8)
+    ax.set_ylabel('EC (dS/m)')
+    ax.set_title('Root-zone EC dynamics — T1 vs T2')
+    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
+              fontsize=8.5, borderpad=0.5)
 
-    axes[3].set_xlabel('出苗后天数')
-    axes[3].set_ylabel('累计灌溉 (mm)')
-    axes[3].set_title('累计灌溉量')
-    axes[3].legend()
-    axes[3].grid(True, alpha=0.3)
+    # Subplot 3: irrigation events
+    ax = axes[2]
+    style_axis(ax)
+    all_irr = np.concatenate([results["T1"]["irrigation_mm_h"],
+                              results["T2"]["irrigation_mm_h"]])
+    set_ylim_tight(ax, all_irr, pad_pct=10, min_val=0.0)
+    ax.set_ylabel('Irrigation (mm/h)')
+    ax.set_title('Irrigation event sequence')
+    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
+              fontsize=8.5, borderpad=0.5)
 
-    plt.tight_layout()
+    # Subplot 4: cumulative irrigation
+    ax = axes[3]
+    style_axis(ax)
+    ax.set_xlabel('Days after emergence')
+    ax.set_ylabel('Cumulative irrigation (mm)')
+    ax.set_title('Cumulative irrigation')
+    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
+              fontsize=8.5, borderpad=0.5)
+
     fig_path = _make_output_path("5")
-    plt.savefig(fig_path, dpi=150)
+    plt.savefig(fig_path, dpi=300)
     print(f"\n对比图已保存: {fig_path}")
     plt.close()
 

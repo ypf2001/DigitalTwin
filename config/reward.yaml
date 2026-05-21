@@ -1,15 +1,21 @@
 # ============================================================
-# 奖励函数权重
+# 奖励函数参数
+#
+# r = -w1 * |EC_soil - target_ec|^2        EC 跟踪惩罚（二次型）
+#     - w2 * |pH_drip - pH_target|^2        pH 跟踪惩罚（二次型）
+#     - w3 * total_flow * flow_penalty_scale  流量/水耗惩罚
+#     + w4 * max(0, 1 - total_flow / wue_norm)  WUE 奖励
+#     + hard_penalty                          烧苗硬惩罚
 # ============================================================
 
 reward:
-  w1: 4.0
-  w2: 4.0
-  w3: 0.1
-  w4: 0.5
-  flow_penalty_scale: 0.01
-  wue_norm: 55.0
-  pH_target: 6.0
-  ec_burn_threshold: 3.0
-  ph_burn_threshold: 4.5
-  hard_penalty: -50.0
+  w1: 4.0                  # EC 跟踪误差权重
+  w2: 4.0                  # pH 跟踪误差权重
+  w3: 0.1                  # 流量惩罚权重
+  w4: 0.5                  # 水分利用效率 (WUE) 奖励权重
+  flow_penalty_scale: 0.01 # 流量惩罚缩放系数 (乘以 total_flow_Lmin)
+  wue_norm: 55.0           # WUE 归一化基准流量 (L/min)，流量低于此值有正奖励
+  pH_target: 6.0           # 目标灌溉液 pH
+  ec_burn_threshold: 3.0   # 烧苗 EC 阈值 (dS/m)，超过即触发 done + hard_penalty
+  ph_burn_threshold: 4.5   # 烧苗 pH 阈值，低于即触发 done + hard_penalty
+  hard_penalty: -100.0     # 烧苗惩罚值，同时触发回合终止 (done=True)

@@ -102,6 +102,24 @@ class CropModel:
         kc = self.get_kc(stage)
         return kc * et0_mm_day
 
+    def get_ks(self, theta: float, theta_fc: float, theta_wp: float) -> float:
+        """FAO-56 水分胁迫系数 Ks。
+
+        theta >= theta_crit → Ks = 1.0 (无胁迫)
+        theta_wp < theta < theta_crit → 线性递减
+        theta <= theta_wp → Ks = 0.0 (完全胁迫)
+
+        theta_crit = theta_fc - p * (theta_fc - theta_wp)
+        其中 p = 0.55 为马铃薯消耗分数 (FAO-56 表 22).
+        """
+        p = 0.55
+        theta_crit = theta_fc - p * (theta_fc - theta_wp)
+        if theta >= theta_crit:
+            return 1.0
+        if theta <= theta_wp:
+            return 0.0
+        return (theta - theta_wp) / (theta_crit - theta_wp)
+
     def get_target_ec(self, stage: GrowthStage) -> float:
         """返回指定生育期的最优土壤 EC (dS/m)。"""
         try:

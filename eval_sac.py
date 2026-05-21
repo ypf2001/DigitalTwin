@@ -32,6 +32,11 @@ except Exception:
 from digital_twin_env import DigitalTwinEnv, GrowthStage
 from irrigation_schedule import get_irrigation_schedule, event_duration_hours, run_season_simulation
 from config_loader import load_config
+from plot_style import (
+    apply_academic_style, style_axis, set_ylim_tight,
+    EC_ACTUAL, EC_TARGET, THETA, QF, QA, ET_COLOR, IRRIGATION,
+    FC_LINE, WP_LINE, ERROR_BAND,
+)
 
 # 观测归一化边界（对齐 digital_twin_gym_env.py）
 cfg_obs = load_config().obs()
@@ -279,53 +284,91 @@ def run_eval(args):
               f"EC_MAE={ec_m:.4f}  WUE={w:.4f}  theta_CV={res['theta'].std()/res['theta'].mean():.4f}")
 
     # ---- 6. 绘图 ----
+    apply_academic_style()
+
     time_day = np.array(history["time_day"])
-    fig, axes = plt.subplots(4, 1, figsize=(14, 14), sharex=True)
+    fig, axes = plt.subplots(4, 1, figsize=(9, 12), sharex=True)
+    fig.subplots_adjust(hspace=0.38)
 
-    # theta
-    axes[0].plot(time_day, theta_arr, 'b-', linewidth=1.0, alpha=0.8)
-    axes[0].axhline(y=0.32, color='gray', linestyle='--', alpha=0.5, label='FC')
-    axes[0].axhline(y=0.04, color='r', linestyle=':', alpha=0.5, label='WP')
-    axes[0].set_ylabel('theta (m³/m³)')
-    axes[0].set_title('根区含水率 — SAC 闭环控制')
-    axes[0].legend()
-    axes[0].grid(True, alpha=0.3)
+    # ================================================================
+    # Subplot 1: Root-zone soil moisture
+    # ================================================================
+    ax = axes[0]
+    style_axis(ax)
+    ax.plot(time_day, theta_arr, color=THETA, linewidth=1.5, label='θ (soil moisture)')
+    ax.axhline(y=0.32, color=FC_LINE, linestyle='--', linewidth=1.0, alpha=0.8,
+               label='Field capacity')
+    ax.axhline(y=0.04, color=WP_LINE, linestyle=':', linewidth=1.0, alpha=0.8,
+               label='Wilting point')
+    set_ylim_tight(ax, theta_arr, pad_pct=5, min_val=0.0)
+    ax.set_ylabel('θ (m³/m³)')
+    ax.set_title('Root-zone soil moisture — SAC closed-loop control')
+    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
+              fontsize=8.5, borderpad=0.5)
 
-    # EC
-    axes[1].plot(time_day, ec_arr, 'r-', linewidth=1.0, alpha=0.8, label='EC_soil')
-    axes[1].plot(time_day, target_arr, 'g--', linewidth=1.5, label='Target EC')
-    axes[1].set_ylabel('EC (dS/m)')
-    axes[1].set_title('根区 EC 跟踪')
-    axes[1].legend()
-    axes[1].grid(True, alpha=0.3)
+    # ================================================================
+    # Subplot 2: Root-zone EC tracking
+    # ================================================================
+    ax = axes[1]
+    style_axis(ax)
+    ax.plot(time_day, ec_arr, color=EC_ACTUAL, linewidth=1.5, label='EC_soil')
+    ax.plot(time_day, target_arr, color=EC_TARGET, linestyle='--', linewidth=1.8,
+            label='Target EC')
+    # Shaded error band where deviation is significant
+    ax.fill_between(time_day, ec_arr, target_arr,
+                    color=ERROR_BAND, alpha=0.35, linewidth=0)
+    set_ylim_tight(ax, np.concatenate([ec_arr, target_arr]), pad_pct=8)
+    ax.set_ylabel('EC (dS/m)')
+    ax.set_title('Root-zone EC tracking')
+    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
+              fontsize=8.5, borderpad=0.5)
 
-    # 动作
-    axes[2].plot(time_day, qf_arr, 'g-', linewidth=0.8, alpha=0.7, label='q_f (母液)')
-    axes[2].plot(time_day, qa_arr, 'm-', linewidth=0.8, alpha=0.7, label='q_a (酸液)')
-    axes[2].set_ylabel('Flow (L/min)')
-    axes[2].set_title('SAC 动作序列')
-    axes[2].legend()
-    axes[2].grid(True, alpha=0.3)
+    # ================================================================
+    # Subplot 3: SAC action sequence
+    # ================================================================
+    ax = axes[2]
+    style_axis(ax)
+    n_pts = len(time_day)
+    mk_every = max(1, n_pts // 40)
+    ax.plot(time_day, qf_arr, color=QF, linewidth=1.2,
+            marker='o', markersize=3.0, markevery=mk_every,
+            label='q_f (fertilizer)')
+    ax.plot(time_day, qa_arr, color=QA, linewidth=1.2,
+            marker='^', markersize=3.5, markevery=mk_every,
+            label='q_a (acid)')
+    set_ylim_tight(ax, np.concatenate([qf_arr, qa_arr]), pad_pct=10)
+    ax.set_ylabel('Flow (L/min)')
+    ax.set_title('SAC action sequence')
+    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
+              fontsize=8.5, borderpad=0.5)
 
-    # 灌溉 + ET
+    # ================================================================
+    # Subplot 4: Irrigation and evapotranspiration
+    # ================================================================
+    ax = axes[3]
+    style_axis(ax)
     irr_arr = np.array(history["irrigation_mm_h"])
     etc_arr = np.array(history["etc_mm_h"])
-    axes[3].fill_between(time_day, 0, irr_arr, color='b', alpha=0.3, label='Irrigation')
-    axes[3].plot(time_day, etc_arr, 'orange', linewidth=1.0, label='ET (mm/h)')
-    axes[3].set_xlabel('出苗后天数')
-    axes[3].set_ylabel('Rate (mm/h)')
-    axes[3].set_title('灌溉与蒸散发')
-    axes[3].legend()
-    axes[3].grid(True, alpha=0.3)
+    # Semi-transparent fill for irrigation events
+    ax.fill_between(time_day, 0, irr_arr, color=IRRIGATION, alpha=0.30,
+                    linewidth=0, label='Irrigation')
+    # Thick dashed line for ET
+    ax.plot(time_day, etc_arr, color=ET_COLOR, linewidth=2.0, linestyle='--',
+            label='ET (mm/h)')
+    set_ylim_tight(ax, np.concatenate([irr_arr, etc_arr]), pad_pct=10, min_val=0.0)
+    ax.set_xlabel('Days after emergence')
+    ax.set_ylabel('Rate (mm/h)')
+    ax.set_title('Irrigation and evapotranspiration')
+    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
+              fontsize=8.5, borderpad=0.5)
 
-    plt.tight_layout()
-
+    # ---- Save ----
     out_dir = os.path.join(os.path.dirname(__file__), "pic_output", "eval_sac")
     os.makedirs(out_dir, exist_ok=True)
     from datetime import datetime
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     fname = os.path.join(out_dir, f"sac_eval_{ts}.png")
-    plt.savefig(fname, dpi=150)
+    plt.savefig(fname, dpi=300)
     print(f"\n图表已保存: {fname}")
     plt.close()
 

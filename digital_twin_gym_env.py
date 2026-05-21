@@ -93,7 +93,7 @@ class DigitalTwinGymEnv(gym.Env):
         self._obs_low = OBS_LOW.copy()
         self._obs_high = OBS_HIGH.copy()
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32
         )
 
         act = load_config().action()
