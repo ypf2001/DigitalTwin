@@ -16,11 +16,19 @@
 """
 
 import json
+import logging
 import os
 import time
 from datetime import datetime
 
 import requests
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+_error_fh = logging.FileHandler(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rl_logs', 'error.log'), encoding='utf-8')
+_error_fh.setLevel(logging.ERROR)
+_error_fh.setFormatter(logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s'))
+logging.getLogger().addHandler(_error_fh)
 
 # ---- 地点配置 ----
 LOCATION = {
@@ -103,7 +111,7 @@ def fetch_daily_weather(
         raw = resp.json()
     except (requests.RequestException, ValueError) as e:
         # 网络异常时返回缓存（哪怕过期）或默认值
-        print(f"[weather_client] 请求失败: {e}")
+        logger.error(f"[weather_client] 请求失败: {e}")
         return _fallback_data()
 
     daily = raw.get("daily", {})
@@ -167,18 +175,18 @@ if __name__ == "__main__":
     import sys
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-    print(f"地点: {LOCATION['name']}")
-    print(f"坐标: {LOCATION['latitude']}N, {LOCATION['longitude']}E")
-    print(f"海拔: {LOCATION['elevation_m']}m")
-    print("-" * 60)
+    logger.info(f"地点: {LOCATION['name']}")
+    logger.info(f"坐标: {LOCATION['latitude']}N, {LOCATION['longitude']}E")
+    logger.info(f"海拔: {LOCATION['elevation_m']}m")
+    logger.info("-" * 60)
 
     data = fetch_daily_weather(use_cache=False)
-    print(f"{'日期':<12} {'ET0(mm)':>8} {'降雨(mm)':>8} {'最高(°C)':>8} {'最低(°C)':>8}")
-    print("-" * 52)
+    logger.info(f"{'日期':<12} {'ET0(mm)':>8} {'降雨(mm)':>8} {'最高(°C)':>8} {'最低(°C)':>8}")
+    logger.info("-" * 52)
     for i in range(len(data["time"])):
-        print(f"{data['time'][i]:<12} {data['et0_mm_day'][i]:>8.1f} "
-              f"{data['rain_mm_day'][i]:>8.1f} {data['t_max_c'][i]:>8.1f} "
-              f"{data['t_min_c'][i]:>8.1f}")
+        logger.info(f"{data['time'][i]:<12} {data['et0_mm_day'][i]:>8.1f} "
+                    f"{data['rain_mm_day'][i]:>8.1f} {data['t_max_c'][i]:>8.1f} "
+                    f"{data['t_min_c'][i]:>8.1f}")
 
     et0, rain = get_et0_rain()
-    print(f"\n当前用于仿真: et0={et0} mm/天, rain={rain} mm/天")
+    logger.info(f"\n当前用于仿真: et0={et0} mm/天, rain={rain} mm/天")

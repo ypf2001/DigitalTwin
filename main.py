@@ -11,6 +11,7 @@
 
 import argparse
 import io
+import logging
 import os
 import subprocess
 import sys
@@ -22,6 +23,13 @@ from plot_style import (
     EC_ACTUAL, EC_TARGET, THETA, QF, QA, ET_COLOR, IRRIGATION,
     FC_LINE, WP_LINE, T1, T2,
 )
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+_error_fh = logging.FileHandler(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rl_logs', 'error.log'), encoding='utf-8')
+_error_fh.setLevel(logging.ERROR)
+_error_fh.setFormatter(logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s'))
+logging.getLogger().addHandler(_error_fh)
 
 # Windows GBK 编码修复
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -67,10 +75,10 @@ def _get_weather_or_default(use_weather: bool):
 
     try:
         et0, rain = get_et0_rain()
-        print(f"[天气] 察右中旗 今日 ET0={et0:.1f} mm/天, 降雨={rain:.1f} mm/天")
+        logger.info(f"[天气] 察右中旗 今日 ET0={et0:.1f} mm/天, 降雨={rain:.1f} mm/天")
         return et0, rain, True
     except Exception as e:
-        print(f"[天气] 获取失败 ({e})，回退到 config.yaml 默认值")
+        logger.error(f"[天气] 获取失败 ({e})，回退到 config.yaml 默认值")
         env_cfg = load_config().env()
         irr_cfg = load_config().irrigation()
         return env_cfg["et0_mm_day"], irr_cfg.get("rain_mm_day", 2.0), False
@@ -97,9 +105,9 @@ def run_simulation(model_type: str = "none", mode: str = "1",
     from digital_twin_gym_env import DigitalTwinGymEnv
     from crop_model import GrowthStage
 
-    print("=" * 60)
-    print("Potato Fertigation Digital Twin - Simulation")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Potato Fertigation Digital Twin - Simulation")
+    logger.info("=" * 60)
 
     et0_val, rain_val, from_weather = _get_weather_or_default(use_weather)
 
@@ -119,9 +127,9 @@ def run_simulation(model_type: str = "none", mode: str = "1",
 
         if os.path.exists(model_path + ".zip"):
             model = RLModel.load(model_path)
-            print(f"[SAC] 模型加载: {model_path}")
+            logger.info(f"[SAC] 模型加载: {model_path}")
         else:
-            print(f"[WARN] 模型 {model_path}.zip 不存在，回退到固定策略")
+            logger.error(f"[WARN] 模型 {model_path}.zip 不存在，回退到固定策略")
             model = None
             use_rl = False
     else:
@@ -137,8 +145,8 @@ def run_simulation(model_type: str = "none", mode: str = "1",
     mode_labels = {"none": "固定策略 [5.0, 1.0]", "sac": "SAC 动态控制"}
     mode_label_short = {"none": "Fixed", "sac": "SAC"}
     mode_label = mode_label_short.get(model_type, model_type)
-    print(f"Observation dim: {len(obs)}")
-    print(f"Control mode: {mode_labels.get(model_type, model_type)}")
+    logger.info(f"Observation dim: {len(obs)}")
+    logger.info(f"Control mode: {mode_labels.get(model_type, model_type)}")
 
     # 数据记录
     time_hours = []
@@ -151,7 +159,7 @@ def run_simulation(model_type: str = "none", mode: str = "1",
     q_f_vals = []
     q_a_vals = []
 
-    print("\nRunning simulation (5 days)...")
+    logger.info("\nRunning simulation (5 days)...")
     done = False
     step_count = 0
     while not done:
@@ -181,22 +189,22 @@ def run_simulation(model_type: str = "none", mode: str = "1",
 
         step_count += 1
         if use_rl and (step_count <= 10 or step_count % 20 == 0):
-            print(f"  step {step_count:3d}: q_f={action[0]:.4f}, q_a={action[1]:.4f}, "
-                  f"EC={info['ec_soil']:.3f}, target={info['target_ec']:.2f}, "
-                  f"irr={info['irrigation_mm_h']:.3f} mm/h")
+            logger.info(f"  step {step_count:3d}: q_f={action[0]:.4f}, q_a={action[1]:.4f}, "
+                        f"EC={info['ec_soil']:.3f}, target={info['target_ec']:.2f}, "
+                        f"irr={info['irrigation_mm_h']:.3f} mm/h")
 
-    print(f"\nSimulation done! {len(time_hours)} steps ({len(time_hours):.0f} hours)")
-    print(f"Final: theta={theta_vals[-1]:.4f}, EC_soil={ec_soil_vals[-1]:.3f}")
+    logger.info(f"\nSimulation done! {len(time_hours)} steps ({len(time_hours):.0f} hours)")
+    logger.info(f"Final: theta={theta_vals[-1]:.4f}, EC_soil={ec_soil_vals[-1]:.3f}")
 
     # ---- RL 动作统计 ----
     if use_rl:
         q_f_arr = np.array(q_f_vals)
         q_a_arr = np.array(q_a_vals)
-        print(f"\nSAC 动作统计:")
-        print(f"  q_f: mean={q_f_arr.mean():.4f}, std={q_f_arr.std():.4f}, "
-              f"range=[{q_f_arr.min():.4f}, {q_f_arr.max():.4f}]")
-        print(f"  q_a: mean={q_a_arr.mean():.4f}, std={q_a_arr.std():.4f}, "
-              f"range=[{q_a_arr.min():.4f}, {q_a_arr.max():.4f}]")
+        logger.info(f"\nSAC 动作统计:")
+        logger.info(f"  q_f: mean={q_f_arr.mean():.4f}, std={q_f_arr.std():.4f}, "
+                    f"range=[{q_f_arr.min():.4f}, {q_f_arr.max():.4f}]")
+        logger.info(f"  q_a: mean={q_a_arr.mean():.4f}, std={q_a_arr.std():.4f}, "
+                    f"range=[{q_a_arr.min():.4f}, {q_a_arr.max():.4f}]")
 
     # ====== 绘图 ======
     apply_academic_style()
@@ -273,18 +281,18 @@ def run_simulation(model_type: str = "none", mode: str = "1",
 
     fig_name = _make_output_path(mode)
     plt.savefig(fig_name, dpi=300)
-    print(f"\nPlot saved to: {fig_name}")
+    logger.info(f"\nPlot saved to: {fig_name}")
     plt.close()
 
     # 统计摘要
-    print("\n" + "=" * 60)
-    print("Summary Statistics")
-    print("=" * 60)
-    print(f"  Mean theta:       {theta_vals.mean():.4f} +/- {theta_vals.std():.4f}")
-    print(f"  Mean EC_soil:     {ec_soil_vals.mean():.3f} +/- {ec_soil_vals.std():.3f}")
-    print(f"  Mean irrigation:  {np.mean(irrigation_vals):.4f} mm/h")
+    logger.info("\n" + "=" * 60)
+    logger.info("Summary Statistics")
+    logger.info("=" * 60)
+    logger.info(f"  Mean theta:       {theta_vals.mean():.4f} +/- {theta_vals.std():.4f}")
+    logger.info(f"  Mean EC_soil:     {ec_soil_vals.mean():.3f} +/- {ec_soil_vals.std():.3f}")
+    logger.info(f"  Mean irrigation:  {np.mean(irrigation_vals):.4f} mm/h")
     ec_error = np.abs(ec_soil_vals - target_ec_vals)
-    print(f"  EC tracking MAE:  {ec_error.mean():.3f} dS/m")
+    logger.info(f"  EC tracking MAE:  {ec_error.mean():.3f} dS/m")
 
 
 # ============================================================
@@ -298,22 +306,22 @@ def run_season_comparison(use_weather: bool = False):
 
     et0_val, rain_val, from_weather = _get_weather_or_default(use_weather)
 
-    print("=" * 60)
-    print("马铃薯完整生育期仿真 — T1(等量) vs T2(基于根系分布)")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("马铃薯完整生育期仿真 — T1(等量) vs T2(基于根系分布)")
+    logger.info("=" * 60)
 
     schedule = get_irrigation_schedule()
     total_irr_mm = sum(e.t1_amount_m3ha for e in schedule) / 10.0
-    print(f"灌溉事件: {len(schedule)} 次")
-    print(f"总灌溉量: {total_irr_mm:.0f} mm")
-    print(f"T1 单次: {schedule[0].t1_amount_m3ha:.0f} m^3/ha (等量)")
-    print(f"T2 单次: " + ", ".join(f"{e.t2_amount_m3ha:.0f}" for e in schedule) + " m^3/ha (变量)")
-    print()
+    logger.info(f"灌溉事件: {len(schedule)} 次")
+    logger.info(f"总灌溉量: {total_irr_mm:.0f} mm")
+    logger.info(f"T1 单次: {schedule[0].t1_amount_m3ha:.0f} m^3/ha (等量)")
+    logger.info(f"T2 单次: " + ", ".join(f"{e.t2_amount_m3ha:.0f}" for e in schedule) + " m^3/ha (变量)")
+    logger.info("")
 
     results = {}
     for strategy in ["T1", "T2"]:
         label = "等量灌溉" if strategy == "T1" else "根系分布变量灌溉"
-        print(f"\n--- {strategy}: {label} ---")
+        logger.info(f"\n--- {strategy}: {label} ---")
 
         env = DigitalTwinEnv(
             growth_stage=schedule[0].growth_stage,
@@ -429,15 +437,15 @@ def run_season_comparison(use_weather: bool = False):
 
     fig_path = _make_output_path("5")
     plt.savefig(fig_path, dpi=300)
-    print(f"\n对比图已保存: {fig_path}")
+    logger.info(f"\n对比图已保存: {fig_path}")
     plt.close()
 
     # ---- 统计对比 ----
-    print("\n" + "=" * 60)
-    print("T1 vs T2 统计对比（论文关键指标）")
-    print("=" * 60)
-    print(f"{'指标':<30} {'T1 (等量)':>12} {'T2 (根系)':>12} {'改善':>8}")
-    print("-" * 62)
+    logger.info("\n" + "=" * 60)
+    logger.info("T1 vs T2 统计对比（论文关键指标）")
+    logger.info("=" * 60)
+    logger.info(f"{'指标':<30} {'T1 (等量)':>12} {'T2 (根系)':>12} {'改善':>8}")
+    logger.info("-" * 62)
 
     t1 = results["T1"]
     t2 = results["T2"]
@@ -445,19 +453,19 @@ def run_season_comparison(use_weather: bool = False):
     # EC 跟踪 MAE
     ec_mae_t1 = np.abs(t1["ec_soil"] - t1["target_ec"]).mean()
     ec_mae_t2 = np.abs(t2["ec_soil"] - t2["target_ec"]).mean()
-    print(f"  EC tracking MAE (dS/m)       {ec_mae_t1:12.3f} {ec_mae_t2:12.3f}")
+    logger.info(f"  EC tracking MAE (dS/m)       {ec_mae_t1:12.3f} {ec_mae_t2:12.3f}")
 
     # 平均含水率
     theta_t1 = t1["theta"].mean()
     theta_t2 = t2["theta"].mean()
     improvement = (theta_t2 - theta_t1) / (theta_t1 + 1e-6) * 100
-    print(f"  平均 theta                    {theta_t1:12.4f} {theta_t2:12.4f} {improvement:+7.1f}%")
+    logger.info(f"  平均 theta                    {theta_t1:12.4f} {theta_t2:12.4f} {improvement:+7.1f}%")
 
     # 总灌溉量
-    print(f"  总灌溉量 (mm)                {t1['total_irrigation_mm']:12.1f} {t2['total_irrigation_mm']:12.1f}")
+    logger.info(f"  总灌溉量 (mm)                {t1['total_irrigation_mm']:12.1f} {t2['total_irrigation_mm']:12.1f}")
 
     # 总蒸散发（高 = 作物蒸腾更多 = 生长更好）
-    print(f"  总蒸散发 (mm)                {t1['total_etc_mm']:12.1f} {t2['total_etc_mm']:12.1f}")
+    logger.info(f"  总蒸散发 (mm)                {t1['total_etc_mm']:12.1f} {t2['total_etc_mm']:12.1f}")
 
     # 灌溉后 theta 稳定度（标准差越小越稳定）
     # 只统计灌溉事件期间的数据
@@ -466,22 +474,22 @@ def run_season_comparison(use_weather: bool = False):
     if len(t1_event) > 0 and len(t2_event) > 0:
         cv_t1 = t1_event.std() / (t1_event.mean() + 1e-6)
         cv_t2 = t2_event.std() / (t2_event.mean() + 1e-6)
-        print(f"  灌溉期 theta CV               {cv_t1:12.4f} {cv_t2:12.4f}")
+        logger.info(f"  灌溉期 theta CV               {cv_t1:12.4f} {cv_t2:12.4f}")
 
     # 深层渗漏估算 (theta > FC 期间的排水)
     drain_t1 = np.maximum(0, t1["theta"] - 0.32).sum() * 15.3  # K_sat × excess
     drain_t2 = np.maximum(0, t2["theta"] - 0.32).sum() * 15.3
-    print(f"  深层渗漏估算 (mm)            {drain_t1:12.1f} {drain_t2:12.1f}")
+    logger.info(f"  深层渗漏估算 (mm)            {drain_t1:12.1f} {drain_t2:12.1f}")
 
     # WUE 代理 (ET / 总耗水)
     wue_t1 = t1["total_etc_mm"] / (t1["total_irrigation_mm"] + 2.5 * 65 + 1e-6)
     wue_t2 = t2["total_etc_mm"] / (t2["total_irrigation_mm"] + 2.5 * 65 + 1e-6)
-    print(f"  WUE 代理 (ET/总入流)          {wue_t1:12.4f} {wue_t2:12.4f}")
+    logger.info(f"  WUE 代理 (ET/总入流)          {wue_t1:12.4f} {wue_t2:12.4f}")
 
     # 论文期望: T2 水分利用效率提高 14%-19%
     wue_change = (wue_t2 - wue_t1) / (wue_t1 + 1e-6) * 100
-    print(f"\n  → 论文 WUE 提升: 14%-19%")
-    print(f"  → 当前模型 WUE 变化: {wue_change:+.1f}%")
+    logger.info(f"\n  → 论文 WUE 提升: 14%-19%")
+    logger.info(f"  → 当前模型 WUE 变化: {wue_change:+.1f}%")
 
 
 # ============================================================
@@ -490,18 +498,18 @@ def run_season_comparison(use_weather: bool = False):
 
 def show_menu():
     """显示交互式启动菜单。"""
-    print()
-    print("=" * 50)
-    print("  马铃薯施肥灌溉数字孪生系统")
-    print("=" * 50)
-    print("  1. 仿真运行（固定策略）")
-    print("  2. 仿真运行（SAC 动态控制）")
-    print("  3. 训练 SAC 模型（支持断点续训）")
-    print("  4. 查看训练进度")
-    print("  5. 季节仿真 T1 vs T2 对比")
-    print("  6. SAC 闭环评估（全生育期）")
-    print("  0. 退出")
-    print("=" * 50)
+    logger.info("")
+    logger.info("=" * 50)
+    logger.info("  马铃薯施肥灌溉数字孪生系统")
+    logger.info("=" * 50)
+    logger.info("  1. 仿真运行（固定策略）")
+    logger.info("  2. 仿真运行（SAC 动态控制）")
+    logger.info("  3. 训练 SAC 模型（支持断点续训）")
+    logger.info("  4. 查看训练进度")
+    logger.info("  5. 季节仿真 T1 vs T2 对比")
+    logger.info("  6. SAC 闭环评估（全生育期）")
+    logger.info("  0. 退出")
+    logger.info("=" * 50)
 
     choice = input("  请选择 [0-6]: ").strip()
     return choice
@@ -527,10 +535,10 @@ def run_script(script_name: str, args: list = None):
     cmd = [_PYTHON, script_path]
     if args:
         cmd.extend(args)
-    print(f"\n>>> 启动: {' '.join(cmd)}\n")
+    logger.info(f"\n>>> 启动: {' '.join(cmd)}\n")
     result = subprocess.run(cmd)
     if result.returncode != 0:
-        print(f"\n[WARN] {script_name} 退出码: {result.returncode}")
+        logger.error(f"\n[WARN] {script_name} 退出码: {result.returncode}")
     return result.returncode
 
 
@@ -549,7 +557,7 @@ if __name__ == '__main__':
 
     if args.mode is not None:
         mode = str(args.mode)
-        print()
+        logger.info("")
         if mode == "1":
             run_simulation(model_type="none", mode="1", use_weather=args.weather)
         elif mode == "2":
@@ -564,15 +572,15 @@ if __name__ == '__main__':
         elif mode == "6":
             run_script("eval_sac.py")
         elif mode == "0":
-            print("再见！")
+            logger.info("再见！")
         else:
-            print(f"[ERROR] 无效选项: {mode}")
+            logger.error(f"[ERROR] 无效选项: {mode}")
             sys.exit(1)
     else:
         try:
           while True:
             mode = show_menu()
-            print()
+            logger.info("")
 
             if mode == "1":
                 run_simulation(model_type="none", mode="1", use_weather=args.weather)
@@ -588,11 +596,11 @@ if __name__ == '__main__':
             elif mode == "6":
                 run_script("eval_sac.py")
             elif mode == "0":
-                print("再见！")
+                logger.info("再见！")
                 break
             else:
-                print(f"[ERROR] 无效选项: {mode}")
+                logger.error(f"[ERROR] 无效选项: {mode}")
 
             input("\n按 Enter 键返回菜单...")
         except KeyboardInterrupt:
-            print("\n再见！")
+            logger.info("\n再见！")

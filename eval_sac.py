@@ -7,9 +7,17 @@ SAC 闭环评估脚本 — eval_sac.py
 
 import argparse
 import io
+import logging
 import os
 import sys
 import numpy as np
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+_error_fh = logging.FileHandler(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rl_logs', 'error.log'), encoding='utf-8')
+_error_fh.setLevel(logging.ERROR)
+_error_fh.setFormatter(logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s'))
+logging.getLogger().addHandler(_error_fh)
 
 # Windows GBK 修复
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -46,7 +54,7 @@ OBS_HIGH = np.array(cfg_obs["obs_high"], dtype=np.float32)
 try:
     from stable_baselines3 import SAC
 except ImportError:
-    print("请安装 stable-baselines3: pip install stable-baselines3")
+    logger.error("请安装 stable-baselines3: pip install stable-baselines3")
     sys.exit(1)
 
 # 阶段 → 简写
@@ -112,7 +120,7 @@ class SACSeasonRunner:
                 path = os.path.join(self.model_dir, f"sac_{tag}_final")
                 if os.path.exists(path + ".zip"):
                     self.models = {t: path for t in ["ini", "dev", "mid", "late"]}
-                    print(f"[INFO] 未找到全部阶段模型，使用单一模型: {path}")
+                    logger.info(f"[INFO] 未找到全部阶段模型，使用单一模型: {path}")
                     break
 
     def _load_model(self, model_path: str, env):
@@ -132,7 +140,7 @@ class SACSeasonRunner:
 
         if stage_tag not in self._loaded_models:
             self._loaded_models[stage_tag] = SAC.load(path)
-            print(f"  [加载] {path}.zip")
+            logger.info(f"  [加载] {path}.zip")
 
         model = self._loaded_models[stage_tag]
         norm_obs = normalize_obs(obs)
@@ -145,9 +153,9 @@ def run_eval(args):
     cfg = load_config()
     irr_cfg = cfg.irrigation()
 
-    print("=" * 60)
-    print("SAC 闭环评估 — 全生育期推演")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("SAC 闭环评估 — 全生育期推演")
+    logger.info("=" * 60)
 
     # ---- 1. 初始化模型加载器 ----
     runner = SACSeasonRunner(
@@ -156,12 +164,12 @@ def run_eval(args):
     )
 
     if not runner.models:
-        print("[ERROR] 未找到任何 SAC 模型，请先训练。")
-        print(f"  检查目录: {os.path.abspath(args.model_dir)}")
+        logger.error("[ERROR] 未找到任何 SAC 模型，请先训练。")
+        logger.error(f"  检查目录: {os.path.abspath(args.model_dir)}")
         sys.exit(1)
 
-    print(f"阶段模型配置: {runner.models}")
-    print()
+    logger.info(f"阶段模型配置: {runner.models}")
+    logger.info("")
 
     # ---- 2. 创建环境（DigitalTwinEnv，需要用 Gym 的归一化） ----
     schedule = get_irrigation_schedule()
@@ -199,8 +207,8 @@ def run_eval(args):
 
     event_tags = ["ini", "ini", "dev", "dev", "mid", "mid", "mid", "late"]
 
-    print("按灌溉事件推进...")
-    print("-" * 60)
+    logger.info("按灌溉事件推进...")
+    logger.info("-" * 60)
 
     for i, (event, tag) in enumerate(zip(schedule, event_tags)):
         env.set_growth_stage(event.growth_stage)
@@ -231,17 +239,17 @@ def run_eval(args):
         target_ec = env.crop.get_target_ec(event.growth_stage)
         theta = info.get("theta", 0)
         ec = info.get("ec_soil", 0)
-        print(f"  事件 {i+1}/8  day {event.day:3.0f}  "
-              f"stage={stage_name:20s}  tag={tag}  "
-              f"irr={event_irr:.1f}mm  theta={theta:.3f}  EC={ec:.3f}  target={target_ec:.2f}")
+        logger.info(f"  事件 {i+1}/8  day {event.day:3.0f}  "
+                    f"stage={stage_name:20s}  tag={tag}  "
+                    f"irr={event_irr:.1f}mm  theta={theta:.3f}  EC={ec:.3f}  target={target_ec:.2f}")
 
         prev_day = event.day
 
     # ---- 4. 统计摘要 ----
-    print()
-    print("=" * 60)
-    print("评估汇总")
-    print("=" * 60)
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("评估汇总")
+    logger.info("=" * 60)
     theta_arr = np.array(history["theta"])
     ec_arr = np.array(history["ec_soil"])
     target_arr = np.array(history["target_ec"])
@@ -249,21 +257,21 @@ def run_eval(args):
     qa_arr = np.array(history["q_a"])
 
     ec_mae = np.abs(ec_arr - target_arr).mean()
-    print(f"  总步数:          {len(history['time_day'])}")
-    print(f"  总灌溉量:        {total_irr_mm:.1f} mm")
-    print(f"  总蒸散发:        {total_etc_mm:.1f} mm")
-    print(f"  平均 theta:      {theta_arr.mean():.4f} ± {theta_arr.std():.4f}")
-    print(f"  EC 跟踪 MAE:     {ec_mae:.4f} dS/m")
-    print(f"  q_f 均值/范围:   {qf_arr.mean():.2f} / [{qf_arr.min():.2f}, {qf_arr.max():.2f}]")
-    print(f"  q_a 均值/范围:   {qa_arr.mean():.2f} / [{qa_arr.min():.2f}, {qa_arr.max():.2f}]")
+    logger.info(f"  总步数:          {len(history['time_day'])}")
+    logger.info(f"  总灌溉量:        {total_irr_mm:.1f} mm")
+    logger.info(f"  总蒸散发:        {total_etc_mm:.1f} mm")
+    logger.info(f"  平均 theta:      {theta_arr.mean():.4f} ± {theta_arr.std():.4f}")
+    logger.info(f"  EC 跟踪 MAE:     {ec_mae:.4f} dS/m")
+    logger.info(f"  q_f 均值/范围:   {qf_arr.mean():.2f} / [{qf_arr.min():.2f}, {qf_arr.max():.2f}]")
+    logger.info(f"  q_a 均值/范围:   {qa_arr.mean():.2f} / [{qa_arr.min():.2f}, {qa_arr.max():.2f}]")
 
     # WUE 代理
     wue = total_etc_mm / (total_irr_mm + irr_cfg.get("rain_mm_day", 2.0) * 65 + 1e-6)
-    print(f"  WUE 代理:        {wue:.4f}")
+    logger.info(f"  WUE 代理:        {wue:.4f}")
 
     # ---- 5. 对比 T1/T2 基线 ----
-    print()
-    print("--- 对比基线 (T1/T2) ---")
+    logger.info("")
+    logger.info("--- 对比基线 (T1/T2) ---")
     for strategy in ["T1", "T2"]:
         env2 = DigitalTwinEnv(
             growth_stage=schedule[0].growth_stage,
@@ -280,8 +288,8 @@ def run_eval(args):
         )
         ec_m = np.abs(res["ec_soil"] - res["target_ec"]).mean()
         w = res["total_etc_mm"] / (res["total_irrigation_mm"] + irr_cfg.get("rain_mm_day", 2.0) * 65 + 1e-6)
-        print(f"  {strategy}: 灌溉={res['total_irrigation_mm']:.1f}mm  "
-              f"EC_MAE={ec_m:.4f}  WUE={w:.4f}  theta_CV={res['theta'].std()/res['theta'].mean():.4f}")
+        logger.info(f"  {strategy}: 灌溉={res['total_irrigation_mm']:.1f}mm  "
+                    f"EC_MAE={ec_m:.4f}  WUE={w:.4f}  theta_CV={res['theta'].std()/res['theta'].mean():.4f}")
 
     # ---- 6. 绘图 ----
     apply_academic_style()
@@ -369,7 +377,7 @@ def run_eval(args):
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     fname = os.path.join(out_dir, f"sac_eval_{ts}.png")
     plt.savefig(fname, dpi=300)
-    print(f"\n图表已保存: {fname}")
+    logger.info(f"\n图表已保存: {fname}")
     plt.close()
 
 

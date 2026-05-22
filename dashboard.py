@@ -13,7 +13,15 @@ import os
 import sys
 import time
 import argparse
+import logging
 import numpy as np
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+_error_fh = logging.FileHandler(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rl_logs', 'error.log'), encoding='utf-8')
+_error_fh.setLevel(logging.ERROR)
+_error_fh.setFormatter(logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s'))
+logging.getLogger().addHandler(_error_fh)
 
 # Windows GBK 编码修复
 try:
@@ -59,17 +67,17 @@ def format_trend(current: float, previous: float) -> str:
 
 def print_header():
     """打印看板标题栏。"""
-    print("=" * 62)
-    print("  🌱  马铃薯水肥数字孪生 — SAC 训练监控看板")
-    print("=" * 62)
+    logger.info("=" * 62)
+    logger.info("  🌱  马铃薯水肥数字孪生 — SAC 训练监控看板")
+    logger.info("=" * 62)
 
 
 def print_status(last_eval_count: int, file_mtime: float):
     """打印文件状态行。"""
     status = "● 监控中" if last_eval_count > 0 else "○ 等待首次评估..."
     mtime_str = time.strftime("%H:%M:%S", time.localtime(file_mtime)) if file_mtime else "--:--:--"
-    print(f"  状态: {status}    文件更新时间: {mtime_str}")
-    print("-" * 62)
+    logger.info(f"  状态: {status}    文件更新时间: {mtime_str}")
+    logger.info("-" * 62)
 
 
 def main(interval: float = 2.0):
@@ -85,9 +93,9 @@ def main(interval: float = 2.0):
         if not os.path.exists(EVAL_PATH):
             clear_screen()
             print_header()
-            print(f"\n  ⏳ 等待评估文件生成...\n  {EVAL_PATH}\n")
-            print("-" * 62)
-            print("  按 Ctrl+C 退出")
+            logger.info(f"\n  ⏳ 等待评估文件生成...\n  {EVAL_PATH}\n")
+            logger.info("-" * 62)
+            logger.info("  按 Ctrl+C 退出")
             time.sleep(interval)
             continue
 
@@ -131,51 +139,51 @@ def main(interval: float = 2.0):
 
         # 文件状态
         mtime_str = time.strftime("%H:%M:%S", time.localtime(current_mtime))
-        print(f"  评估次数: {n_evals}    文件更新: {mtime_str}    刷新间隔: {interval}s")
-        print("-" * 62)
+        logger.info(f"  评估次数: {n_evals}    文件更新: {mtime_str}    刷新间隔: {interval}s")
+        logger.info("-" * 62)
 
         # 训练进度
         progress_pct = timesteps[-1] / 200000 * 100 if len(timesteps) > 0 else 0
-        print(f"\n  📊 训练进度")
-        print(f"     当前步数: {latest_timestep:,} / 200,000 ({progress_pct:.1f}%)")
+        logger.info(f"\n  📊 训练进度")
+        logger.info(f"     当前步数: {latest_timestep:,} / 200,000 ({progress_pct:.1f}%)")
 
         # 奖励指标
-        print(f"\n  🎯 奖励指标")
-        print(f"     历史最佳平均奖励:  {best_reward:12.4f}  (第 {best_timestep:,} 步)")
-        print(f"     最新平均奖励:      {latest_avg:12.4f}{format_trend(latest_avg, prev_avg)}")
+        logger.info(f"\n  🎯 奖励指标")
+        logger.info(f"     历史最佳平均奖励:  {best_reward:12.4f}  (第 {best_timestep:,} 步)")
+        logger.info(f"     最新平均奖励:      {latest_avg:12.4f}{format_trend(latest_avg, prev_avg)}")
 
         # 最近一次评估的详细结果
-        print(f"\n  📋 最新评估详情 (步数 {latest_timestep:,})")
+        logger.info(f"\n  📋 最新评估详情 (步数 {latest_timestep:,})")
         latest_episodes = results[-1]
-        print(f"     {'Episode':<12}{'奖励':>12}{'步长':>10}")
-        print(f"     {'-' * 34}")
+        logger.info(f"     {'Episode':<12}{'奖励':>12}{'步长':>10}")
+        logger.info(f"     {'-' * 34}")
         for i in range(len(latest_episodes)):
-            print(f"     {i + 1:<12}{latest_episodes[i]:>12.4f}{ep_lengths[-1, i]:>10}")
+            logger.info(f"     {i + 1:<12}{latest_episodes[i]:>12.4f}{ep_lengths[-1, i]:>10}")
 
         # 历史最佳评估的详细结果
         if best_idx != n_evals - 1:
-            print(f"\n  🏆 历史最佳评估详情 (步数 {best_timestep:,})")
+            logger.info(f"\n  🏆 历史最佳评估详情 (步数 {best_timestep:,})")
             best_episodes = results[best_idx]
             for i in range(len(best_episodes)):
-                print(f"     {i + 1:<12}{best_episodes[i]:>12.4f}{ep_lengths[best_idx, i]:>10}")
+                logger.info(f"     {i + 1:<12}{best_episodes[i]:>12.4f}{ep_lengths[best_idx, i]:>10}")
 
         # 最近 5 次评估趋势（简易 ASCII 折线）
         if n_evals >= 2:
             recent_n = min(n_evals, 6)
             recent_avgs = avg_per_eval[-recent_n:]
             recent_steps = timesteps[-recent_n:]
-            print(f"\n  📈 最近 {recent_n} 次评估趋势")
-            print(f"     {'步数':<10} {'平均奖励':>10}")
-            print(f"     {'-' * 22}")
+            logger.info(f"\n  📈 最近 {recent_n} 次评估趋势")
+            logger.info(f"     {'步数':<10} {'平均奖励':>10}")
+            logger.info(f"     {'-' * 22}")
             for step, avg in zip(recent_steps, recent_avgs):
                 bar = "█" * max(1, int((avg - avg_per_eval.min()) /
                                        (avg_per_eval.max() - avg_per_eval.min() + 1e-6) * 20))
-                print(f"     {step:<10,} {avg:>10.4f}  {bar}")
+                logger.info(f"     {step:<10,} {avg:>10.4f}  {bar}")
 
         # 底部
-        print("\n" + "-" * 62)
-        print("  按 Ctrl+C 退出")
-        print("=" * 62)
+        logger.info("\n" + "-" * 62)
+        logger.info("  按 Ctrl+C 退出")
+        logger.info("=" * 62)
 
         # 更新状态，等待下一次检测
         prev_eval_count = n_evals
@@ -194,6 +202,6 @@ if __name__ == "__main__":
         main(interval=args.interval)
     except KeyboardInterrupt:
         clear_screen()
-        print("=" * 62)
-        print("  监控已停止，再见！")
-        print("=" * 62)
+        logger.info("=" * 62)
+        logger.info("  监控已停止，再见！")
+        logger.info("=" * 62)

@@ -14,9 +14,19 @@
 import numpy as np
 from dataclasses import dataclass
 from typing import List, Optional
+import logging
 
 from crop_model import GrowthStage
 from config_loader import load_config
+
+import os
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+_error_fh = logging.FileHandler(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rl_logs', 'error.log'), encoding='utf-8')
+_error_fh.setLevel(logging.ERROR)
+_error_fh.setFormatter(logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s'))
+logging.getLogger().addHandler(_error_fh)
 
 _irr_cfg = load_config().irrigation()
 EMITTERS_PER_HA = _irr_cfg["emitters_per_ha"]
@@ -203,12 +213,12 @@ def run_season_simulation(
 
         if verbose:
             target_ec = env.crop.get_target_ec(event.growth_stage)
-            print(f"  事件 {event_idx+1}/8  day {event.day:3.0f}  "
-                  f"stage={event.growth_stage.value:12s}  "
-                  f"{strategy}={amount:3.0f} m^3/ha  "
-                  f"duration={event_hours:.1f}h  "
-                  f"irr_applied={event_irr_total:.1f}mm  "
-                  f"theta={info['theta']:.3f}  EC={info['ec_soil']:.3f}")
+            logger.info(f"  事件 {event_idx+1}/8  day {event.day:3.0f}  "
+                        f"stage={event.growth_stage.value:12s}  "
+                        f"{strategy}={amount:3.0f} m^3/ha  "
+                        f"duration={event_hours:.1f}h  "
+                        f"irr_applied={event_irr_total:.1f}mm  "
+                        f"theta={info['theta']:.3f}  EC={info['ec_soil']:.3f}")
 
         prev_day = event.day
 

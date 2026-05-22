@@ -69,3 +69,20 @@ plc:
   db_number: 1
   cycle_s: 1.0
   max_retries: 5
+
+  # ---- DB1 内存地址映射（需与 TIA Portal 中 DB1 的实际偏移量一致）----
+  # 新增变量后请重新确认偏移量：TIA Portal → DB1 → 变量表 → "偏移量" 列
+  addresses:
+    # ===== Write: Python → PLC =====
+    Valve_F_Opt_SP:   { offset: 0,  type: real,  bytes: 4 }
+    Valve_A_Opt_SP:   { offset: 4,  type: real,  bytes: 4 }
+    Remote_Heartbeat: { offset: 10, type: int,   bytes: 2 }
+
+    # ===== Read: PLC → Python =====
+    Remote_Comms_OK:    { offset: 8,  type: bool,  bytes: 1 }
+    Watchdog_Timer:     { offset: 14, type: int,   bytes: 2 }
+    Actual_Valve_F:     { offset: 22, type: real,  bytes: 4 }
+    Actual_Valve_A:     { offset: 26, type: real,  bytes: 4 }
+    AQ_Valve_F_Raw:     { offset: 36, type: int,   bytes: 2 }
+    AQ_Valve_A_Raw:     { offset: 38, type: int,   bytes: 2 }
+    System_Alarm_Light: { offset: 40, type: bool,  bytes: 1 }

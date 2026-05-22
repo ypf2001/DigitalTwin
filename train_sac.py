@@ -136,7 +136,11 @@ if __name__ == "__main__":
                 key=lambda x: int(x.split("_")[-1].replace(".zip", "").replace("steps", "")),
             )
             load_path = os.path.join(args.save_dir, ckpts[-1].replace(".zip", ""))
-        model = SAC.load(load_path, env=train_env)
+        model = SAC.load(load_path)
+        # 旧模型观测空间是 Box(-inf, inf)，新环境是 Box(-1, 1)
+        # 维度相同 (23)，覆盖后兼容
+        model.observation_space = train_env.observation_space
+        model.set_env(train_env)
         trained_steps = model.num_timesteps
         logger.info(f"从 {load_path}.zip 恢复训练 (已训练 {trained_steps} 步)")
     else:
