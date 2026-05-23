@@ -4,9 +4,10 @@ import traceback
 
 from fastapi import APIRouter
 
-from models import SimulateRequest, SeasonRequest
+from models import SimulateRequest, SeasonRequest, ConfigSaveRequest
 from services import (
     get_weather_data, get_config_data, run_simulation, run_season_compare,
+    save_config_section,
 )
 
 router = APIRouter()
@@ -45,6 +46,15 @@ def simulate(req: SimulateRequest):
 def season_compare(req: SeasonRequest):
     try:
         return run_season_compare(req.weather)
+    except Exception as e:
+        return {"success": False, "error": str(e),
+                "traceback": traceback.format_exc()}
+
+
+@router.put("/api/config/save")
+def save_config(req: ConfigSaveRequest):
+    try:
+        return save_config_section(req.section, req.updates)
     except Exception as e:
         return {"success": False, "error": str(e),
                 "traceback": traceback.format_exc()}

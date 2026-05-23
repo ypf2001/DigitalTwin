@@ -98,7 +98,7 @@ export default {
       const mk = (id, ds, yt, xt) => { const c = new Chart(document.getElementById(id).getContext('2d'), {
         type: 'line', data: { labels: lbl, datasets: ds },
         options: { responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
-          plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 12, font: { size: 11 } } } },
+          plugins: { legend: { position: 'top', onClick: () => {}, labels: { boxWidth: 12, padding: 12, font: { size: 11 } } } },
           scales: { x: { title: { display: true, text: xt || '天数 (DAE)', font: { size: 11 } }, ticks: { maxTicksLimit: 10, font: { size: 10 } } },
                     y: { title: { display: true, text: yt, font: { size: 11 } }, ticks: { font: { size: 10 } } } } }
       }); c.canvas.parentElement.style.height = '240px'; return c }

@@ -1,4 +1,6 @@
 """请求/响应数据模型"""
+from typing import Dict
+
 from pydantic import BaseModel
 
 
@@ -10,3 +12,8 @@ class SimulateRequest(BaseModel):
 
 class SeasonRequest(BaseModel):
     weather: bool = False
+
+
+class ConfigSaveRequest(BaseModel):
+    section: str
+    updates: Dict[str, object]

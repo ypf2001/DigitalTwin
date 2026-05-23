@@ -2,9 +2,25 @@
 
 import os
 import traceback
-import numpy as np
 
-from config_loader import load_config
+import numpy as np
+import yaml
+
+from config_loader import load_config, reload_config
+
+# 配置项 → YAML 文件 映射
+_SECTION_FILE_MAP = {
+    "crop": "crop.yaml",
+    "irrigation": "irrigation.yaml",
+    "reward": "reward.yaml",
+    "sac": "training.yaml",
+}
+# simulation.yaml 包含多个顶层 key
+_SIMULATION_KEYS = {"env", "soil", "mixing_tank", "pipe", "action", "obs", "day_night", "plc"}
+
+
+def _get_config_dir():
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
 
 
 def get_weather_data(use_weather: bool = True):
@@ -194,3 +210,62 @@ def run_season_compare(use_weather: bool):
             "wue_change_pct": round((wue2 - wue1) / (wue1 + 1e-6) * 100, 1),
         },
     }
+
+
+def save_config_section(section: str, updates: dict):
+    """保存配置段到对应的 YAML 文件，支持嵌套键路径如 'crop.stages.bulking.target_ec'。
+
+    参数
+    ----------
+    section : str
+        'crop' / 'irrigation' / 'reward' / 'sac' 或 'simulation'
+    updates : dict
+        {'key.path': new_value, ...}
+    """
+    config_dir = _get_config_dir()
+
+    # 确定文件名
+    if section == "simulation":
+        filename = "simulation.yaml"
+    else:
+        filename = _SECTION_FILE_MAP.get(section)
+    if not filename:
+        raise ValueError(f"未知配置段: {section}")
+
+    filepath = os.path.join(config_dir, filename)
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"配置文件不存在: {filepath}")
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    # 按点号路径设置值
+    for key_path, value in updates.items():
+        parts = key_path.split(".")
+        node = data
+        for i, part in enumerate(parts[:-1]):
+            if part not in node:
+                node[part] = {}
+            node = node[part]
+        # 尝试类型转换
+        old_val = node.get(parts[-1])
+        if isinstance(old_val, float) or (isinstance(old_val, int) and isinstance(value, str) and "." in value):
+            try:
+                value = float(value)
+            except (ValueError, TypeError):
+                pass
+        elif isinstance(old_val, int):
+            try:
+                value = int(value)
+            except (ValueError, TypeError):
+                pass
+        elif isinstance(old_val, bool):
+            value = value if isinstance(value, bool) else str(value).lower() in ("true", "1", "yes")
+        node[parts[-1]] = value
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+    reload_config()
+    return {"success": True, "section": section}
+
