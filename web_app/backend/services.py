@@ -189,9 +189,9 @@ def run_season_compare(use_weather: bool):
 
     return {
         "success": True, "weather": from_weather,
-        "T1": {k: _r(t1[k]) for k in ["time_day", "theta", "ec_soil", "ec_target",
+        "T1": {k: _r(t1[k]) for k in ["time_day", "theta", "ec_soil", "target_ec",
                                          "irrigation_mm_h", "etc_mm_h", "event_marker"]},
-        "T2": {k: _r(t2[k]) for k in ["time_day", "theta", "ec_soil", "ec_target",
+        "T2": {k: _r(t2[k]) for k in ["time_day", "theta", "ec_soil", "target_ec",
                                          "irrigation_mm_h", "etc_mm_h", "event_marker"]},
         "stats": {
             "ec_mae_t1": round(em1, 3), "ec_mae_t2": round(em2, 3),

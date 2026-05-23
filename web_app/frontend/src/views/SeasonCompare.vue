@@ -33,10 +33,10 @@
     </div>
 
     <div v-if="result" class="chart-grid">
-      <div class="card"><div class="card-title">θ — T1 vs T2</div><div class="chart-wrapper"><canvas id="c-stheta"></canvas></div></div>
-      <div class="card"><div class="card-title">EC 动态 — T1 vs T2</div><div class="chart-wrapper"><canvas id="c-sec"></canvas></div></div>
-      <div class="card"><div class="card-title">灌溉事件</div><div class="chart-wrapper"><canvas id="c-sirr"></canvas></div></div>
-      <div class="card"><div class="card-title">累积灌溉量</div><div class="chart-wrapper"><canvas id="c-scum"></canvas></div></div>
+      <div class="card"><div class="card-title">θ — T1 vs T2</div><div class="chart-wrapper"><canvas ref="cSTheta"></canvas></div></div>
+      <div class="card"><div class="card-title">EC 动态 — T1 vs T2</div><div class="chart-wrapper"><canvas ref="cSEc"></canvas></div></div>
+      <div class="card"><div class="card-title">灌溉事件</div><div class="chart-wrapper"><canvas ref="cSIrr"></canvas></div></div>
+      <div class="card"><div class="card-title">累积灌溉量</div><div class="chart-wrapper"><canvas ref="cSCum"></canvas></div></div>
     </div>
   </div>
 </template>
@@ -54,6 +54,7 @@ export default {
   name: 'SeasonCompare',
   setup() {
     const weather = ref(false); const loading = ref(false); const error = ref(''); const result = ref(null)
+    const cSTheta = ref(null); const cSEc = ref(null); const cSIrr = ref(null); const cSCum = ref(null)
     let charts = {}
 
     const statRows = computed(() => {
@@ -89,36 +90,41 @@ export default {
       const lbl = downsample(t1.time_day, 400).map(d => d.toFixed(1) + 'd')
       const th1 = downsample(t1.theta, 400); const th2 = downsample(t2.theta, 400)
       const ec1 = downsample(t1.ec_soil, 400); const ec2 = downsample(t2.ec_soil, 400)
-      const ect = downsample(t1.ec_target, 400)
+      const ect = downsample(t1.target_ec, 400)
       const ir1 = downsample(t1.irrigation_mm_h, 400); const ir2 = downsample(t2.irrigation_mm_h, 400)
       const cum1 = []; const cum2 = []; let s1 = 0; let s2 = 0
       for (let i = 0; i < t1.irrigation_mm_h.length; i++) { s1 += t1.irrigation_mm_h[i] * 0.25; cum1.push(s1) }
       for (let i = 0; i < t2.irrigation_mm_h.length; i++) { s2 += t2.irrigation_mm_h[i] * 0.25; cum2.push(s2) }
 
-      const mk = (id, ds, yt, xt) => { const c = new Chart(document.getElementById(id).getContext('2d'), {
-        type: 'line', data: { labels: lbl, datasets: ds },
-        options: { responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
-          plugins: { legend: { position: 'top', onClick: () => {}, labels: { boxWidth: 12, padding: 12, font: { size: 11 } } } },
-          scales: { x: { title: { display: true, text: xt || '天数 (DAE)', font: { size: 11 } }, ticks: { maxTicksLimit: 10, font: { size: 10 } } },
-                    y: { title: { display: true, text: yt, font: { size: 11 } }, ticks: { font: { size: 10 } } } } }
-      }); c.canvas.parentElement.style.height = '240px'; return c }
+      const mk = (el, ds, yt, xt) => {
+        if (!el) { console.error('chart canvas ref is null'); return null }
+        const c = new Chart(el.getContext('2d'), {
+          type: 'line', data: { labels: lbl, datasets: ds },
+          options: { responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+            plugins: { legend: { position: 'top', onClick: () => {}, labels: { boxWidth: 12, padding: 12, font: { size: 11 } } } },
+            scales: { x: { title: { display: true, text: xt || '天数 (DAE)', font: { size: 11 } }, ticks: { maxTicksLimit: 10, font: { size: 10 } } },
+                      y: { title: { display: true, text: yt, font: { size: 11 } }, ticks: { font: { size: 10 } } } } }
+        })
+        c.canvas.parentElement.style.height = '240px'
+        return c
+      }
 
       charts = {
-        th: mk('c-stheta', [
+        th: mk(cSTheta.value, [
           { data: th1, borderColor: BLUE, tension: 0.3, pointRadius: 0, label: 'θ T1' },
           { data: th2, borderColor: ORANGE, borderDash: [6,3], tension: 0.3, pointRadius: 0, label: 'θ T2' },
           { data: Array(th1.length).fill(0.32), borderColor: GRAY, borderDash: [3,6], pointRadius: 0, borderWidth: 0.8, label: 'θ_fc' },
         ], 'θ (m³/m³)'),
-        ec: mk('c-sec', [
+        ec: mk(cSEc.value, [
           { data: ec1, borderColor: BLUE, tension: 0.3, pointRadius: 0, label: 'EC T1' },
           { data: ec2, borderColor: ORANGE, borderDash: [6,3], tension: 0.3, pointRadius: 0, label: 'EC T2' },
           { data: ect, borderColor: '#333', borderDash: [3,3], pointRadius: 0, borderWidth: 1, label: '目标 EC' },
         ], 'EC (dS/m)'),
-        ir: mk('c-sirr', [
+        ir: mk(cSIrr.value, [
           { data: ir1, borderColor: BLUE, tension: 0.3, pointRadius: 0, label: 'T1' },
           { data: ir2, borderColor: ORANGE, borderDash: [6,3], tension: 0.3, pointRadius: 0, label: 'T2' },
         ], 'mm/h'),
-        cu: mk('c-scum', [
+        cu: mk(cSCum.value, [
           { data: downsample(cum1, 400), borderColor: BLUE, tension: 0.3, pointRadius: 0, label: '累积 T1' },
           { data: downsample(cum2, 400), borderColor: ORANGE, borderDash: [6,3], tension: 0.3, pointRadius: 0, label: '累积 T2' },
         ], '累积 (mm)'),
@@ -126,7 +132,7 @@ export default {
     }
 
     onBeforeUnmount(() => destroyCharts())
-    return { weather, loading, error, result, statRows, run }
+    return { weather, loading, error, result, statRows, run, cSTheta, cSEc, cSIrr, cSCum }
   },
 }
 </script>
