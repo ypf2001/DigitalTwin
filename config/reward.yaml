@@ -9,13 +9,13 @@
 # ============================================================
 
 reward:
-  w1: 4.0                  # EC 跟踪误差权重
-  w2: 4.0                  # pH 跟踪误差权重
-  w3: 0.1                  # 流量惩罚权重
-  w4: 0.5                  # 水分利用效率 (WUE) 奖励权重
-  flow_penalty_scale: 0.01 # 流量惩罚缩放系数 (乘以 total_flow_Lmin)
-  wue_norm: 55.0           # WUE 归一化基准流量 (L/min)，流量低于此值有正奖励
-  pH_target: 6.0           # 目标灌溉液 pH
-  ec_burn_threshold: 3.0   # 烧苗 EC 阈值 (dS/m)，超过即触发 done + hard_penalty
-  ph_burn_threshold: 4.5   # 烧苗 pH 阈值，低于即触发 done + hard_penalty
-  hard_penalty: -100.0     # 烧苗惩罚值，同时触发回合终止 (done=True)
+  w1: 4.0                  # EC 跟踪误差权重，放大 soil_ec 与 target_ec 的偏差惩罚
+  w2: 4.0                  # pH 跟踪误差权重，放大 drip_pH 与 pH_target 的偏差惩罚
+  w3: 0.1                  # 流量惩罚权重，抑制过度灌溉（节水激励）
+  w4: 0.5                  # 水分利用效率 (WUE) 奖励权重，鼓励以较少流量达成灌溉目标
+  flow_penalty_scale: 0.01 # 流量惩罚缩放系数，将 total_flow_Lmin 缩放到合理量级
+  wue_norm: 55.0           # WUE 归一化基准流量 (L/min)，总流量低于此值时获得正奖励
+  pH_target: 6.0           # 目标灌溉液 pH 值，弱酸性利于马铃薯养分吸收
+  ec_burn_threshold: 3.0   # 烧苗 EC 阈值 (dS/m)，土壤 EC 超过此值即判定为烧苗
+  ph_burn_threshold: 4.5   # 烧苗 pH 阈值，管道 pH 低于此值即判定为酸烧苗
+  hard_penalty: -100.0     # 烧苗惩罚值（大幅度负奖励），同时强制终止当前回合 (done=True)
