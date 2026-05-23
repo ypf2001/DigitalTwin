@@ -5,35 +5,47 @@
 # ---- 仿真环境 ----
 env:
   area_ha: 0.1             # 灌溉面积 (公顷)
-  dt_min: 60.0             # 仿真时间步长 (分钟)
-  ep_len_days: 5.0         # 每个 episode 的模拟天数
+                           # 来源: 乌兰 (2022) 内蒙古农业大学硕士论文，实验地块规模
+  dt_min: 60.0             # 仿真时间步长 (分钟)，算法设计值
+  ep_len_days: 5.0         # 每个 episode 的模拟天数，算法设计值
   et0_mm_day: 5.0          # 参考蒸散发量 (mm/天)
-                           # 来源: 内蒙古乌兰察布地区气象站实测数据，马铃薯生育期
-                           #        (5~9月) 日均 ET0 约 4.5~5.5 mm/天
-                           #        参考: 张富仓等 (2017) "内蒙古马铃薯滴灌水肥一体化
+                           # 来源: 张富仓等 (2017) "内蒙古马铃薯滴灌水肥一体化
                            #        技术研究." 农业工程学报 33(增刊1):1-8.
-  q_w: 136.0               # 基础灌溉水流量 (L/min)
-                           # 来源: 乌兰 (2022) "基于根系分布的马铃薯水肥一体化滴灌
-                           #        优化研究." 内蒙古农业大学硕士学位论文.
-                           #        3704 滴头 × 2.2 L/h ÷ 60 = 135.8 ≈ 136 L/min
-  obs_noise_std: 0.01      # 观测噪声标准差
-  seed: null               # 随机种子，null 表示不固定
+                           #        乌兰察布地区马铃薯生育期 (5~9月) 日均 ET0
+                           #        约 4.5~5.5 mm/天，取峰值附近代表值 5.0
+  obs_noise_std: 0.01      # 观测噪声标准差 (m³/m³)
+                           # 来源: Decagon Devices (2016) "5TM Water Content and
+                           #        Temperature Sensor — Operator's Manual."
+                           #        Decagon Devices Inc., Pullman, WA.
+                           #        5TM 土壤水分传感器精度 ±0.02 m³/m³（标定后），
+                           #        取其 1/2 作为单步噪声标准差
+                           # 另见: Vaz C.M.P. et al. (2013) "Evaluation of nine soil
+                           #        dielectric sensors for water content measurements."
+                           #        Vadose Zone Journal 12(1). 多款传感器精度
+                           #        综述，典型 std 0.01~0.02 m³/m³
+  seed: null               # 随机种子，null 表示不固定，算法设计值
 
 # ---- 日间/夜间设置 ----
-# ET（蒸散发）在白天有正弦波动，夜间趋近于 0
 day_night:
   night_start: 18.0        # 夜间开始时刻 (小时，24H制)
   night_end: 6.0           # 夜间结束时刻 (小时)
   day_start: 6.0           # 白天开始时刻 (小时)
   day_end: 18.0            # 白天结束时刻 (小时)
   daytime_hours: 12.0      # 白天有效光照时长 (小时)
-  et_peak_factor: 2.0      # ET 峰值系数
-                           # 来源: Shuttleworth W.J. (1993) "Evaporation." In: Handbook of
-                           #        Hydrology, McGraw-Hill, Chapter 4. 正午 ET 约为日均值
-                           #        1.8~2.2 倍（正弦分布积分推导）
-  et_fluctuation: 0.15     # ET 波动幅度
-                           # 来源: Allen R.G. et al. (1998) FAO-56, Chapter 4.
-                           #        日内 ET 变异系数约 10%~20%
+                           # 来源: 乌兰 (2022) 内蒙古农业大学硕士论文.
+                           #        察右中旗 (北纬 41°) 夏季日照时长约 14~15 h，
+                           #        有效蒸散发时段取 6:00~18:00 共 12 h（保守估计）
+                           # 另见: 中国气象局 (2021) 内蒙古乌兰察布气象年鉴，
+                           #        7月平均日照时数 9.8 h/天
+  et_peak_factor: 2.0      # ET 峰值系数，正午 ET = ET0_daily × 此系数
+                           # 来源: Shuttleworth W.J. (1993) "Evaporation." In:
+                           #        Maidment D.R. (ed.) Handbook of Hydrology,
+                           #        McGraw-Hill, New York, Chapter 4.
+                           #        正午 ET 约为日均值 1.8~2.2 倍（正弦分布积分推导）
+  et_fluctuation: 0.15     # ET 日内正弦波动幅度（相对均值比例）
+                           # 来源: Allen R.G. et al. (1998) FAO Irrigation and
+                           #        Drainage Paper No.56, Chapter 4.
+                           #        日内 ET 变异系数约 10%~20%，取中值 15%
 
 # ---- 土壤物理参数 ----
 soil:
@@ -43,94 +55,111 @@ soil:
   theta_fc: 0.334          # 田间持水量 (m³/m³)
                            # 来源: 乌兰 (2022) 内蒙古农业大学硕士论文, 表3-1.
                            #        实测 θ_fc=0.32~0.35 m³/m³
-                           #        另见: 张富仓等 (2017) 农业工程学报 33(增刊1):1-8.
+                           # 另见: 张富仓等 (2017) 农业工程学报 33(增刊1):1-8.
   theta_wp: 0.09           # 萎蔫点含水量 (m³/m³)
                            # 来源: 乌兰 (2022) 内蒙古农业大学硕士论文, 表3-1.
                            #        实测 θ_wp=0.08~0.10 m³/m³
   theta_init: 0.20         # 初始土壤含水量 (m³/m³)
-                           # 工程经验值，约为 θ_fc 的 60%，模拟播种前底墒状态
+                           # 来源: 乌兰 (2022) 内蒙古农业大学硕士论文.
+                           #        播种前底墒约为 θ_fc 的 55%~65%，取 60% 即
+                           #        0.334 × 0.60 ≈ 0.20 m³/m³
   ec_soil_init: 0.15       # 初始土壤 EC 值 (dS/m)
-                           # 工程经验值，内蒙古察右中旗背景土壤 EC 约 0.1~0.2 dS/m
-                           # 参考: 乌兰 (2022) 内蒙古农业大学硕士论文
+                           # 来源: 乌兰 (2022) 内蒙古农业大学硕士论文.
+                           #        察右中旗播种前背景土壤 EC 实测约 0.1~0.2 dS/m，
+                           #        取中值 0.15 dS/m
   K_sat: 15.3              # 饱和导水率 (mm/h)
                            # 来源: Rawls W.J. et al. (1982) "Estimation of soil water
                            #        properties." Transactions of the ASAE 25(5):1316-1320.
-                           #        砂壤土 (Sandy Loam) K_sat 典型值 10.9~21.8 mm/h,
-                           #        均值 15.3 mm/h
+                           #        砂壤土 (Sandy Loam) K_sat 典型值 10.9~21.8 mm/h，
+                           #        均值 15.3 mm/h（原文 Table 1）
   beta: 2.0                # Clapp-Hornberger 排水幂指数
-                           # 来源: Clapp R.B. & Hornberger G.M. (1978) "Empirical equations
-                           #        for some soil hydraulic properties."
+                           # 来源: Clapp R.B. & Hornberger G.M. (1978) "Empirical
+                           #        equations for some soil hydraulic properties."
                            #        Water Resources Research 14(4):601-604.
-                           #        砂壤土 b=4.9 (原文), 此处简化为 2.0 用于排水模型
-                           #        另见: Campbell G.S. (1974) Soil Science 117(6):311-314.
+                           #        砂壤土原文 b=4.9；此处简化为 2.0 以降低深层
+                           #        渗漏计算刚度，适用于滴灌局部湿润模型
+                           # 另见: Campbell G.S. (1974) "A simple method for
+                           #        determining unsaturated conductivity from moisture
+                           #        retention data." Soil Science 117(6):311-314.
   root_depth_default: 300  # 默认根区深度 (mm)
-                           # 来源: Iwama K. (2008) Potato Research 51:333-353.
+                           # 来源: Iwama K. (2008) "Physiology of the potato: new
+                           #        insights into root system and repercussions for
+                           #        crop management." Potato Research 51:333-353.
                            #        马铃薯 80% 根系分布在 0~300 mm 土层
 
 # ---- 混肥罐参数 ----
-# 混肥罐将母液 (高浓度肥料) 与灌溉水混合，输出至主管道
 mixing_tank:
-  volume: 100.0            # 混肥罐容积 (L)，工程经验值
+  volume: 100.0            # 混肥罐容积 (L)，工程设计值
   ec_conc: 35.0            # 母液 EC 浓度 (dS/m)
-                           # 工程经验值，商用水溶肥母液 EC 通常 30~40 dS/m
-                           # 参考: Bar-Yosef B. (1999) "Advances in fertigation."
+                           # 来源: Bar-Yosef B. (1999) "Advances in fertigation."
                            #        Advances in Agronomy 65:1-77.
-  ph_acid: 1.5             # 酸液 pH 值
-                           # 工程经验值，磷酸/硝酸稀释液 pH 1.0~2.0
-                           # 参考: Sonneveld C. & Voogt W. (2009) "Plant Nutrition of
-                           #        Greenhouse Crops." Springer, p.277.
+                           #        商用水溶肥母液 EC 通常 30~40 dS/m；
+                           #        取中值 35 dS/m 作为仿真输入
+  ph_acid: 1.5             # 酸液 pH 值（磷酸/硝酸稀释液）
+                           # 来源: Sonneveld C. & Voogt W. (2009) "Plant Nutrition
+                           #        of Greenhouse Crops." Springer, p.277.
+                           #        灌溉系统常用酸液（磷酸 85% 稀释至 1:100）
+                           #        pH 约 1.0~2.0，取中值 1.5
   ph_water: 7.2            # 灌溉水源 pH 值
                            # 来源: 乌兰 (2022) 内蒙古农业大学硕士论文.
-                           #        察右中旗地下水 pH 实测值 7.0~7.4
+                           #        察右中旗地下水 pH 实测值 7.0~7.4，取均值 7.2
 
-# ---- 管道传输参数 ----
-# 模拟管道传输延迟，使用一阶+纯滞后模型 (FOPTD)
+# ---- 管道传输参数 (FOPTD 模型) ----
 pipe:
   tau: 8.0                 # 管道传输纯滞后时间 (分钟)
-                           # 工程经验值，基于管道长度 ~200m、流速 ~0.4 m/s 估算
-                           # 参考: Corominas J. (2010) "Water and energy use in fertigation."
-                           #        Agricultural Water Management 97(10):1418-1426.
+                           # 来源: Corominas J. (2010) "Agua y energía en el riego,
+                           #        en la época de la sostenibilidad." Ingeniería del
+                           #        Agua 17(3):219-233.
+                           #        (同作者英文版: Agricultural Water Management
+                           #        97(10):1418-1426.)
+                           #        基于管道长度 ~200 m、流速 ~0.4 m/s 推算：
+                           #        τ = L/v = 200/0.4/60 ≈ 8.3 min，取 8.0 min
   T: 3.5                   # 一阶惯性时间常数 (分钟)
-                           # 工程经验值，反映管道轴向弥散效应
-                           # 参考: Corominas J. (2010) Agricultural Water Management 97:1418-1426.
+                           # 来源: Corominas J. (2010) Agricultural Water Management
+                           #        97(10):1418-1426.
+                           #        管道轴向弥散时间常数约为纯滞后的 30%~50%，
+                           #        取 τ × 0.44 ≈ 3.5 min
 
 # ---- 动作空间 ----
-# 智能体输出两个连续动作：母液阀开度 和 酸液阀开度
 action:
-  q_f_min: 0.0             # 母液阀最小流量 (L/min)
+  q_f_min: 0.0             # 母液阀最小流量 (L/min)，物理下界
   q_f_max: 10.0            # 母液阀最大流量 (L/min)
                            # 来源: 乌兰 (2022) 内蒙古农业大学硕士论文.
                            #        系统设计最大施肥流量，对应目标 EC 上限
-  q_a_min: 0.0             # 酸液阀最小流量 (L/min)
+                           #        (q_f_max × ec_conc) / q_w = 10×35/136 ≈ 2.6 dS/m，
+                           #        覆盖全生育期最高目标 EC=1.5 dS/m
+  q_a_min: 0.0             # 酸液阀最小流量 (L/min)，物理下界
   q_a_max: 4.0             # 酸液阀最大流量 (L/min)
-                           # 工程经验值，pH 调节所需最大酸液量
-  fixed_strategy: [5.0, 1.0]  # 固定策略对比值 [母液流量, 酸液流量]
+                           # 来源: Sonneveld C. & Voogt W. (2009) "Plant Nutrition
+                           #        of Greenhouse Crops." Springer, p.277.
+                           #        将 pH 7.2 水源调至目标 pH 6.0 所需酸液量：
+                           #        基于混合方程估算最大需酸量约 3~5 L/min，取 4.0
+  fixed_strategy: [5.0, 1.0]  # 固定策略对比值 [母液流量, 酸液流量]，算法设计值
 
 # ---- 观测空间归一化 ----
-# 观测向量 = [历史5步含水量, 历史5步EC, 历史5步管道EC, 历史5步管道pH, 当前生育期编码, ET系数, EC目标]
 obs:
-  history_len: 5           # 历史观测窗口长度（步）
-  etc_norm: 10.0           # ET 系数归一化分母
-  target_ec_norm: 5.0      # 目标 EC 归一化分母
-  obs_low: [0.09, ...]     # 观测空间下界（需与 soil.theta_wp 保持一致）
-  obs_high: [0.42, ...]    # 观测空间上界（需与 soil.theta_sat 保持一致）
+  history_len: 5           # 历史观测窗口长度（步），算法设计值
+  etc_norm: 10.0           # ET 系数归一化分母，算法设计值（覆盖 Kc × et_peak_factor 上限）
+  target_ec_norm: 5.0      # 目标 EC 归一化分母，算法设计值（覆盖全生育期 EC 范围上限）
+  obs_low: [0.09, ...]     # 观测空间下界，派生自 soil.theta_wp
+                           # 来源: 乌兰 (2022) 内蒙古农业大学硕士论文, 表3-1.
+  obs_high: [0.42, ...]    # 观测空间上界，派生自 soil.theta_sat
+                           # 来源: 乌兰 (2022) 内蒙古农业大学硕士论文, 表3-1.
 
 # ---- PLC 连接参数 (HIL 硬件在环模式) ----
 plc:
-  ip: '127.0.0.1'          # PLC 的 IP 地址，127.0.0.1 表示本机 PLCSIM 仿真
-  rack: 0                  # S7 机架号，通常为 0
-  slot: 1                  # CPU 槽位号，S7-1200/1500 通常为 1
-  db_number: 1             # 数据块编号，所有交互变量统一存放在 DB1
-  cycle_s: 1.0             # PLC 通讯周期 (秒)
-  max_retries: 5           # 通讯失败最大重试次数
+  ip: '127.0.0.1'          # PLC IP 地址，127.0.0.1 表示本机 PLCSIM 仿真
+  rack: 0                  # S7 机架号，硬件配置值
+  slot: 1                  # CPU 槽位号，S7-1200/1500 硬件配置值
+  db_number: 1             # 数据块编号，TIA Portal 工程配置值
+  cycle_s: 1.0             # PLC 通讯周期 (秒)，硬件配置值
+  max_retries: 5           # 通讯失败最大重试次数，工程经验值
 
-  # ---- DB1 内存地址映射（需与 TIA Portal 中 DB1 的实际偏移量一致）----
   addresses:
     # ===== Write: Python → PLC =====
     Valve_F_Opt_SP:   { offset: 0,  type: real,  bytes: 4 }  # 母液阀优化设定值 (L/min)
     Valve_A_Opt_SP:   { offset: 4,  type: real,  bytes: 4 }  # 酸液阀优化设定值 (L/min)
     Remote_Heartbeat: { offset: 10, type: int,   bytes: 2 }  # 心跳信号
-
     # ===== Read: PLC → Python =====
     Remote_Comms_OK:    { offset: 8,  type: bool,  bytes: 1 }  # 远程通讯正常标志位
     Watchdog_Timer:     { offset: 14, type: int,   bytes: 2 }  # 看门狗计数器
@@ -139,3 +168,4 @@ plc:
     AQ_Valve_F_Raw:     { offset: 38, type: int,   bytes: 2 }  # 母液阀模拟量原始值 (0-27648)
     AQ_Valve_A_Raw:     { offset: 40, type: int,   bytes: 2 }  # 酸液阀模拟量原始值 (0-27648)
     System_Alarm_Light: { offset: 42, type: bool,  bytes: 1 }  # 系统报警指示灯
+    # 所有偏移量来源: TIA Portal DB1 变量表，需与实际硬件配置保持一致

@@ -3,15 +3,33 @@
 # ============================================================
 
 sac:
-  total_timesteps: 120000  # 总训练步数（环境交互步数）
-  learning_rate: 3.0e-4    # 学习率，控制每次梯度更新的步幅
-  buffer_size: 100000      # 经验回放缓冲区容量（最多存储多少条 transition）
-  batch_size: 256          # 每次从缓冲区采样的批次大小
-  learning_starts: 1000    # 开始学习前需先收集的随机探索步数（warm-up）
-  tau: 0.005               # 目标网络软更新系数，τ 越小更新越平滑稳定
-  gamma: 0.99              # 折扣因子，越接近 1 越重视远期回报
-  ent_coef: auto           # 熵正则化系数，'auto' 表示自动调整以平衡探索与利用
-  eval_freq: 2000          # 评估频率（步），每 N 步运行一次无噪声评估
-  n_eval_episodes: 5       # 每次评估运行的 episode 数量，取平均作为评估指标
-  log_interval: 4          # 日志输出间隔（步），控制训练过程信息的打印频率
-  save_freq_div: 20        # 模型保存频率除数，每 total_timesteps/20 步保存一次中间模型
+  total_timesteps: 120000  # 总训练步数，算法设计值（基于收敛曲线经验判断）
+  learning_rate: 3.0e-4    # 学习率
+                           # 来源: Haarnoja T. et al. (2018) "Soft Actor-Critic:
+                           #        Off-Policy Maximum Entropy Deep Reinforcement
+                           #        Learning with a Stochastic Actor."
+                           #        Proceedings of ICML 2018, PMLR 80:1861-1870.
+                           #        原文推荐默认值 3×10⁻⁴
+  buffer_size: 100000      # 经验回放缓冲区容量
+                           # 来源: Haarnoja T. et al. (2018) ICML 2018.
+                           #        原文连续控制任务标准配置 10⁵~10⁶
+  batch_size: 256          # 每次采样批次大小
+                           # 来源: Haarnoja T. et al. (2018) ICML 2018.
+                           #        原文推荐 batch_size=256
+  learning_starts: 1000    # 随机探索热身步数，算法设计值
+  tau: 0.005               # 目标网络软更新系数
+                           # 来源: Haarnoja T. et al. (2018) ICML 2018.
+                           #        原文推荐 τ=0.005（polyak averaging）
+  gamma: 0.99              # 折扣因子
+                           # 来源: Sutton R.S. & Barto A.G. (2018) "Reinforcement
+                           #        Learning: An Introduction." 2nd ed., MIT Press,
+                           #        Cambridge, MA. Chapter 3.
+                           #        连续控制任务标准值 γ=0.99
+  ent_coef: auto           # 熵正则化系数自动调整
+                           # 来源: Haarnoja T. et al. (2018) "Soft Actor-Critic
+                           #        Algorithms and Applications." arXiv:1812.05905.
+                           #        SAC-v2 引入自动温度调节，消除手动调参需求
+  eval_freq: 2000          # 评估频率（步），算法设计值
+  n_eval_episodes: 5       # 每次评估 episode 数，算法设计值
+  log_interval: 4          # 日志输出间隔，算法设计值
+  save_freq_div: 20        # 模型保存频率除数，算法设计值
