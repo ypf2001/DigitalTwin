@@ -46,10 +46,10 @@
     </div>
 
     <div v-if="result" class="chart-grid">
-      <div class="card"><div class="card-title">土壤含水率 θ</div><div class="chart-wrapper"><canvas ref="cMoisture"></canvas></div></div>
-      <div class="card"><div class="card-title">根区 EC (实际 vs 目标)</div><div class="chart-wrapper"><canvas ref="cEC"></canvas></div></div>
-      <div class="card"><div class="card-title">灌溉 & 蒸散发</div><div class="chart-wrapper"><canvas ref="cIrr"></canvas></div></div>
-      <div class="card"><div class="card-title">控制动作 q_f, q_a</div><div class="chart-wrapper"><canvas ref="cAct"></canvas></div></div>
+      <div class="card"><div class="card-title">土壤含水率 θ</div><div class="chart-wrapper"><canvas id="c-moisture"></canvas></div></div>
+      <div class="card"><div class="card-title">根区 EC (实际 vs 目标)</div><div class="chart-wrapper"><canvas id="c-ec"></canvas></div></div>
+      <div class="card"><div class="card-title">灌溉 & 蒸散发</div><div class="chart-wrapper"><canvas id="c-irrig"></canvas></div></div>
+      <div class="card"><div class="card-title">控制动作 q_f, q_a</div><div class="chart-wrapper"><canvas id="c-act"></canvas></div></div>
     </div>
   </div>
 </template>
