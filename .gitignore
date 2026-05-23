@@ -16,5 +16,12 @@ __pycache__/
 rl_models/
 pic_output/
 
+# Web 前端
+node_modules/
+dist/
+.vite/
+
 # 工具配置
 .claude/
+.ruff_cache/
+.junie/
