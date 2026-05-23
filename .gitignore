@@ -11,6 +11,7 @@ env/
 rl_logs/
 __pycache__/
 *.pyc
+*.log
 
 # 模型和输出
 rl_models/
@@ -20,6 +21,9 @@ pic_output/
 node_modules/
 dist/
 .vite/
+
+# Web 运行时输出
+web_app/backend/static/images/
 
 # 工具配置
 .claude/

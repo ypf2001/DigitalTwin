@@ -32,33 +32,24 @@
       </table>
     </div>
 
-    <div v-if="result" class="chart-grid">
-      <div class="card"><div class="card-title">θ — T1 vs T2</div><div class="chart-wrapper"><canvas ref="cSTheta"></canvas></div></div>
-      <div class="card"><div class="card-title">EC 动态 — T1 vs T2</div><div class="chart-wrapper"><canvas ref="cSEc"></canvas></div></div>
-      <div class="card"><div class="card-title">灌溉事件</div><div class="chart-wrapper"><canvas ref="cSIrr"></canvas></div></div>
-      <div class="card"><div class="card-title">累积灌溉量</div><div class="chart-wrapper"><canvas ref="cSCum"></canvas></div></div>
+    <div v-if="result && result.image" class="card" style="margin-top:16px">
+      <div class="card-title">对比图表</div>
+      <img :src="result.image" style="width:100%;max-width:100%" alt="季节对比图表" />
     </div>
   </div>
 </template>
 
 <script>
-import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
-import { Chart, LineController, CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend } from 'chart.js'
+import { ref, computed } from 'vue'
 import { runSeasonCompare } from '../api/index.js'
-
-Chart.register(LineController, CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend)
-
-const BLUE = '#1f77b4'; const ORANGE = '#ff7f0e'; const GRAY = '#888'
 
 export default {
   name: 'SeasonCompare',
   setup() {
     const weather = ref(false); const loading = ref(false); const error = ref(''); const result = ref(null)
-    const cSTheta = ref(null); const cSEc = ref(null); const cSIrr = ref(null); const cSCum = ref(null)
-    let charts = {}
 
     const statRows = computed(() => {
-      if (!result.value) return []
+      if (!result.value || !result.value.stats) return []
       const s = result.value.stats
       return [
         { label: 'EC 跟踪 MAE', v1: s.ec_mae_t1, v2: s.ec_mae_t2, good: s.ec_mae_t2 < s.ec_mae_t1, delta: (s.ec_mae_t1 - s.ec_mae_t2) > 0 ? '↓' + (s.ec_mae_t1 - s.ec_mae_t2).toFixed(3) : '—' },
@@ -71,68 +62,17 @@ export default {
       ]
     })
 
-    function destroyCharts() { Object.values(charts).forEach(c => { try { c.destroy() } catch (_) {} }); charts = {} }
-
-    function downsample(arr, n = 400) { if (arr.length <= n) return arr; const s = Math.ceil(arr.length / n); return arr.filter((_, i) => i % s === 0) }
-
     async function run() {
-      loading.value = true; error.value = ''; result.value = null; destroyCharts()
+      loading.value = true; error.value = ''; result.value = null
       try {
         const data = await runSeasonCompare({ weather: weather.value })
         if (!data.success) { error.value = data.error || '仿真失败'; return }
-        result.value = data; await nextTick(); createCharts(data)
+        result.value = data
       } catch (e) { error.value = e.message || '网络错误' }
       finally { loading.value = false }
     }
 
-    function createCharts(data) {
-      const t1 = data.T1; const t2 = data.T2
-      const lbl = downsample(t1.time_day, 400).map(d => d.toFixed(1) + 'd')
-      const th1 = downsample(t1.theta, 400); const th2 = downsample(t2.theta, 400)
-      const ec1 = downsample(t1.ec_soil, 400); const ec2 = downsample(t2.ec_soil, 400)
-      const ect = downsample(t1.target_ec, 400)
-      const ir1 = downsample(t1.irrigation_mm_h, 400); const ir2 = downsample(t2.irrigation_mm_h, 400)
-      const cum1 = []; const cum2 = []; let s1 = 0; let s2 = 0
-      for (let i = 0; i < t1.irrigation_mm_h.length; i++) { s1 += t1.irrigation_mm_h[i] * 0.25; cum1.push(s1) }
-      for (let i = 0; i < t2.irrigation_mm_h.length; i++) { s2 += t2.irrigation_mm_h[i] * 0.25; cum2.push(s2) }
-
-      const mk = (el, ds, yt, xt) => {
-        if (!el) { console.error('chart canvas ref is null'); return null }
-        const c = new Chart(el.getContext('2d'), {
-          type: 'line', data: { labels: lbl, datasets: ds },
-          options: { responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
-            plugins: { legend: { position: 'top', onClick: () => {}, labels: { boxWidth: 12, padding: 12, font: { size: 11 } } } },
-            scales: { x: { title: { display: true, text: xt || '天数 (DAE)', font: { size: 11 } }, ticks: { maxTicksLimit: 10, font: { size: 10 } } },
-                      y: { title: { display: true, text: yt, font: { size: 11 } }, ticks: { font: { size: 10 } } } } }
-        })
-        c.canvas.parentElement.style.height = '240px'
-        return c
-      }
-
-      charts = {
-        th: mk(cSTheta.value, [
-          { data: th1, borderColor: BLUE, tension: 0.3, pointRadius: 0, label: 'θ T1' },
-          { data: th2, borderColor: ORANGE, borderDash: [6,3], tension: 0.3, pointRadius: 0, label: 'θ T2' },
-          { data: Array(th1.length).fill(0.32), borderColor: GRAY, borderDash: [3,6], pointRadius: 0, borderWidth: 0.8, label: 'θ_fc' },
-        ], 'θ (m³/m³)'),
-        ec: mk(cSEc.value, [
-          { data: ec1, borderColor: BLUE, tension: 0.3, pointRadius: 0, label: 'EC T1' },
-          { data: ec2, borderColor: ORANGE, borderDash: [6,3], tension: 0.3, pointRadius: 0, label: 'EC T2' },
-          { data: ect, borderColor: '#333', borderDash: [3,3], pointRadius: 0, borderWidth: 1, label: '目标 EC' },
-        ], 'EC (dS/m)'),
-        ir: mk(cSIrr.value, [
-          { data: ir1, borderColor: BLUE, tension: 0.3, pointRadius: 0, label: 'T1' },
-          { data: ir2, borderColor: ORANGE, borderDash: [6,3], tension: 0.3, pointRadius: 0, label: 'T2' },
-        ], 'mm/h'),
-        cu: mk(cSCum.value, [
-          { data: downsample(cum1, 400), borderColor: BLUE, tension: 0.3, pointRadius: 0, label: '累积 T1' },
-          { data: downsample(cum2, 400), borderColor: ORANGE, borderDash: [6,3], tension: 0.3, pointRadius: 0, label: '累积 T2' },
-        ], '累积 (mm)'),
-      }
-    }
-
-    onBeforeUnmount(() => destroyCharts())
-    return { weather, loading, error, result, statRows, run, cSTheta, cSEc, cSIrr, cSCum }
+    return { weather, loading, error, result, statRows, run }
   },
 }
 </script>

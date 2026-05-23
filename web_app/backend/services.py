@@ -8,6 +8,8 @@ import yaml
 
 from config_loader import load_config, reload_config
 
+_IMAGES_DIR = os.path.join(os.path.dirname(__file__), "static", "images")
+
 # 配置项 → YAML 文件 映射
 _SECTION_FILE_MAP = {
     "crop": "crop.yaml",
@@ -125,9 +127,19 @@ def run_simulation(mode: str, stage_key: str, use_weather: bool):
         qal.append(float(action[1]))
 
     ec, tec, irr = np.array(ecl), np.array(tcl), np.array(irl)
+
+    # 生成 matplotlib PNG 图
+    label = "SAC" if use_rl else "Fixed"
+    try:
+        from plots import make_sim_plot
+        img = make_sim_plot(th, tl, ecl, tcl, irl, etl, qfl, qal, label, _IMAGES_DIR)
+    except Exception:
+        img = None
+
     return {
         "success": True, "mode": mode, "stage": stage_key,
         "weather": from_weather, "steps": len(th),
+        "image": f"/static/images/{img}" if img else None,
         "series": {
             "time_hours": [round(v, 1) for v in th],
             "theta": [round(v, 4) for v in tl],
@@ -187,8 +199,15 @@ def run_season_compare(use_weather: bool):
     cv1 = float(t1e.std() / (t1e.mean() + 1e-6)) if len(t1e) > 0 else 0
     cv2 = float(t2e.std() / (t2e.mean() + 1e-6)) if len(t2e) > 0 else 0
 
+    try:
+        from plots import make_season_plot
+        img = make_season_plot(t1, t2, _IMAGES_DIR)
+    except Exception:
+        img = None
+
     return {
         "success": True, "weather": from_weather,
+        "image": f"/static/images/{img}" if img else None,
         "T1": {k: _r(t1[k]) for k in ["time_day", "theta", "ec_soil", "target_ec",
                                          "irrigation_mm_h", "etc_mm_h", "event_marker"]},
         "T2": {k: _r(t2[k]) for k in ["time_day", "theta", "ec_soil", "target_ec",

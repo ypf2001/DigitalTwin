@@ -45,77 +45,34 @@
       <div class="stat-card warning"><div class="stat-value">{{ result.stats.total_irrigation_mm }}</div><div class="stat-label">总灌溉 (mm)</div></div>
     </div>
 
-    <div v-if="result" class="chart-grid">
-      <div class="card"><div class="card-title">土壤含水率 θ</div><div class="chart-wrapper"><canvas ref="cMoisture"></canvas></div></div>
-      <div class="card"><div class="card-title">根区 EC (实际 vs 目标)</div><div class="chart-wrapper"><canvas ref="cEC"></canvas></div></div>
-      <div class="card"><div class="card-title">灌溉 & 蒸散发</div><div class="chart-wrapper"><canvas ref="cIrr"></canvas></div></div>
-      <div class="card"><div class="card-title">控制动作 q_f, q_a</div><div class="chart-wrapper"><canvas ref="cAct"></canvas></div></div>
+    <div v-if="result && result.image" class="card" style="margin-top:16px">
+      <div class="card-title">仿真结果</div>
+      <img :src="result.image" style="width:100%;max-width:100%" alt="仿真图表" />
     </div>
   </div>
 </template>
 
 <script>
-import { ref, reactive, nextTick, onBeforeUnmount } from 'vue'
-import { Chart, LineController, CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend } from 'chart.js'
+import { ref, reactive } from 'vue'
 import { runSimulation } from '../api/index.js'
-
-Chart.register(LineController, CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend)
-
-const C = { blue: '#1f77b4', orange: '#ff7f0e', green: '#2ca02c', red: '#d62728', gray: '#888', teal: '#00acc1' }
 
 export default {
   name: 'Simulation',
   setup() {
     const params = reactive({ mode: 'fixed', stage: 'BULKING', weather: false })
     const loading = ref(false); const error = ref(''); const result = ref(null)
-    const cMoisture = ref(null); const cEC = ref(null); const cIrr = ref(null); const cAct = ref(null)
-    let charts = {}
-
-    function destroyCharts() { Object.values(charts).forEach(c => { try { c.destroy() } catch (_) {} }); charts = {} }
 
     async function run() {
-      loading.value = true; error.value = ''; result.value = null; destroyCharts()
+      loading.value = true; error.value = ''; result.value = null
       try {
         const data = await runSimulation({ mode: params.mode, stage: params.stage, weather: params.weather })
         if (!data.success) { error.value = data.error || '仿真失败'; return }
-        result.value = data; await nextTick(); createCharts(data)
+        result.value = data
       } catch (e) { error.value = e.message || '网络错误' }
       finally { loading.value = false }
     }
 
-    function createCharts(data) {
-      const s = data.series; const labels = s.time_hours.map(t => t.toFixed(1) + 'h')
-      const mk = (el, ds, yt) => {
-        if (!el) { console.error('canvas element is null'); return null }
-        const c = new Chart(el.getContext('2d'), {
-        type: 'line', data: { labels, datasets: ds },
-        options: { responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
-          plugins: { legend: { position: 'top', onClick: () => {}, labels: { boxWidth: 12, padding: 12, font: { size: 11 } } } },
-          scales: { x: { ticks: { maxTicksLimit: 10, font: { size: 10 } } }, y: { title: { display: true, text: yt, font: { size: 11 } }, ticks: { font: { size: 10 } } } } }
-      }); c.canvas.parentElement.style.height = '240px'; return c }
-
-      charts = {
-        m: mk(cMoisture.value, [
-          { data: s.theta, borderColor: C.blue, backgroundColor: C.blue+'20', fill: true, tension: 0.3, pointRadius: 0, label: 'θ' },
-          { data: Array(s.theta.length).fill(0.32), borderColor: C.gray, borderDash: [6,4], pointRadius: 0, label: 'θ_fc' },
-        ], 'θ (m³/m³)'),
-        e: mk(cEC.value, [
-          { data: s.ec_soil, borderColor: C.red, tension: 0.3, pointRadius: 0, label: 'EC_soil' },
-          { data: s.ec_target, borderColor: C.gray, borderDash: [6,4], pointRadius: 0, label: '目标 EC' },
-        ], 'EC (dS/m)'),
-        i: mk(cIrr.value, [
-          { data: s.irrigation_mm_h, borderColor: C.teal, backgroundColor: C.teal+'30', fill: true, tension: 0.3, pointRadius: 0, label: '灌溉' },
-          { data: s.etc_mm_h, borderColor: C.orange, borderDash: [4,4], tension: 0.3, pointRadius: 0, label: 'ET' },
-        ], 'mm/h'),
-        a: mk(cAct.value, [
-          { data: s.q_f, borderColor: C.blue, tension: 0.3, pointRadius: 1, label: 'q_f' },
-          { data: s.q_a, borderColor: C.green, tension: 0.3, pointRadius: 1, label: 'q_a' },
-        ], 'L/min'),
-      }
-    }
-
-    onBeforeUnmount(() => destroyCharts())
-    return { params, loading, error, result, cMoisture, cEC, cIrr, cAct, run }
+    return { params, loading, error, result, run }
   },
 }
 </script>

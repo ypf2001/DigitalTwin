@@ -141,10 +141,10 @@ export default {
     const editing = ref(false); const saveMsg = ref(''); const edits = reactive({})
 
     const soilFields = {
-      theta_fc: { label: '田间持水量 θ_fc' },
-      theta_wp: { label: '萎蔫点 θ_wp' },
-      theta_init: { label: '初始含水率 θ_init' },
-      ec_init: { label: '初始 EC (dS/m)' },
+      theta_fc: { label: '田间持水量  θfc' },
+      theta_wp: { label: '萎蔫点  θwp' },
+      theta_init: { label: '初始含水率  θinit' },
+      ec_init: { label: '初始电导率  ECinit (dS/m)' },
     }
 
     const stageNames = {
