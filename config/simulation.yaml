@@ -81,8 +81,8 @@ plc:
     # ===== Read: PLC → Python =====
     Remote_Comms_OK:    { offset: 8,  type: bool,  bytes: 1 }
     Watchdog_Timer:     { offset: 14, type: int,   bytes: 2 }
-    Actual_Valve_F:     { offset: 22, type: real,  bytes: 4 }
-    Actual_Valve_A:     { offset: 26, type: real,  bytes: 4 }
-    AQ_Valve_F_Raw:     { offset: 36, type: int,   bytes: 2 }
-    AQ_Valve_A_Raw:     { offset: 38, type: int,   bytes: 2 }
-    System_Alarm_Light: { offset: 40, type: bool,  bytes: 1 }
+    Actual_Valve_F:     { offset: 30, type: real,  bytes: 4 }
+    Actual_Valve_A:     { offset: 34, type: real,  bytes: 4 }
+    AQ_Valve_F_Raw:     { offset: 38, type: int,   bytes: 2 }
+    AQ_Valve_A_Raw:     { offset: 40, type: int,   bytes: 2 }
+    System_Alarm_Light: { offset: 42, type: bool,  bytes: 1 }

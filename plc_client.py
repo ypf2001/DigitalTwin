@@ -246,29 +246,29 @@ class PLCClient:
         try:
             self._ensure_connected()
 
-            # ---- 单次 db_write 写入全部 12 字节 (offset 0~11) ----
-            #     offset 0~3:  Valve_F_Opt_SP (Real)
-            #     offset 4~7:  Valve_A_Opt_SP (Real)
-            #     offset 8~9:  保留为 0（Remote_Comms_OK 由 PLC 管理）
-            #     offset 10~11: Remote_Heartbeat (Int)
-            #
-            #     单次写入确保 PLC 不会在两次写入之间扫描到中间态，
-            #     避免看门狗误触发。字节 8~9 被清零不影响——
-            #     PLC 在下一扫描周期检测到心跳变化后会立刻置回 TRUE。
             self._heartbeat = (self._heartbeat + 1) % 32000
-            buf = bytearray(12)
-            set_real(buf, 0, valve_f)
-            set_real(buf, 4, valve_a)
-            set_int(buf, 10, self._heartbeat)
-            # --- 写入缓冲区的 offset 8-9 会被清零，必须回读保护 ---
-            prev = self._client.db_read(self.db_number, 8, 2)
-            buf = bytearray(12)
-            set_real(buf, 0, valve_f)
-            set_real(buf, 4, valve_a)
-            buf[8] = prev[0]  # 保留 Remote_Comms_OK 原值
-            buf[9] = prev[1]
-            set_int(buf, 10, self._heartbeat)
-            self._client.db_write(self.db_number, 0, buf)
+
+            # ---- 分两次写入，只碰需要改的字节 ----
+            #   offset 0~3:  Valve_F_Opt_SP (Real)
+            #   offset 4~7:  Valve_A_Opt_SP (Real)
+            #   offset 8~9:  ← 不碰！Remote_Comms_OK 完全由 PLC 管理
+            #   offset 10~11: Remote_Heartbeat (Int)
+            #   offset 12~15: ← 不碰！Last_Heartbeat、Watchdog_Timer 由 PLC 管理
+            #
+            #   分次写入顺序：先写阀门，再写心跳。
+            #   PLC 在两次写入之间扫描到旧心跳无影响，
+            #   心跳信号只要最终进入新值就能被 PLC 检测到。
+
+            # 写入阀门目标值 (offset 0~7)
+            buf_v = bytearray(8)
+            set_real(buf_v, 0, valve_f)
+            set_real(buf_v, 4, valve_a)
+            self._client.db_write(self.db_number, 0, buf_v)
+
+            # 写入心跳 (offset 10~11)，不碰中间 byte 8~9
+            buf_h = bytearray(2)
+            set_int(buf_h, 0, self._heartbeat)
+            self._client.db_write(self.db_number, 10, buf_h)
 
             logger.info(
                 f"[PLC] 写入 → Valve_F={valve_f:.3f}, Valve_A={valve_a:.3f}, "
