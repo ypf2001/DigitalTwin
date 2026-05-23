@@ -20,14 +20,14 @@
           <tr><th>固定策略</th><td>q_f = {{ data.action_fixed?.[0] }}, q_a = {{ data.action_fixed?.[1] }}</td></tr>
         </table>
       </div>
-      <div v-if="data.tank" class="card"><div class="card-title">混肥罐</div>
-        <table class="stats-table"><tr v-for="(v,k) in data.tank" :key="k"><th>{{k}}</th><td>{{v}}</td></tr></table>
+      <div v-if="data.mixing_tank" class="card"><div class="card-title">混肥罐</div>
+        <table class="stats-table"><tr v-for="(v,k) in data.mixing_tank" :key="k"><th>{{k}}</th><td>{{v}}</td></tr></table>
       </div>
       <div v-if="data.pipe" class="card"><div class="card-title">管道 (FOPTD)</div>
         <table class="stats-table"><tr v-for="(v,k) in data.pipe" :key="k"><th>{{k}}</th><td>{{v}}</td></tr></table>
       </div>
-      <div v-if="data.training" class="card"><div class="card-title">SAC 训练参数</div>
-        <table class="stats-table"><tr v-for="(v,k) in data.training" :key="k"><th>{{k}}</th><td>{{v}}</td></tr></table>
+      <div v-if="data.sac" class="card"><div class="card-title">SAC 参数</div>
+        <table class="stats-table"><tr v-for="(v,k) in data.sac" :key="k"><th>{{k}}</th><td>{{v}}</td></tr></table>
       </div>
       <div v-if="data.stages" class="card"><div class="card-title">生育期参数</div>
         <div style="overflow-x:auto">
