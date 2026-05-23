@@ -29,6 +29,7 @@ sac:
                            # 来源: Haarnoja T. et al. (2018) "Soft Actor-Critic
                            #        Algorithms and Applications." arXiv:1812.05905.
                            #        SAC-v2 引入自动温度调节，消除手动调参需求
+  reward_scale: 0.1        # 奖励缩放因子，将原始奖励缩小以稳定训练
   eval_freq: 2000          # 评估频率（步），算法设计值
   n_eval_episodes: 5       # 每次评估 episode 数，算法设计值
   log_interval: 4          # 日志输出间隔，算法设计值

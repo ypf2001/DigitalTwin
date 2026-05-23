@@ -49,18 +49,19 @@ class KeyboardStopCallback(BaseCallback):
                 return False
         return True
 
-def make_env(stage_name: str, dt_min: float = 60.0,
-             obs_noise: float = 0.01, reward_scale: float = 0.1):
-    """创建环境的工厂函数。"""
+def make_env(stage_name: str, obs_noise: float = None, reward_scale: float = None):
+    """创建环境的工厂函数（环境参数从 simulation.yaml 读取）。"""
+    env_cfg = load_config().env()
+    sac_cfg = load_config().sac()
     def _init():
         env = DigitalTwinGymEnv(
             growth_stage=stage_name,
-            area_ha=0.1,
-            dt_min=dt_min,
-            ep_len_days=5.0,
-            et0_mm_day=5.0,
-            obs_noise_std=obs_noise,
-            reward_scale=reward_scale,
+            area_ha=env_cfg["area_ha"],
+            dt_min=env_cfg["dt_min"],
+            ep_len_days=env_cfg["ep_len_days"],
+            et0_mm_day=env_cfg["et0_mm_day"],
+            obs_noise_std=obs_noise if obs_noise is not None else env_cfg["obs_noise_std"],
+            reward_scale=reward_scale if reward_scale is not None else sac_cfg.get("reward_scale", 0.1),
         )
         return env
     return _init
@@ -119,7 +120,7 @@ if __name__ == "__main__":
     logger.info("=" * 60)
 
     # ---- 创建环境（SAC 不需要 VecNormalize） ----
-    train_env = make_env(stage_short, obs_noise=0.01)()
+    train_env = make_env(stage_short)()
     eval_env = make_env(stage_short, obs_noise=0.0)()
 
     # ---- SAC 模型（新建 或 从 checkpoint 恢复） ----
