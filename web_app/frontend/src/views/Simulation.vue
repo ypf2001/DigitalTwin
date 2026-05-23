@@ -46,10 +46,10 @@
     </div>
 
     <div v-if="result" class="chart-grid">
-      <div class="card"><div class="card-title">土壤含水率 θ</div><div class="chart-wrapper"><canvas id="c-moisture"></canvas></div></div>
-      <div class="card"><div class="card-title">根区 EC (实际 vs 目标)</div><div class="chart-wrapper"><canvas id="c-ec"></canvas></div></div>
-      <div class="card"><div class="card-title">灌溉 & 蒸散发</div><div class="chart-wrapper"><canvas id="c-irrig"></canvas></div></div>
-      <div class="card"><div class="card-title">控制动作 q_f, q_a</div><div class="chart-wrapper"><canvas id="c-act"></canvas></div></div>
+      <div class="card"><div class="card-title">土壤含水率 θ</div><div class="chart-wrapper"><canvas ref="cMoisture"></canvas></div></div>
+      <div class="card"><div class="card-title">根区 EC (实际 vs 目标)</div><div class="chart-wrapper"><canvas ref="cEC"></canvas></div></div>
+      <div class="card"><div class="card-title">灌溉 & 蒸散发</div><div class="chart-wrapper"><canvas ref="cIrr"></canvas></div></div>
+      <div class="card"><div class="card-title">控制动作 q_f, q_a</div><div class="chart-wrapper"><canvas ref="cAct"></canvas></div></div>
     </div>
   </div>
 </template>
@@ -85,7 +85,9 @@ export default {
 
     function createCharts(data) {
       const s = data.series; const labels = s.time_hours.map(t => t.toFixed(1) + 'h')
-      const mk = (id, ds, yt) => { const c = new Chart(document.getElementById(id).getContext('2d'), {
+      const mk = (el, ds, yt) => {
+        if (!el) { console.error('canvas element is null'); return null }
+        const c = new Chart(el.getContext('2d'), {
         type: 'line', data: { labels, datasets: ds },
         options: { responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
           plugins: { legend: { position: 'top', onClick: () => {}, labels: { boxWidth: 12, padding: 12, font: { size: 11 } } } },
@@ -93,19 +95,19 @@ export default {
       }); c.canvas.parentElement.style.height = '240px'; return c }
 
       charts = {
-        m: mk('c-moisture', [
+        m: mk(cMoisture.value, [
           { data: s.theta, borderColor: C.blue, backgroundColor: C.blue+'20', fill: true, tension: 0.3, pointRadius: 0, label: 'θ' },
           { data: Array(s.theta.length).fill(0.32), borderColor: C.gray, borderDash: [6,4], pointRadius: 0, label: 'θ_fc' },
         ], 'θ (m³/m³)'),
-        e: mk('c-ec', [
+        e: mk(cEC.value, [
           { data: s.ec_soil, borderColor: C.red, tension: 0.3, pointRadius: 0, label: 'EC_soil' },
           { data: s.ec_target, borderColor: C.gray, borderDash: [6,4], pointRadius: 0, label: '目标 EC' },
         ], 'EC (dS/m)'),
-        i: mk('c-irr', [
+        i: mk(cIrr.value, [
           { data: s.irrigation_mm_h, borderColor: C.teal, backgroundColor: C.teal+'30', fill: true, tension: 0.3, pointRadius: 0, label: '灌溉' },
           { data: s.etc_mm_h, borderColor: C.orange, borderDash: [4,4], tension: 0.3, pointRadius: 0, label: 'ET' },
         ], 'mm/h'),
-        a: mk('c-act', [
+        a: mk(cAct.value, [
           { data: s.q_f, borderColor: C.blue, tension: 0.3, pointRadius: 1, label: 'q_f' },
           { data: s.q_a, borderColor: C.green, tension: 0.3, pointRadius: 1, label: 'q_a' },
         ], 'L/min'),
