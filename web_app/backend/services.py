@@ -1,6 +1,7 @@
 """业务逻辑层 — 仿真、季节对比、天气、配置"""
 
 import os
+import sys
 import traceback
 
 import numpy as np
@@ -287,4 +288,302 @@ def save_config_section(section: str, updates: dict):
 
     reload_config()
     return {"success": True, "section": section}
+
+
+# ============ 训练相关 ============
+
+import threading
+import time
+import json
+import subprocess
+import signal
+
+# 全局训练状态
+_training_state = {
+    "running": False,
+    "pid": None,
+    "stage": None,
+    "timesteps": 0,
+    "target_steps": 0,
+    "start_time": None,
+    "progress": 0,
+    "log_lines": [],
+    "error": None,
+}
+
+
+def _get_project_root():
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _get_rl_models_dir():
+    return os.path.join(_get_project_root(), "rl_models")
+
+
+def _get_training_log_path():
+    return os.path.join(_get_project_root(), "rl_logs", "training_progress.json")
+
+
+def get_training_status():
+    """获取训练状态"""
+    global _training_state
+
+    # 检查子进程是否还在运行
+    if _training_state["running"] and _training_state["pid"]:
+        try:
+            if os.name == "nt":
+                # 检查进程是否还在（不杀死它）
+                result = subprocess.run(f"tasklist /FI \"PID eq {_training_state['pid']}\"",
+                                      shell=True, capture_output=True, text=True)
+                if str(_training_state["pid"]) not in result.stdout:
+                    _training_state["running"] = False
+                    _training_state["pid"] = None
+            else:
+                os.kill(_training_state["pid"], 0)
+        except (ProcessLookupError, PermissionError):
+            _training_state["running"] = False
+            _training_state["pid"] = None
+
+    # 从 train_output.log 读取最新进度
+    import locale
+    default_encoding = locale.getpreferredencoding(False) or 'utf-8'
+    log_file = os.path.join(_get_project_root(), "rl_logs", "train_output.log")
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, "r", encoding=default_encoding, errors='replace') as f:
+                content = f.read()
+            # 查找最新的 total_timesteps
+            import re
+            matches = re.findall(r'total_timesteps\s+\|\s+(\d+)', content)
+            if matches:
+                _training_state["timesteps"] = int(matches[-1])
+        except Exception:
+            pass
+
+    # 计算进度百分比
+    target = _training_state["target_steps"] if _training_state["target_steps"] > 0 else 120000
+    if target > 0:
+        _training_state["progress"] = min(100, _training_state["timesteps"] / target * 100)
+
+    return {
+        "running": _training_state["running"],
+        "stage": _training_state["stage"],
+        "timesteps": _training_state["timesteps"],
+        "target_steps": _training_state["target_steps"] if _training_state["target_steps"] > 0 else 120000,
+        "progress": round(_training_state["progress"], 1),
+        "start_time": _training_state["start_time"],
+        "log_lines": _training_state["log_lines"][-50:] if _training_state["log_lines"] else [],
+        "error": _training_state["error"],
+    }
+
+
+def _training_worker(stage, timesteps, resume):
+    """后台训练线程"""
+    global _training_state
+
+    try:
+        project_root = _get_project_root()
+        log_file = os.path.join(project_root, "rl_logs", "train_output.log")
+
+        # 确保目录存在
+        os.makedirs(os.path.join(project_root, "rl_models"), exist_ok=True)
+        os.makedirs(os.path.join(project_root, "rl_logs"), exist_ok=True)
+
+        # 构建命令 - 将输出重定向到文件
+        cmd = [
+            sys.executable,
+            os.path.join(project_root, "train_sac.py"),
+            "--stage", stage,
+            "--timesteps", str(timesteps),
+        ]
+        if resume:
+            cmd.append("--resume")
+
+        # 启动训练进程，输出重定向到文件
+        # 使用系统默认编码（Windows 中文系统通常是 GBK）
+        import locale
+        default_encoding = locale.getpreferredencoding(False) or 'utf-8'
+        with open(log_file, "w", encoding=default_encoding, errors='replace') as f_out:
+            process = subprocess.Popen(
+                cmd,
+                cwd=project_root,
+                stdout=f_out,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+        _training_state["pid"] = process.pid
+        _training_state["running"] = True
+
+        # 定期检查进程状态和读取日志
+        import time
+        last_pos = 0
+        episode_rewards = []
+
+        while True:
+            # 检查进程是否结束
+            ret = process.poll()
+            if ret is not None:
+                # 进程已结束，读取剩余日志
+                with open(log_file, "r", encoding=default_encoding, errors='replace') as f:
+                    f.seek(last_pos)
+                    for line in f:
+                        line = line.strip()
+                        if line and ("episode" in line.lower() or "rew" in line.lower() or "step" in line.lower()):
+                            episode_rewards.append(line[-100:] if len(line) > 100 else line)
+                _training_state["log_lines"] = episode_rewards[-50:]
+                _training_state["running"] = False
+                _training_state["pid"] = None
+                if ret != 0 and ret is not None:
+                    _training_state["error"] = f"训练进程退出 (code: {ret})"
+                break
+
+            # 每秒读取一次日志
+            time.sleep(1)
+            try:
+                with open(log_file, "r", encoding=default_encoding, errors='replace') as f:
+                    f.seek(last_pos)
+                    new_lines = f.readlines()
+                    last_pos = f.tell()
+                    for line in new_lines:
+                        line = line.strip()
+                        if line and ("episode" in line.lower() or "rew" in line.lower() or "step" in line.lower() or "timestep" in line.lower()):
+                            episode_rewards.append(line[-100:] if len(line) > 100 else line)
+                    if new_lines:
+                        _training_state["log_lines"] = episode_rewards[-50:]
+            except Exception:
+                pass
+
+    except Exception as e:
+        _training_state["running"] = False
+        _training_state["error"] = str(e)
+        import traceback as tb
+        tb.print_exc()
+
+
+def start_training(stage: str, timesteps: int, resume: bool = False):
+    """启动训练"""
+    global _training_state
+
+    if _training_state["running"]:
+        return {"success": False, "error": "训练已在进行中"}
+
+    # 检查模型文件
+    stage_short_map = {
+        "BULKING": "mid", "STARCH_ACCUMULATION": "late",
+        "EMERGENCE": "ini", "VEGETATIVE": "dev",
+        "TUBER_INIT": "dev", "MATURATION": "late",
+    }
+    model_short = stage_short_map.get(stage, "mid")
+    model_path = os.path.join(_get_rl_models_dir(), f"sac_{model_short}_final.zip")
+    model_exists = os.path.exists(model_path)
+
+    # 检查是否有之前的训练进度
+    log_file = os.path.join(_get_project_root(), "rl_logs", "train_output.log")
+    last_timesteps = 0
+    if os.path.exists(log_file):
+        try:
+            import locale
+            default_encoding = locale.getpreferredencoding(False) or 'utf-8'
+            with open(log_file, "r", encoding=default_encoding, errors='replace') as f:
+                content = f.read()
+            import re
+            matches = re.findall(r'total_timesteps\s+\|\s+(\d+)', content)
+            if matches:
+                last_timesteps = int(matches[-1])
+        except Exception:
+            pass
+
+    # resume=true 时续训，resume=false 时清空日志重新开始
+    if not resume:
+        # 清空日志文件，重新开始
+        try:
+            with open(log_file, "w", encoding="utf-8", errors='replace') as f:
+                f.write("")
+        except Exception:
+            pass
+        last_timesteps = 0
+
+    auto_resume = resume or model_exists or (last_timesteps > 0)
+
+    # 重启时需要先重新加载配置
+    reload_config()
+
+    # 重置状态
+    _training_state.update({
+        "running": True,
+        "stage": stage,
+        "timesteps": last_timesteps,
+        "target_steps": timesteps,
+        "start_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "progress": last_timesteps / timesteps * 100 if timesteps > 0 else 0,
+        "log_lines": [],
+        "error": None,
+    })
+
+    # 启动后台线程
+    thread = threading.Thread(target=_training_worker, args=(stage, timesteps, auto_resume))
+    thread.daemon = True
+    thread.start()
+
+    msg = f"继续训练 {stage}" if auto_resume else f"开始训练 {stage}"
+    return {
+        "success": True,
+        "message": f"{msg}，目标 {timesteps} 步（已训练 {last_timesteps} 步）",
+        "stage": stage,
+        "target_steps": timesteps,
+        "resume_available": True,
+        "last_timesteps": last_timesteps,
+    }
+
+
+def stop_training():
+    """停止训练"""
+    global _training_state
+
+    if not _training_state["running"]:
+        return {"success": False, "error": "没有正在运行的训练"}
+
+    if _training_state["pid"]:
+        try:
+            if os.name == "nt":
+                subprocess.run(f"taskkill /F /PID {_training_state['pid']}",
+                             shell=True, capture_output=True)
+            else:
+                os.kill(_training_state["pid"], signal.SIGTERM)
+        except Exception:
+            pass
+
+    _training_state["running"] = False
+    _training_state["pid"] = None
+    _training_state["error"] = "用户手动停止"
+
+    return {"success": True, "message": "训练已停止"}
+
+
+def get_model_info():
+    """获取已有模型信息"""
+    models = []
+    models_dir = _get_rl_models_dir()
+
+    stage_names = {
+        "ini": "EMERGENCE (出苗期)",
+        "dev": "VEGETATIVE/TUBER_INIT (营养/块茎形成)",
+        "mid": "BULKING (块茎膨大期)",
+        "late": "STARCH_ACCUMULATION/MATURATION (淀粉积累/成熟)",
+    }
+
+    for short, full_name in stage_names.items():
+        model_path = os.path.join(models_dir, f"sac_{short}_final.zip")
+        if os.path.exists(model_path):
+            mtime = os.path.getmtime(model_path)
+            size_mb = os.path.getsize(model_path) / (1024 * 1024)
+            models.append({
+                "name": f"sac_{short}_final",
+                "stage": full_name,
+                "size_mb": round(size_mb, 2),
+                "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime)),
+            })
+
+    return {"models": models, "models_dir": models_dir}
 

@@ -7,3 +7,9 @@ export function getConfig() { return http.get('/config').then(r => r.data) }
 export function runSimulation(params) { return http.post('/simulate', params).then(r => r.data) }
 export function runSeasonCompare(params) { return http.post('/season-compare', params).then(r => r.data) }
 export function saveConfig(section, updates) { return http.put('/config/save', { section, updates }).then(r => r.data) }
+
+// 训练相关 API
+export function getTrainingStatus() { return http.get('/training/status').then(r => r.data) }
+export function startTraining(params) { return http.post('/training/start', params).then(r => r.data) }
+export function stopTraining() { return http.post('/training/stop').then(r => r.data) }
+export function getTrainingModels() { return http.get('/training/models').then(r => r.data) }

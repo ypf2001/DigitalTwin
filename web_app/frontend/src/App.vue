@@ -7,6 +7,7 @@
         <router-link to="/" @click="sidebarOpen = false"><span class="nav-icon">📊</span> 首页</router-link>
         <router-link to="/simulation" @click="sidebarOpen = false"><span class="nav-icon">🔬</span> 仿真运行</router-link>
         <router-link to="/season-compare" @click="sidebarOpen = false"><span class="nav-icon">📈</span> 季节对比</router-link>
+        <router-link to="/training" @click="sidebarOpen = false"><span class="nav-icon">🤖</span> 模型训练</router-link>
         <router-link to="/settings" @click="sidebarOpen = false"><span class="nav-icon">⚙️</span> 系统配置</router-link>
       </nav>
     </aside>
@@ -22,6 +23,7 @@
         <router-link to="/"><span class="nav-icon">📊</span> 首页</router-link>
         <router-link to="/simulation"><span class="nav-icon">🔬</span> 仿真</router-link>
         <router-link to="/season-compare"><span class="nav-icon">📈</span> 对比</router-link>
+        <router-link to="/training"><span class="nav-icon">🤖</span> 训练</router-link>
         <router-link to="/settings"><span class="nav-icon">⚙️</span> 配置</router-link>
       </div>
     </nav>
@@ -39,7 +41,8 @@ export default {
     const sidebarOpen = ref(false)
     const pageTitle = computed(() => ({
       Dashboard: '系统总览', Simulation: '仿真运行',
-      SeasonCompare: '季节对比 T1 vs T2', Settings: '系统配置',
+      SeasonCompare: '季节对比 T1 vs T2', Training: '模型训练',
+      Settings: '系统配置',
     }[route.name] || '数字孪生系统'))
     return { sidebarOpen, pageTitle }
   },

@@ -17,3 +17,9 @@ class SeasonRequest(BaseModel):
 class ConfigSaveRequest(BaseModel):
     section: str
     updates: Dict[str, object]
+
+
+class TrainRequest(BaseModel):
+    stage: str = "BULKING"
+    timesteps: int = 120000
+    resume: bool = False

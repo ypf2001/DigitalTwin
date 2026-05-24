@@ -4,10 +4,11 @@ import traceback
 
 from fastapi import APIRouter
 
-from models import SimulateRequest, SeasonRequest, ConfigSaveRequest
+from models import SimulateRequest, SeasonRequest, ConfigSaveRequest, TrainRequest
 from services import (
     get_weather_data, get_config_data, run_simulation, run_season_compare,
-    save_config_section,
+    save_config_section, get_training_status, start_training, stop_training,
+    get_model_info,
 )
 
 router = APIRouter()
@@ -58,3 +59,43 @@ def save_config(req: ConfigSaveRequest):
     except Exception as e:
         return {"success": False, "error": str(e),
                 "traceback": traceback.format_exc()}
+
+
+# ============ 训练相关 API ============
+
+@router.get("/api/training/status")
+def training_status():
+    """获取训练状态"""
+    try:
+        return get_training_status()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/api/training/start")
+def training_start(req: TrainRequest):
+    """启动训练"""
+    try:
+        return start_training(req.stage, req.timesteps, req.resume)
+    except Exception as e:
+        return {"success": False, "error": str(e),
+                "traceback": traceback.format_exc()}
+
+
+@router.post("/api/training/stop")
+def training_stop():
+    """停止训练"""
+    try:
+        return stop_training()
+    except Exception as e:
+        return {"success": False, "error": str(e),
+                "traceback": traceback.format_exc()}
+
+
+@router.get("/api/training/models")
+def training_models():
+    """获取已有模型列表"""
+    try:
+        return get_model_info()
+    except Exception as e:
+        return {"error": str(e)}
