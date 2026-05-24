@@ -633,3 +633,10 @@ def get_model_info():
     models.sort(key=lambda x: x["mtime"], reverse=True)
     return {"models": models, "models_dir": models_dir}
 
+
+def upload_models_to_cloud():
+    """将本地所有模型上传到云端 MySQL"""
+    from cloud_storage import upload_all_models
+    models_dir = _get_rl_models_dir()
+    return upload_all_models(models_dir)
+

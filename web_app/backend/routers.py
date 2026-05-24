@@ -8,7 +8,7 @@ from models import SimulateRequest, SeasonRequest, ConfigSaveRequest, TrainReque
 from services import (
     get_weather_data, get_config_data, run_simulation, run_season_compare,
     save_config_section, get_training_status, start_training, stop_training,
-    get_model_info,
+    get_model_info, upload_models_to_cloud,
 )
 
 router = APIRouter()
@@ -99,3 +99,14 @@ def training_models():
         return get_model_info()
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.post("/api/training/upload")
+def upload_models():
+    """上传本地所有模型到云端 MySQL"""
+    try:
+        result = upload_models_to_cloud()
+        return {"success": True, **result}
+    except Exception as e:
+        return {"success": False, "error": str(e),
+                "traceback": traceback.format_exc()}

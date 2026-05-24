@@ -145,7 +145,13 @@
 
     <!-- 模型列表 -->
     <div class="card" style="margin-top:16px">
-      <div class="card-title">已训练模型</div>
+      <div class="card-title">
+        已训练模型
+        <button class="btn btn-sm btn-outline" style="float:right" @click="uploadToCloud" :disabled="uploading || models.length === 0">
+          {{ uploading ? '上传中...' : '☁️ 上传云端' }}
+        </button>
+      </div>
+      <div v-if="uploadMsg" :class="uploadMsg.startsWith('✅') ? 'success-box' : 'error-box'" style="margin-bottom:12px">{{ uploadMsg }}</div>
       <div v-if="models.length === 0" style="color:var(--text-secondary);padding:16px 0">
         暂无已训练的模型
       </div>
@@ -223,7 +229,7 @@
 
 <script>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { getTrainingStatus, startTraining, stopTraining, getTrainingModels } from '../api/index.js'
+import { getTrainingStatus, startTraining, stopTraining, getTrainingModels, uploadModels } from '../api/index.js'
 
 export default {
   name: 'Training',
@@ -233,6 +239,8 @@ export default {
     const error = ref('')
     const message = ref('')
     const models = ref([])
+    const uploadMsg = ref('')
+    const uploading = ref(false)
     const incompleteModels = computed(() => models.value.filter(m => (m.steps_num || 0) < 120000))
     const completedModels = computed(() => models.value.filter(m => (m.steps_num || 0) >= 120000))
     const training = reactive({
@@ -375,6 +383,26 @@ export default {
       showResumeModal.value = true
     }
 
+    async function uploadToCloud() {
+      uploading.value = true
+      uploadMsg.value = ''
+      try {
+        const res = await uploadModels()
+        if (res.success) {
+          const parts = [`✅ 上传完成：共 ${res.total} 个模型`]
+          if (res.uploaded > 0) parts.push(`新增 ${res.uploaded} 个`)
+          if (res.skipped > 0) parts.push(`跳过 ${res.skipped} 个（已存在）`)
+          uploadMsg.value = parts.join('，')
+        } else {
+          uploadMsg.value = '❌ ' + (res.error || '上传失败')
+        }
+      } catch (e) {
+        uploadMsg.value = '❌ ' + (e.message || '网络错误')
+      } finally {
+        uploading.value = false
+      }
+    }
+
     async function handleStop() {
       stopPolling()
       try {
@@ -481,6 +509,9 @@ export default {
       incompleteModels,
       completedModels,
       training,
+      uploadMsg,
+      uploading,
+      uploadToCloud,
       elapsedTime,
       showNewTrainModal,
       showResumeModal,
