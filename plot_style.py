@@ -33,7 +33,7 @@ def apply_academic_style():
     plt.rcParams.update({
         # Font
         'font.family': 'sans-serif',
-        'font.sans-serif': ['Arial', 'SimHei', 'Helvetica', 'DejaVu Sans'],
+        'font.sans-serif': ['SimHei', 'Arial', 'Helvetica', 'DejaVu Sans'],
         'font.size': 10,
         'axes.titlesize': 11,
         'axes.labelsize': 10,

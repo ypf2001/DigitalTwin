@@ -1,13 +1,13 @@
 """Matplotlib 图表生成 — 替代前端 Chart.js，与终端 main.py 同款"""
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
 import os
 import sys
 import time
 
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
 
 # 添加项目根目录到 sys.path，确保能导入 plot_style
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,16 +17,6 @@ if _ROOT not in sys.path:
 from plot_style import (
     apply_academic_style, set_ylim_tight,
 )
-
-# ---- 中文字体 ----
-try:
-    simhei_path = r"C:\Windows\Fonts\simhei.ttf"
-    if os.path.exists(simhei_path):
-        fm.fontManager.addfont(simhei_path)
-        plt.rcParams['font.sans-serif'] = ['SimHei'] + plt.rcParams.get('font.sans-serif', [])
-    plt.rcParams['axes.unicode_minus'] = False
-except Exception:
-    pass
 
 
 def _save(fig, prefix, output_dir):
