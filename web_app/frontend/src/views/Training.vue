@@ -462,6 +462,7 @@ export default {
       confirmResume,
       resumeTraining,
       handleStop,
+      selectModel,
       refreshStatus,
       getStageName,
       formatDuration,
