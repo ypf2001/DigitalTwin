@@ -76,7 +76,7 @@ def training_status():
 def training_start(req: TrainRequest):
     """启动训练"""
     try:
-        return start_training(req.stage, req.timesteps, req.resume)
+        return start_training(req.stage, req.timesteps, req.resume, req.load_model)
     except Exception as e:
         return {"success": False, "error": str(e),
                 "traceback": traceback.format_exc()}

@@ -165,7 +165,7 @@
               <td>{{ m.steps }}</td>
               <td>{{ m.size_mb }} MB</td>
               <td>{{ m.mtime }}</td>
-              <td><button class="btn btn-sm" @click="selectModel(m)">选择</button></td>
+              <td><button class="btn btn-sm btn-success" @click="selectModel(m)" :disabled="training.running">继续训练</button></td>
             </tr>
           </tbody>
         </table>
@@ -391,7 +391,33 @@ export default {
     }
 
     function selectModel(model) {
-      message.value = `已选择模型: ${model.name}`
+      if (training.running) {
+        error.value = '训练进行中，请先停止'
+        return
+      }
+      // 从模型名解析 stage（sac_mid_6000_steps → BULKING）
+      const name = model.name
+      const stageMap = { ini: 'EMERGENCE', dev: 'VEGETATIVE', mid: 'BULKING', late: 'STARCH_ACCUMULATION' }
+      let stage = params.stage
+      for (const [short, full] of Object.entries(stageMap)) {
+        if (name.includes('_' + short + '_') || name.includes('_' + short) || name === 'best_model') {
+          stage = full; break
+        }
+      }
+      params.stage = stage
+      loading.value = true
+      error.value = ''
+      message.value = ''
+      startTraining({ stage, timesteps: params.timesteps, resume: true, load_model: name })
+        .then(res => {
+          if (res.success) {
+            message.value = res.message
+            trainingStarted.value = true
+            refreshStatus().then(() => startPolling())
+          } else { error.value = res.error || '启动失败' }
+        })
+        .catch(e => { error.value = e.message || '网络错误' })
+        .finally(() => { loading.value = false })
     }
 
     function stopPolling() {

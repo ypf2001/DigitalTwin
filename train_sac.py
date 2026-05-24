@@ -81,6 +81,8 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--resume", action="store_true",
                         help="从上次保存的模型继续训练")
+    parser.add_argument("--load-path", type=str, default=None,
+                        help="从指定模型路径加载 (如 sac_mid_6000_steps)")
     args = parser.parse_args()
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -125,45 +127,98 @@ if __name__ == "__main__":
 
     # ---- SAC 模型（新建 或 从 checkpoint 恢复） ----
     final_path = os.path.join(args.save_dir, f"sac_{model_tag}_final")
-    if args.resume and (os.path.exists(final_path + ".zip") or
-                        any(f.startswith(f"sac_{model_tag}_") for f in os.listdir(args.save_dir))):
-        # 优先加载 final，否则找最新的 checkpoint
-        if os.path.exists(final_path + ".zip"):
-            load_path = final_path
-        else:
-            ckpts = sorted(
-                [f for f in os.listdir(args.save_dir)
-                 if f.startswith(f"sac_{model_tag}_") and f.endswith(".zip")],
-                key=lambda x: int(x.split("_")[-1].replace(".zip", "").replace("steps", "")),
-            )
-            load_path = os.path.join(args.save_dir, ckpts[-1].replace(".zip", ""))
+    model_found = (os.path.exists(final_path + ".zip") or
+                   any(f.startswith(f"sac_{model_tag}_") for f in os.listdir(args.save_dir)))
+
+    # 如果指定了 --load-path，直接加载该模型
+    trained_steps = 0
+    if args.load_path:
+        load_path = os.path.join(args.save_dir, args.load_path)
+        if not os.path.exists(load_path + ".zip"):
+            logger.error(f"指定模型不存在: {load_path}.zip")
+            sys.exit(1)
         model = SAC.load(load_path)
-        # 旧模型观测空间是 Box(-inf, inf)，新环境是 Box(-1, 1)
-        # 维度相同 (23)，覆盖后兼容
         model.observation_space = train_env.observation_space
         model.set_env(train_env)
         trained_steps = model.num_timesteps
-        logger.info(f"从 {load_path}.zip 恢复训练 (已训练 {trained_steps} 步)")
+        logger.info(f"从指定模型 {args.load_path}.zip 继续训练 (已训练 {trained_steps} 步)")
     else:
-        ent_coef = sac_cfg["ent_coef"]
-        if ent_coef != "auto":
-            ent_coef = float(ent_coef)
-        model = SAC(
-            "MlpPolicy",
-            train_env,
-            learning_rate=float(sac_cfg["learning_rate"]),
-            buffer_size=int(sac_cfg["buffer_size"]),
-            batch_size=int(sac_cfg["batch_size"]),
-            learning_starts=int(sac_cfg["learning_starts"]),
-            tau=float(sac_cfg["tau"]),
-            gamma=float(sac_cfg["gamma"]),
-            ent_coef=ent_coef,
-            verbose=1,
-            seed=args.seed,
-        )
-        trained_steps = 0
-        if args.resume:
-            logger.warning("未找到已有模型，将从头训练")
+        # 检测上次训练是否已完成
+        already_completed = False
+        if model_found:
+            try:
+                tmp = SAC.load(final_path if os.path.exists(final_path + ".zip") else
+                              os.path.join(args.save_dir,
+                                           sorted([f for f in os.listdir(args.save_dir)
+                                                   if f.startswith(f"sac_{model_tag}_") and f.endswith(".zip")],
+                                                  key=lambda x: int(x.split("_")[-1].replace(".zip", "").replace("steps", "")))[-1].replace(".zip", "")))
+                if tmp.num_timesteps >= args.timesteps:
+                    already_completed = True
+                    logger.info(f"检测到上次训练已完成 ({tmp.num_timesteps} >= {args.timesteps})，将从头开始新训练")
+                del tmp
+            except Exception:
+                pass
+
+        if model_found and not already_completed:
+            if args.resume:
+                should_resume = True
+            else:
+                # 交互式询问
+                try:
+                    ans = input(f"\n检测到已有模型，是否从上次模型继续训练? [y/N]: ").strip().lower()
+                    should_resume = (ans == "y" or ans == "yes")
+                except (EOFError, KeyboardInterrupt):
+                    should_resume = False
+
+            if should_resume:
+                # 优先加载 final，否则找最新的 checkpoint
+                if os.path.exists(final_path + ".zip"):
+                    load_path = final_path
+                else:
+                    ckpts = sorted(
+                        [f for f in os.listdir(args.save_dir)
+                         if f.startswith(f"sac_{model_tag}_") and f.endswith(".zip")],
+                        key=lambda x: int(x.split("_")[-1].replace(".zip", "").replace("steps", "")),
+                    )
+                    load_path = os.path.join(args.save_dir, ckpts[-1].replace(".zip", ""))
+                model = SAC.load(load_path)
+                model.observation_space = train_env.observation_space
+                model.set_env(train_env)
+                trained_steps = model.num_timesteps
+                logger.info(f"从 {load_path}.zip 恢复训练 (已训练 {trained_steps} 步)")
+            else:
+                ent_coef = sac_cfg["ent_coef"]
+                if ent_coef != "auto":
+                    ent_coef = float(ent_coef)
+                model = SAC(
+                    "MlpPolicy", train_env,
+                    learning_rate=float(sac_cfg["learning_rate"]),
+                    buffer_size=int(sac_cfg["buffer_size"]),
+                    batch_size=int(sac_cfg["batch_size"]),
+                    learning_starts=int(sac_cfg["learning_starts"]),
+                    tau=float(sac_cfg["tau"]),
+                    gamma=float(sac_cfg["gamma"]),
+                    ent_coef=ent_coef, verbose=1, seed=args.seed,
+                )
+                trained_steps = 0
+                logger.info("用户选择从头训练")
+        else:
+            ent_coef = sac_cfg["ent_coef"]
+            if ent_coef != "auto":
+                ent_coef = float(ent_coef)
+            model = SAC(
+                "MlpPolicy", train_env,
+                learning_rate=float(sac_cfg["learning_rate"]),
+                buffer_size=int(sac_cfg["buffer_size"]),
+                batch_size=int(sac_cfg["batch_size"]),
+                learning_starts=int(sac_cfg["learning_starts"]),
+                tau=float(sac_cfg["tau"]),
+                gamma=float(sac_cfg["gamma"]),
+                ent_coef=ent_coef, verbose=1, seed=args.seed,
+            )
+            trained_steps = 0
+            if args.resume:
+                logger.warning("未找到已有模型，将从头训练")
 
     # ---- 回调 ----
     save_freq = max(5000, args.timesteps // int(sac_cfg["save_freq_div"]))
@@ -189,11 +244,15 @@ if __name__ == "__main__":
     )
 
     # ---- 训练 ----
-    logger.info(f"开始训练... (目标: +{args.timesteps} 步, 已训练: {trained_steps}, 按 q 键优雅停止)")
+    # SB3: 当 reset_num_timesteps=False 时会累加 num_timesteps 到 total_timesteps，
+    # 因此 resume 时必须传入剩余步数（非总步数），否则最终总步数会超标
+    remaining_steps = max(0, args.timesteps - trained_steps)
+    logger.info(f"开始训练... (目标总步数: {args.timesteps}, 已训练: {trained_steps}, "
+                f"本次新增: {remaining_steps}, 按 q 键优雅停止)")
     try:
         model.learn(
             log_interval=log_interval,
-            total_timesteps=args.timesteps,
+            total_timesteps=remaining_steps,
             reset_num_timesteps=(trained_steps == 0),
             callback=[keyboard_cb, checkpoint_cb, eval_cb],
         )

@@ -377,7 +377,7 @@ def get_training_status():
     }
 
 
-def _training_worker(stage, timesteps, resume):
+def _training_worker(stage, timesteps, resume, load_model=""):
     """后台训练线程"""
     global _training_state
 
@@ -398,6 +398,8 @@ def _training_worker(stage, timesteps, resume):
         ]
         if resume:
             cmd.append("--resume")
+        if load_model:
+            cmd.extend(["--load-path", load_model])
 
         # 启动训练进程，输出重定向到文件
         # 使用系统默认编码（Windows 中文系统通常是 GBK）
@@ -463,8 +465,11 @@ def _training_worker(stage, timesteps, resume):
         tb.print_exc()
 
 
-def start_training(stage: str, timesteps: int, resume: bool = False):
-    """启动训练"""
+def start_training(stage: str, timesteps: int, resume: bool = False, load_model: str = ""):
+    """启动训练
+    - resume=True: 自动找最新 checkpoint 继续训练
+    - load_model: 指定模型文件名（不含 .zip），如 'sac_mid_6000_steps'
+    """
     global _training_state
 
     if _training_state["running"]:
@@ -496,9 +501,8 @@ def start_training(stage: str, timesteps: int, resume: bool = False):
         except Exception:
             pass
 
-    # resume=true 时续训，resume=false 时清空日志重新开始
-    if not resume:
-        # 清空日志文件，重新开始
+    # resume=true 时续训，resume=false / load_model 时清空日志重新开始
+    if not resume or load_model:
         try:
             with open(log_file, "w", encoding="utf-8", errors='replace') as f:
                 f.write("")
@@ -524,11 +528,16 @@ def start_training(stage: str, timesteps: int, resume: bool = False):
     })
 
     # 启动后台线程
-    thread = threading.Thread(target=_training_worker, args=(stage, timesteps, auto_resume))
+    thread = threading.Thread(target=_training_worker, args=(stage, timesteps, auto_resume, load_model))
     thread.daemon = True
     thread.start()
 
-    msg = "继续训练" if auto_resume else "开始训练"
+    if load_model:
+        msg = f"从 {load_model} 继续训练"
+    elif auto_resume:
+        msg = "继续训练"
+    else:
+        msg = "开始训练"
     return {
         "success": True,
         "message": f"{msg} {stage}，目标 {timesteps} 步（已训练 {last_timesteps} 步）",

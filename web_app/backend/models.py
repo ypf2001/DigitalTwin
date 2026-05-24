@@ -23,3 +23,4 @@ class TrainRequest(BaseModel):
     stage: str = "BULKING"
     timesteps: int = 120000
     resume: bool = False
+    load_model: str = ""
