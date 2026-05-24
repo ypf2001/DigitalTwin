@@ -145,12 +145,7 @@
 
     <!-- 模型列表 -->
     <div class="card" style="margin-top:16px">
-      <div class="card-title">
-        已训练模型
-        <button class="btn btn-sm btn-outline" style="float:right" @click="uploadToCloud" :disabled="uploading || models.length === 0">
-          {{ uploading ? '上传中...' : '☁️ 上传云端' }}
-        </button>
-      </div>
+      <div class="card-title">已训练模型</div>
       <div v-if="uploadMsg" :class="uploadMsg.startsWith('✅') ? 'success-box' : 'error-box'" style="margin-bottom:12px">{{ uploadMsg }}</div>
       <div v-if="models.length === 0" style="color:var(--text-secondary);padding:16px 0">
         暂无已训练的模型
@@ -179,7 +174,19 @@
         </div>
         <!-- 已完成 -->
         <div v-if="completedModels.length > 0">
-          <div class="card-title" style="font-size:14px;color:var(--success)">✓ 已完成 (120,000 步)</div>
+          <div class="card-title" style="font-size:14px;color:var(--success);display:flex;align-items:center;gap:12px">
+            <span>✓ 已完成 (120,000 步)</span>
+            <button class="btn btn-sm" style="background:#4caf50;color:#fff" @click="uploadToCloud" :disabled="uploading || completedModels.length === 0">
+              {{ uploading ? '☁️ 上传中...' : '☁️ 上传云端' }}
+            </button>
+          </div>
+          <!-- 上传进度条 -->
+          <div v-if="uploading" style="margin:8px 0;background:#e9ecef;border-radius:6px;height:16px;overflow:hidden">
+            <div :style="{ width: uploadPct + '%', height:'100%', background:'linear-gradient(90deg,#4caf50,#8bc34a)', transition:'width .3s' }"></div>
+          </div>
+          <div v-if="uploading" style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">
+            {{ uploadCurrent }} / {{ uploadTotal }}
+          </div>
           <div style="overflow:auto;max-height:300px">
             <table class="stats-table">
               <thead>
@@ -229,7 +236,7 @@
 
 <script>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { getTrainingStatus, startTraining, stopTraining, getTrainingModels, uploadModels } from '../api/index.js'
+import { getTrainingStatus, startTraining, stopTraining, getTrainingModels, uploadModels, getUploadProgress } from '../api/index.js'
 
 export default {
   name: 'Training',
@@ -241,6 +248,9 @@ export default {
     const models = ref([])
     const uploadMsg = ref('')
     const uploading = ref(false)
+    const uploadPct = ref(0)
+    const uploadCurrent = ref('0')
+    const uploadTotal = ref('0')
     const incompleteModels = computed(() => models.value.filter(m => (m.steps_num || 0) < 120000))
     const completedModels = computed(() => models.value.filter(m => (m.steps_num || 0) >= 120000))
     const training = reactive({
@@ -386,19 +396,32 @@ export default {
     async function uploadToCloud() {
       uploading.value = true
       uploadMsg.value = ''
+      uploadPct.value = 0
+      uploadCurrent.value = '0'
+      uploadTotal.value = '0'
       try {
         const res = await uploadModels()
-        if (res.success) {
-          const parts = [`✅ 上传完成：共 ${res.total} 个模型`]
-          if (res.uploaded > 0) parts.push(`新增 ${res.uploaded} 个`)
-          if (res.skipped > 0) parts.push(`跳过 ${res.skipped} 个（已存在）`)
-          uploadMsg.value = parts.join('，')
-        } else {
-          uploadMsg.value = '❌ ' + (res.error || '上传失败')
-        }
+        if (!res.success) { uploadMsg.value = '❌ ' + (res.error || '启动失败'); uploading.value = false; return }
+        // 轮询进度
+        const poll = setInterval(async () => {
+          try {
+            const p = await getUploadProgress()
+            uploadPct.value = Math.min(100, p.total > 0 ? ((p.uploaded + p.skipped) / p.total * 100) : 0)
+            uploadCurrent.value = (p.uploaded + p.skipped).toString()
+            uploadTotal.value = p.total.toString()
+            if (p.done) {
+              clearInterval(poll)
+              uploading.value = false
+              const parts = [`✅ 上传完成：共 ${p.total} 个`]
+              if (p.uploaded > 0) parts.push(`新增 ${p.uploaded} 个`)
+              if (p.skipped > 0) parts.push(`跳过 ${p.skipped} 个`)
+              if (p.errors && p.errors.length > 0) parts.push(`错误 ${p.errors.length} 个`)
+              uploadMsg.value = parts.join('，')
+            }
+          } catch (_) {}
+        }, 500)
       } catch (e) {
         uploadMsg.value = '❌ ' + (e.message || '网络错误')
-      } finally {
         uploading.value = false
       }
     }
@@ -511,6 +534,9 @@ export default {
       training,
       uploadMsg,
       uploading,
+      uploadPct,
+      uploadCurrent,
+      uploadTotal,
       uploadToCloud,
       elapsedTime,
       showNewTrainModal,

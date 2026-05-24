@@ -14,3 +14,4 @@ export function startTraining(params) { return http.post('/training/start', para
 export function stopTraining() { return http.post('/training/stop').then(r => r.data) }
 export function getTrainingModels() { return http.get('/training/models').then(r => r.data) }
 export function uploadModels() { return http.post('/training/upload').then(r => r.data) }
+export function getUploadProgress() { return http.get('/training/upload/progress').then(r => r.data) }

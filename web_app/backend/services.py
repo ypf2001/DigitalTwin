@@ -634,9 +634,33 @@ def get_model_info():
     return {"models": models, "models_dir": models_dir}
 
 
+# 上传进度状态
+_upload_progress = {"done": True, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": []}
+
+
 def upload_models_to_cloud():
-    """将本地所有模型上传到云端 MySQL"""
-    from cloud_storage import upload_all_models
+    """将已完成模型异步上传到云端 MySQL，立即返回"""
+    global _upload_progress
+    _upload_progress = {"done": False, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": []}
     models_dir = _get_rl_models_dir()
-    return upload_all_models(models_dir)
+
+    def _run():
+        global _upload_progress
+        from cloud_storage import upload_all_models
+        try:
+            result = upload_all_models(models_dir, completed_only=True, progress=_upload_progress)
+            _upload_progress["done"] = True
+        except Exception as e:
+            _upload_progress["done"] = True
+            _upload_progress["errors"].append(str(e))
+
+    thread = threading.Thread(target=_run)
+    thread.daemon = True
+    thread.start()
+    return {"success": True, "message": "上传任务已启动"}
+
+
+def get_upload_progress():
+    """查询上传进度"""
+    return _upload_progress
 
