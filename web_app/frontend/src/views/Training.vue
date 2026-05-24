@@ -153,7 +153,7 @@
       <div v-if="models.length === 0" style="color:var(--text-secondary);padding:16px 0">
         暂无已训练的模型
       </div>
-      <div v-else style="overflow-x:auto">
+      <div v-else style="overflow:auto;max-height:400px">
         <table class="stats-table">
             <thead>
             <tr><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th><th>操作</th></tr>
