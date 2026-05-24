@@ -65,7 +65,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 .loading-overlay{display:flex;align-items:center;justify-content:center;gap:12px;padding:60px;color:var(--text-secondary);font-size:16px}
 
 /* Table */
-.stats-table{width:100%;border-collapse:collapse;table-layout:auto}
+.stats-table{width:100%;border-collapse:collapse;table-layout:fixed}
 .stats-table th,.stats-table td{padding:10px 16px;text-align:left;border-bottom:1px solid var(--border);font-size:14px}
 .stats-table th{background:#f8f9fa;font-weight:600}
 .improve{color:var(--success);font-weight:600}

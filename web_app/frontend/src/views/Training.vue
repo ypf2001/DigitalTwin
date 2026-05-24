@@ -146,7 +146,7 @@
           <div style="width:100%;overflow-x:auto;max-height:300px">
             <table class="stats-table">
               <thead>
-                <tr><th style="width:30px">☐</th><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th><th>云端</th><th>操作</th></tr>
+                <tr><th style="width:4%">☐</th><th style="width:26%">模型名称</th><th style="width:14%">阶段</th><th style="width:12%">步数</th><th style="width:8%">大小</th><th style="width:16%">更新时间</th><th style="width:6%">云端</th><th style="width:14%">操作</th></tr>
               </thead>
               <tbody>
                 <tr v-for="m in incompleteModels" :key="m.name">
@@ -186,10 +186,10 @@
           <div style="width:100%;overflow-x:auto;max-height:300px">
             <table class="stats-table">
               <thead>
-                <tr><th style="width:30px">☐</th><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th><th>云端</th><th></th></tr>
+                <tr><th style="width:4%">☐</th><th style="width:26%">模型名称</th><th style="width:14%">阶段</th><th style="width:12%">步数</th><th style="width:8%">大小</th><th style="width:16%">更新时间</th><th style="width:6%">云端</th><th style="width:14%"></th></tr>
               </thead>
               <tbody>
-                  <tr v-for="m in completedModels" :key="m.name">
+                <tr v-for="m in completedModels" :key="m.name">
                   <td>
                     <input v-if="m.in_cloud" type="checkbox" checked disabled />
                     <input v-else type="checkbox" :checked="checkedModels.has(m.name)" @change="toggleCheck(m.name)" />
