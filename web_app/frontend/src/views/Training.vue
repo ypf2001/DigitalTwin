@@ -166,14 +166,16 @@
               </thead>
               <tbody>
                 <tr v-for="m in incompleteModels" :key="m.name">
-                  <td><input type="checkbox" :checked="checkedModels.has(m.name)" :disabled="m.in_cloud" @change="toggleCheck(m.name)" /></td>
+                  <td>
+                    <input v-if="m.in_cloud" type="checkbox" checked disabled />
+                    <input v-else type="checkbox" :checked="checkedModels.has(m.name)" @change="toggleCheck(m.name)" />
+                  </td>
                   <td><code>{{ m.name }}</code></td>
                   <td>{{ m.stage }}</td>
                   <td>{{ m.steps }}</td>
                   <td>{{ m.size_mb }} MB</td>
                   <td>{{ m.mtime }}</td>
                   <td><span v-if="m.in_cloud" style="color:var(--success)">☁️</span><span v-else style="color:#ccc">—</span></td>
-                  <td><button class="btn btn-sm btn-success" @click="selectModel(m)" :disabled="training.running">继续训练</button></td>
                 </tr>
               </tbody>
             </table>
@@ -200,7 +202,10 @@
               </thead>
               <tbody>
                 <tr v-for="m in completedModels" :key="m.name">
-                  <td><input type="checkbox" :checked="checkedModels.has(m.name)" :disabled="m.in_cloud" @change="toggleCheck(m.name)" /></td>
+                  <td>
+                    <input v-if="m.in_cloud" type="checkbox" checked disabled />
+                    <input v-else type="checkbox" :checked="checkedModels.has(m.name)" @change="toggleCheck(m.name)" />
+                  </td>
                   <td><code>{{ m.name }}</code></td>
                   <td>{{ m.stage }}</td>
                   <td>{{ m.steps }}</td>
