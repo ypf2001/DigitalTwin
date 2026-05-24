@@ -59,6 +59,21 @@ def ensure_database():
                     UNIQUE KEY uk_name (name)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS training_progress (
+                    id          INT PRIMARY KEY DEFAULT 1,
+                    running     TINYINT DEFAULT 0,
+                    stage       VARCHAR(50),
+                    timesteps   INT DEFAULT 0,
+                    target_steps INT DEFAULT 120000,
+                    progress    DECIMAL(5,1) DEFAULT 0,
+                    start_time  VARCHAR(30),
+                    error_msg   TEXT,
+                    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            # 确保有一条初始化记录
+            cur.execute("INSERT IGNORE INTO training_progress (id, running) VALUES (1, 0)")
         conn.commit()
     finally:
         conn.close()
@@ -210,3 +225,42 @@ def upload_all_models(models_dir, completed_only=False, progress=None):
 
     if progress:
         progress["done"] = True
+
+
+def sync_training_progress(running, stage=None, timesteps=0, target_steps=120000, progress=0, start_time=None, error_msg=None):
+    """同步训练进度到云端 MySQL"""
+    ensure_database()
+    conn = _get_db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO training_progress (id, running, stage, timesteps, target_steps, progress, start_time, error_msg)
+                VALUES (1, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    running=VALUES(running), stage=VALUES(stage), timesteps=VALUES(timesteps),
+                    target_steps=VALUES(target_steps), progress=VALUES(progress),
+                    start_time=VALUES(start_time), error_msg=VALUES(error_msg)
+            """, (int(running), stage, timesteps, target_steps, round(progress, 1), start_time, error_msg))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def query_training_progress():
+    """从云端读取训练进度"""
+    ensure_database()
+    conn = _get_db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT running, stage, timesteps, target_steps, progress, start_time, error_msg FROM training_progress WHERE id=1")
+            row = cur.fetchone()
+            if row:
+                return {
+                    "running": bool(row[0]), "stage": row[1],
+                    "timesteps": row[2] or 0, "target_steps": row[3] or 120000,
+                    "progress": float(row[4] or 0), "start_time": row[5],
+                    "error": row[6],
+                }
+    finally:
+        conn.close()
+    return None

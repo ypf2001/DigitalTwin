@@ -440,6 +440,7 @@ def _training_worker(stage, timesteps, resume, load_model=""):
                 if ret != 0 and ret is not None:
                     _training_state["error"] = f"训练进程退出 (code: {ret})"
                 _auto_upload_models()
+                _sync_progress_cloud()
                 break
 
             # 每秒读取一次日志
@@ -455,6 +456,7 @@ def _training_worker(stage, timesteps, resume, load_model=""):
                             episode_rewards.append(line[-100:] if len(line) > 100 else line)
                     if new_lines:
                         _training_state["log_lines"] = episode_rewards[-50:]
+                        _sync_progress_cloud()
             except Exception:
                 pass
 
@@ -462,6 +464,7 @@ def _training_worker(stage, timesteps, resume, load_model=""):
         _training_state["running"] = False
         _training_state["error"] = str(e)
         _training_state["target_steps"] = 0
+        _sync_progress_cloud()
         import traceback as tb
         tb.print_exc()
 
@@ -533,6 +536,10 @@ def start_training(stage: str, timesteps: int, resume: bool = False, load_model:
     thread.daemon = True
     thread.start()
 
+    # 同步训练开始到云端
+    _sync_progress_cloud()
+
+    msg = "开始训练"
     if load_model:
         msg = f"从 {load_model} 继续训练"
     elif auto_resume:
@@ -570,6 +577,7 @@ def stop_training():
     _training_state["pid"] = None
     _training_state["target_steps"] = 0
     _training_state["error"] = "用户手动停止"
+    _sync_progress_cloud()
 
     return {"success": True, "message": "训练已停止"}
 
@@ -645,6 +653,23 @@ def get_model_info():
 
     model_list = sorted(models.values(), key=lambda x: x["mtime"], reverse=True)
     return {"models": model_list, "models_dir": source}
+
+
+def _sync_progress_cloud():
+    """同步当前训练状态到云端"""
+    try:
+        from cloud_storage import sync_training_progress
+        sync_training_progress(
+            running=_training_state["running"],
+            stage=_training_state["stage"],
+            timesteps=_training_state["timesteps"],
+            target_steps=_training_state["target_steps"] or 120000,
+            progress=_training_state["progress"],
+            start_time=_training_state["start_time"],
+            error_msg=_training_state["error"],
+        )
+    except Exception:
+        pass
 
 
 # 上传控制
