@@ -16,4 +16,5 @@ export function getTrainingModels() { return http.get('/training/models').then(r
 export function uploadModels() { return http.post('/training/upload').then(r => r.data) }
 export function uploadSelected(names) { return http.post('/training/upload/selected', { names }).then(r => r.data) }
 export function stopUpload() { return http.post('/training/upload/stop').then(r => r.data) }
+export function deleteModel(name) { return http.delete('/training/models/' + encodeURIComponent(name)).then(r => r.data) }
 export function getUploadProgress() { return http.get('/training/upload/progress').then(r => r.data) }

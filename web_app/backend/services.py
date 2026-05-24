@@ -751,3 +751,48 @@ def stop_upload():
 def get_upload_progress():
     return _upload_progress
 
+
+def delete_model(name: str):
+    """删除指定模型（本地文件 + MySQL 记录）"""
+    deleted_local = False
+    deleted_cloud = False
+    errors = []
+
+    # 删除本地文件
+    local_path = os.path.join(_get_rl_models_dir(), name + ".zip")
+    if os.path.isfile(local_path):
+        try:
+            os.remove(local_path)
+            deleted_local = True
+        except Exception as e:
+            errors.append(f"本地删除失败: {e}")
+
+    # 删除 MySQL 记录
+    try:
+        from cloud_storage import ensure_database
+        ensure_database()
+        import pymysql
+        conn = pymysql.connect(
+            host="154.44.26.212", port=61762,
+            user="root", password="mysql_dDPsQR",
+            database="digital_twin", connect_timeout=5, charset="utf8mb4",
+        )
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM trained_models WHERE name = %s", (name,))
+            if cur.rowcount > 0:
+                deleted_cloud = True
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        errors.append(f"云端删除失败: {e}")
+
+    if not deleted_local and not deleted_cloud:
+        return {"success": False, "error": "模型不存在", "errors": errors}
+
+    return {
+        "success": True,
+        "deleted_local": deleted_local,
+        "deleted_cloud": deleted_cloud,
+        "errors": errors,
+    }
+

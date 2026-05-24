@@ -8,7 +8,7 @@ from models import SimulateRequest, SeasonRequest, ConfigSaveRequest, TrainReque
 from services import (
     get_weather_data, get_config_data, run_simulation, run_season_compare,
     save_config_section, get_training_status, start_training, stop_training,
-    get_model_info, upload_models_to_cloud, get_upload_progress, stop_upload, upload_selected_models,
+    get_model_info, upload_models_to_cloud, get_upload_progress, stop_upload, upload_selected_models, delete_model,
 )
 
 router = APIRouter()
@@ -138,5 +138,14 @@ def upload_stop():
     """停止上传"""
     try:
         return stop_upload()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.delete("/api/training/models/{name}")
+def delete_model_route(name: str):
+    """删除指定模型"""
+    try:
+        return delete_model(name)
     except Exception as e:
         return {"success": False, "error": str(e)}

@@ -176,6 +176,10 @@
                   <td>{{ m.size_mb }} MB</td>
                   <td>{{ m.mtime }}</td>
                   <td><span v-if="m.in_cloud" style="color:var(--success)">☁️</span><span v-else style="color:#ccc">—</span></td>
+                  <td style="white-space:nowrap">
+                    <button class="btn btn-sm btn-success" @click="selectModel(m)" :disabled="training.running">继续训练</button>
+                    <button class="btn btn-sm btn-danger" @click="deleteOne(m)" :disabled="training.running" style="margin-left:3px">🗑</button>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -198,10 +202,10 @@
           <div style="overflow:auto;max-height:300px">
             <table class="stats-table">
               <thead>
-                <tr><th style="width:30px">☐</th><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th><th>云端</th></tr>
+                <tr><th style="width:30px">☐</th><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th><th>云端</th><th></th></tr>
               </thead>
               <tbody>
-                <tr v-for="m in completedModels" :key="m.name">
+                  <tr v-for="m in completedModels" :key="m.name">
                   <td>
                     <input v-if="m.in_cloud" type="checkbox" checked disabled />
                     <input v-else type="checkbox" :checked="checkedModels.has(m.name)" @change="toggleCheck(m.name)" />
@@ -212,6 +216,7 @@
                   <td>{{ m.size_mb }} MB</td>
                   <td>{{ m.mtime }}</td>
                   <td><span v-if="m.in_cloud" style="color:var(--success)">☁️</span><span v-else style="color:#ccc">—</span></td>
+                  <td><button class="btn btn-sm btn-danger" @click="deleteOne(m)" :disabled="training.running">🗑</button></td>
                 </tr>
               </tbody>
             </table>
@@ -249,7 +254,7 @@
 
 <script>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { getTrainingStatus, startTraining, stopTraining, getTrainingModels, uploadModels, uploadSelected, stopUpload, getUploadProgress } from '../api/index.js'
+import { getTrainingStatus, startTraining, stopTraining, getTrainingModels, uploadModels, uploadSelected, stopUpload, getUploadProgress, deleteModel } from '../api/index.js'
 
 export default {
   name: 'Training',
@@ -556,6 +561,19 @@ export default {
       }
     }
 
+    async function deleteOne(model) {
+      if (!confirm(`确定删除模型 "${model.name}" 吗？（本地 + 云端）`)) return
+      try {
+        const res = await deleteModel(model.name)
+        if (res.success) {
+          showToast('✅ 已删除 ' + model.name)
+          await loadModels()
+        } else {
+          showToast((res.errors && res.errors[0]) || res.error || '删除失败', 'error')
+        }
+      } catch (e) { showToast(e.message || '网络错误', 'error') }
+    }
+
     onMounted(async () => {
       await refreshStatus()
       await loadModels()
@@ -604,6 +622,7 @@ export default {
       resumeTraining,
       handleStop,
       selectModel,
+      deleteOne,
       refreshStatus,
       getStageName,
       formatDuration,
