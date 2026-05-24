@@ -149,26 +149,30 @@
     <!-- 模型列表 -->
     <div class="card" style="margin-top:16px">
       <div class="card-title">已训练模型</div>
-      <div v-if="uploadMsg" :class="uploadMsg.startsWith('✅') ? 'success-box' : 'error-box'" style="margin-bottom:12px">{{ uploadMsg }}</div>
       <div v-if="models.length === 0" style="color:var(--text-secondary);padding:16px 0">
         暂无已训练的模型
       </div>
       <template v-else>
         <!-- 未完成 -->
         <div v-if="incompleteModels.length > 0" style="margin-bottom:20px">
-          <div class="card-title" style="font-size:14px;color:var(--warning)">⏳ 训练中 / 未完成</div>
+          <div class="card-title" style="font-size:14px;color:var(--warning);display:flex;align-items:center;gap:12px">
+            <span>⏳ 训练中 / 未完成</span>
+            <button v-if="!uploading" class="btn btn-sm btn-outline" @click="checkAllIncomplete">☐ 全选</button>
+          </div>
           <div style="overflow:auto;max-height:300px">
             <table class="stats-table">
               <thead>
-                <tr><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th><th>操作</th></tr>
+                <tr><th style="width:30px">☐</th><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th><th>云端</th><th>操作</th></tr>
               </thead>
               <tbody>
                 <tr v-for="m in incompleteModels" :key="m.name">
+                  <td><input type="checkbox" :checked="checkedModels.has(m.name)" :disabled="m.in_cloud" @change="toggleCheck(m.name)" /></td>
                   <td><code>{{ m.name }}</code></td>
                   <td>{{ m.stage }}</td>
                   <td>{{ m.steps }}</td>
                   <td>{{ m.size_mb }} MB</td>
                   <td>{{ m.mtime }}</td>
+                  <td><span v-if="m.in_cloud" style="color:var(--success)">☁️</span><span v-else style="color:#ccc">—</span></td>
                   <td><button class="btn btn-sm btn-success" @click="selectModel(m)" :disabled="training.running">继续训练</button></td>
                 </tr>
               </tbody>
@@ -177,13 +181,12 @@
         </div>
         <!-- 已完成 -->
         <div v-if="completedModels.length > 0">
-          <div class="card-title" style="font-size:14px;color:var(--success);display:flex;align-items:center;gap:12px">
+          <div class="card-title" style="font-size:14px;color:var(--success);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
             <span>✓ 已完成 (120,000 步)</span>
-            <button class="btn btn-sm" style="background:#4caf50;color:#fff" @click="uploadToCloud" :disabled="uploading || completedModels.length === 0">
-              {{ uploading ? '☁️ 上传中...' : '☁️ 上传云端' }}
-            </button>
+            <button v-if="!uploading" class="btn btn-sm" style="background:#4caf50;color:#fff" @click="checkAllCompleted">☐ 全选</button>
+            <button v-if="!uploading" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadChecked" :disabled="checkedModels.size === 0">☁️ 上传选中</button>
+            <button v-if="uploading" class="btn btn-sm btn-danger" @click="stopUploading">⏹ 停止上传</button>
           </div>
-          <!-- 上传进度条 -->
           <div v-if="uploading" style="margin:8px 0;background:#e9ecef;border-radius:6px;height:16px;overflow:hidden">
             <div :style="{ width: uploadPct + '%', height:'100%', background:'linear-gradient(90deg,#4caf50,#8bc34a)', transition:'width .3s' }"></div>
           </div>
@@ -193,15 +196,17 @@
           <div style="overflow:auto;max-height:300px">
             <table class="stats-table">
               <thead>
-                <tr><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th></tr>
+                <tr><th style="width:30px">☐</th><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th><th>云端</th></tr>
               </thead>
               <tbody>
                 <tr v-for="m in completedModels" :key="m.name">
+                  <td><input type="checkbox" :checked="checkedModels.has(m.name)" :disabled="m.in_cloud" @change="toggleCheck(m.name)" /></td>
                   <td><code>{{ m.name }}</code></td>
                   <td>{{ m.stage }}</td>
                   <td>{{ m.steps }}</td>
                   <td>{{ m.size_mb }} MB</td>
                   <td>{{ m.mtime }}</td>
+                  <td><span v-if="m.in_cloud" style="color:var(--success)">☁️</span><span v-else style="color:#ccc">—</span></td>
                 </tr>
               </tbody>
             </table>
@@ -239,7 +244,7 @@
 
 <script>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { getTrainingStatus, startTraining, stopTraining, getTrainingModels, uploadModels, getUploadProgress } from '../api/index.js'
+import { getTrainingStatus, startTraining, stopTraining, getTrainingModels, uploadModels, uploadSelected, stopUpload, getUploadProgress } from '../api/index.js'
 
 export default {
   name: 'Training',
@@ -254,6 +259,8 @@ export default {
     const uploadPct = ref(0)
     const uploadCurrent = ref('0')
     const uploadTotal = ref('0')
+    const checkedModels = reactive(new Set())
+    let uploadPollTimer = null
     const toast = reactive({ show: false, msg: '', type: 'success', timer: null })
     const incompleteModels = computed(() => models.value.filter(m => (m.steps_num || 0) < 120000))
     const completedModels = computed(() => models.value.filter(m => (m.steps_num || 0) >= 120000))
@@ -403,40 +410,65 @@ export default {
       toast.timer = setTimeout(() => { toast.show = false }, 3000)
     }
 
-    async function uploadToCloud() {
+    function toggleCheck(name) {
+      if (checkedModels.has(name)) { checkedModels.delete(name) } else { checkedModels.add(name) }
+    }
+
+    function checkAllCompleted() {
+      const names = completedModels.value.filter(m => !m.in_cloud).map(m => m.name)
+      names.forEach(n => checkedModels.add(n))
+    }
+
+    function checkAllIncomplete() {
+      const names = incompleteModels.value.filter(m => !m.in_cloud).map(m => m.name)
+      names.forEach(n => checkedModels.add(n))
+    }
+
+    function uncheckAll() { checkedModels.clear() }
+
+    async function uploadChecked() {
+      const names = [...checkedModels].filter(n => {
+        const m = models.value.find(x => x.name === n)
+        return m && !m.in_cloud
+      })
+      if (names.length === 0) { showToast('请勾选未上传的模型', 'error'); return }
       uploading.value = true
-      uploadMsg.value = ''
       uploadPct.value = 0
       uploadCurrent.value = '0'
       uploadTotal.value = '0'
       try {
-        const res = await uploadModels()
+        const res = await uploadSelected(names)
         if (!res.success) { showToast(res.error || '启动失败', 'error'); uploading.value = false; return }
-        const poll = setInterval(async () => {
-          try {
-            const p = await getUploadProgress()
-            uploadPct.value = Math.min(100, p.total > 0 ? ((p.processed || p.uploaded + p.skipped) / p.total * 100) : 0)
-            uploadCurrent.value = (p.processed || p.uploaded + p.skipped).toString()
-            uploadTotal.value = p.total.toString()
-            if (p.done) {
-              clearInterval(poll)
-              uploading.value = false
-              const parts = []
-              if (p.uploaded > 0) parts.push(`新增 ${p.uploaded} 个`)
-              if (p.skipped > 0) parts.push(`跳过 ${p.skipped} 个`)
-              if (p.errors && p.errors.length > 0) parts.push(`错误 ${p.errors.length} 个`)
-              if (parts.length > 0) {
-                showToast('✅ ' + parts.join('，'))
-              } else {
-                showToast('✅ 上传完成')
-              }
-            }
-          } catch (_) {}
-        }, 500)
-      } catch (e) {
-        showToast(e.message || '网络错误', 'error')
-        uploading.value = false
-      }
+        startUploadPolling()
+      } catch (e) { showToast(e.message || '网络错误', 'error'); uploading.value = false }
+    }
+
+    async function stopUploading() {
+      try { await stopUpload(); showToast('上传已停止') } catch (e) { showToast(e.message || '停止失败', 'error') }
+    }
+
+    function startUploadPolling() {
+      if (uploadPollTimer) clearInterval(uploadPollTimer)
+      uploadPollTimer = setInterval(async () => {
+        try {
+          const p = await getUploadProgress()
+          uploadPct.value = Math.min(100, p.total > 0 ? ((p.processed || p.uploaded + p.skipped) / p.total * 100) : 0)
+          uploadCurrent.value = (p.processed || p.uploaded + p.skipped).toString()
+          uploadTotal.value = p.total.toString()
+          if (p.done) {
+            clearInterval(uploadPollTimer)
+            uploadPollTimer = null
+            uploading.value = false
+            checkedModels.clear()
+            await loadModels()
+            const parts = []
+            if (p.uploaded > 0) parts.push(`新增 ${p.uploaded} 个`)
+            if (p.skipped > 0) parts.push(`跳过 ${p.skipped} 个`)
+            if (p.errors && p.errors.length > 0) parts.push(`错误 ${p.errors.length} 个`)
+            showToast(parts.length > 0 ? '✅ ' + parts.join('，') : '✅ 上传完成')
+          }
+        } catch (_) {}
+      }, 500)
     }
 
     async function handleStop() {
@@ -552,7 +584,13 @@ export default {
       uploadPct,
       uploadCurrent,
       uploadTotal,
-      uploadToCloud,
+      checkedModels,
+      toggleCheck,
+      checkAllCompleted,
+      checkAllIncomplete,
+      uncheckAll,
+      uploadChecked,
+      stopUploading,
       elapsedTime,
       showNewTrainModal,
       showResumeModal,

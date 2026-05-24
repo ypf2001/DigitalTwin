@@ -4,11 +4,11 @@ import traceback
 
 from fastapi import APIRouter
 
-from models import SimulateRequest, SeasonRequest, ConfigSaveRequest, TrainRequest
+from models import SimulateRequest, SeasonRequest, ConfigSaveRequest, TrainRequest, UploadSelectedRequest
 from services import (
     get_weather_data, get_config_data, run_simulation, run_season_compare,
     save_config_section, get_training_status, start_training, stop_training,
-    get_model_info, upload_models_to_cloud, get_upload_progress,
+    get_model_info, upload_models_to_cloud, get_upload_progress, stop_upload, upload_selected_models,
 )
 
 router = APIRouter()
@@ -119,3 +119,24 @@ def upload_progress():
         return get_upload_progress()
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.post("/api/training/upload/selected")
+def upload_selected(req: UploadSelectedRequest):
+    """上传指定模型"""
+    try:
+        names = req.get("names", [])
+        if not names:
+            return {"success": False, "error": "未指定模型名称"}
+        return upload_selected_models(names)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/api/training/upload/stop")
+def upload_stop():
+    """停止上传"""
+    try:
+        return stop_upload()
+    except Exception as e:
+        return {"success": False, "error": str(e)}

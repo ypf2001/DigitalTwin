@@ -107,7 +107,7 @@ def query_all_models():
     return {"models": models, "models_dir": f"mysql://{CLOUD_CONFIG['host']}"}
 
 
-def upload_all_models(models_dir, completed_only=True, progress=None):
+def upload_all_models(models_dir, completed_only=False, progress=None):
     ensure_database()
 
     if not os.path.isdir(models_dir):
@@ -172,6 +172,12 @@ def upload_all_models(models_dir, completed_only=True, progress=None):
         progress["processed"] = 0
 
     for m in model_list:
+        if progress and progress.get("_cancel"):
+            if progress:
+                progress["done"] = True
+                progress["errors"].append("用户取消上传")
+            break
+
         if progress:
             progress["current"] = m["name"]
 

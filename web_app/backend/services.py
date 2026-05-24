@@ -462,7 +462,6 @@ def _training_worker(stage, timesteps, resume, load_model=""):
         _training_state["running"] = False
         _training_state["error"] = str(e)
         _training_state["target_steps"] = 0
-        _auto_upload_models()
         import traceback as tb
         tb.print_exc()
 
@@ -571,7 +570,6 @@ def stop_training():
     _training_state["pid"] = None
     _training_state["target_steps"] = 0
     _training_state["error"] = "用户手动停止"
-    _auto_upload_models()
 
     return {"success": True, "message": "训练已停止"}
 
@@ -626,50 +624,56 @@ def get_model_info():
                 "source": "local",
             }
 
-    # 2. 云端模型（本地没有的则补充）
+    # 2. 云端模型（本地没有的则补充，同时标记 in_cloud）
+    cloud_names = set()
     try:
         from cloud_storage import query_all_models
         cloud = query_all_models()
         for cm in cloud["models"]:
+            cloud_names.add(cm["name"])
             if cm["name"] not in models:
                 cm["source"] = "cloud"
+                cm["in_cloud"] = True
                 models[cm["name"]] = cm
         if cloud.get("models_dir"):
             source = cloud["models_dir"]
     except Exception:
         pass
 
+    for name, m in models.items():
+        m["in_cloud"] = name in cloud_names
+
     model_list = sorted(models.values(), key=lambda x: x["mtime"], reverse=True)
     return {"models": model_list, "models_dir": source}
 
 
+# 上传控制
+_upload_cancel = False
 
 
 def _auto_upload_models():
-    """训练结束后自动上传完成模型到云端（静默，失败不抛）"""
+    """训练完成后自动上传全部模型到云端（静默，失败不抛）"""
     try:
         from cloud_storage import upload_all_models
-        upload_all_models(_get_rl_models_dir(), completed_only=True)
+        upload_all_models(_get_rl_models_dir(), completed_only=False)
     except Exception:
         pass
-_upload_progress = {"done": True, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": []}
 
 
 def upload_models_to_cloud():
-    """将已完成模型异步上传到云端 MySQL，立即返回"""
-    global _upload_progress
-    _upload_progress = {"done": False, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": []}
-    models_dir = _get_rl_models_dir()
+    """异步上传全部已完成模型，立即返回"""
+    global _upload_progress, _upload_cancel
+    _upload_cancel = False
+    _upload_progress = {"done": False, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": [], "processed": 0}
 
     def _run():
-        global _upload_progress
         from cloud_storage import upload_all_models
         try:
-            result = upload_all_models(models_dir, completed_only=True, progress=_upload_progress)
-            _upload_progress["done"] = True
+            upload_all_models(_get_rl_models_dir(), completed_only=False, progress=_upload_progress)
         except Exception as e:
-            _upload_progress["done"] = True
             _upload_progress["errors"].append(str(e))
+        finally:
+            _upload_progress["done"] = True
 
     thread = threading.Thread(target=_run)
     thread.daemon = True
@@ -677,7 +681,73 @@ def upload_models_to_cloud():
     return {"success": True, "message": "上传任务已启动"}
 
 
+def upload_selected_models(names):
+    """异步上传指定名称的模型"""
+    global _upload_progress, _upload_cancel
+    _upload_cancel = False
+    _upload_progress = {"done": False, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": [], "processed": 0}
+    models_dir = _get_rl_models_dir()
+
+    def _run():
+        from cloud_storage import upload_model_by_name
+        total = len(names)
+        if _upload_progress:
+            _upload_progress["total"] = total
+        for i, name in enumerate(names):
+            if _upload_cancel:
+                break
+            if _upload_progress:
+                _upload_progress["current"] = name
+                _upload_progress["processed"] = i
+            try:
+                filepath = os.path.join(models_dir, name + ".zip")
+                if not os.path.isfile(filepath):
+                    raise FileNotFoundError("文件不存在")
+                with open(filepath, "rb") as f:
+                    data = f.read()
+                from cloud_storage import upload_model, ensure_database
+                ensure_database()
+                # 解析元数据
+                import re
+                stage_map = {"ini": "EMERGENCE", "dev": "VEGETATIVE", "mid": "BULKING", "late": "STARCH_ACCUMULATION"}
+                stage = ""; steps_label = ""; steps_num = 0
+                m1 = re.match(r"sac_(ini|dev|mid|late)_(\d+)_steps", name)
+                if m1:
+                    stage = stage_map.get(m1.group(1), m1.group(1))
+                    steps_num = int(m1.group(2))
+                    steps_label = f"{steps_num:,} 步"
+                elif re.match(r"sac_(ini|dev|mid|late)_final", name):
+                    m2 = re.match(r"sac_(ini|dev|mid|late)_final", name)
+                    stage = stage_map.get(m2.group(1), m2.group(1))
+                    steps_num = 999999; steps_label = "最终版"
+                elif name == "best_model":
+                    stage = "BULKING"; steps_label = "最佳模型"
+                size_mb = round(os.path.getsize(filepath) / (1024 * 1024), 2)
+                mtime = time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(filepath)))
+                result = upload_model(name, stage, steps_label, steps_num, size_mb, mtime, data)
+                if result.get("uploaded"):
+                    _upload_progress["uploaded"] += 1
+                else:
+                    _upload_progress["skipped"] += 1
+            except Exception as e:
+                _upload_progress["errors"].append(f"{name}: {str(e)[:80]}")
+            _upload_progress["processed"] = i + 1
+        _upload_progress["done"] = True
+
+    thread = threading.Thread(target=_run)
+    thread.daemon = True
+    thread.start()
+    return {"success": True, "message": f"正在上传 {len(names)} 个模型"}
+
+
+def stop_upload():
+    """取消正在进行的上传"""
+    global _upload_cancel, _upload_progress
+    _upload_cancel = True
+    _upload_progress["_cancel"] = True
+    return {"success": True, "message": "上传已停止"}
+
+
 def get_upload_progress():
-    """查询上传进度"""
     return _upload_progress
 

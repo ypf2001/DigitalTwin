@@ -24,3 +24,7 @@ class TrainRequest(BaseModel):
     timesteps: int = 120000
     resume: bool = False
     load_model: str = ""
+
+
+class UploadSelectedRequest(BaseModel):
+    names: list = []
