@@ -67,7 +67,20 @@
       <div v-if="message" class="success-box" style="margin-top:12px">{{ message }}</div>
     </div>
 
-    <!-- 训练进度 + 日志 -->
+    <!-- 训练日志 -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">📋 训练日志</div>
+      <div class="log-container" style="height:200px">
+        <div v-if="training.logLines && training.logLines.length > 0">
+          <div v-for="(line, i) in training.logLines" :key="i" class="log-line">{{ line }}</div>
+        </div>
+        <div v-else style="color:#666;padding:20px;text-align:center;font-size:12px">
+          {{ training.running ? '等待日志输出...' : '暂无日志' }}
+        </div>
+      </div>
+    </div>
+
+    <!-- 训练进度 -->
     <div class="card" style="margin-top:16px">
       <div class="card-title">
         <span>📈 训练进度</span>
@@ -77,59 +90,42 @@
         <span v-else-if="training.progress >= 100 && training.timesteps >= params.timesteps" class="completed-badge">✓ 完成</span>
         <span v-else class="idle-badge">○ 待机</span>
       </div>
-      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:stretch">
-        <!-- 左：日志终端 -->
-        <div style="flex:1;min-width:300px;display:flex;flex-direction:column">
-          <div style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text-secondary)">📋 训练日志</div>
-          <div class="log-container" style="flex:1;min-height:200px">
-            <div v-if="training.logLines && training.logLines.length > 0">
-              <div v-for="(line, i) in training.logLines" :key="i" class="log-line">{{ line }}</div>
-            </div>
-            <div v-else style="color:#666;padding:20px;text-align:center;font-size:12px">
-              {{ training.running ? '等待日志输出...' : '暂无日志' }}
-            </div>
-          </div>
-        </div>
-        <!-- 右：进度表 -->
-        <div style="flex:1;min-width:400px">
-          <table class="progress-table">
-            <thead>
-              <tr>
-                <th>阶段</th>
-                <th>目标步数</th>
-                <th>当前步数</th>
-                <th style="width:140px">进度</th>
-                <th>来源</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :class="{ 'running-row': training.running }">
-                <td><span class="stage-badge">{{ training.stage ? getStageName(training.stage) : '-' }}</span></td>
-                <td>{{ training.running && training.target_steps ? training.target_steps.toLocaleString() : params.timesteps.toLocaleString() }}</td>
-                <td>{{ training.timesteps ? training.timesteps.toLocaleString() : '0' }}</td>
-                <td>
-                  <div class="table-progress">
-                    <div class="table-progress-bar" :class="{ animating: training.running }"
-                         :style="{ width: Math.max(2, training.progress) + '%' }"></div>
-                    <span class="table-progress-text">{{ training.progress.toFixed(1) }}%</span>
-                  </div>
-                </td>
-                <td><span style="font-size:11px;color:var(--text-secondary)">💻 本地</span></td>
-                <td style="white-space:nowrap">
-                  <button v-if="training.running" class="btn btn-sm btn-danger" @click="handleStop" :disabled="loading">⏹ 停止</button>
-                  <button v-else-if="training.timesteps > 0 && training.progress < 100" class="btn btn-sm btn-success" @click="resumeTraining" :disabled="loading">🔄 继续</button>
-                  <button v-if="!training.running && training.timesteps > 0" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadChecked" :disabled="uploading">☁️ 上传</button>
-                  <button v-if="!training.running && training.timesteps > 0" class="btn btn-sm btn-danger" @click="clearTrainingProgress" style="margin-left:3px">🗑</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-if="training.start_time" class="time-info">
-            <span>⏱️ 已用时间: {{ formatDuration(elapsedTime) }}</span>
-            <span v-if="training.running">📅 开始于: {{ training.start_time }}</span>
-          </div>
-        </div>
+      <table class="progress-table">
+        <thead>
+          <tr>
+            <th>阶段</th>
+            <th>目标步数</th>
+            <th>当前步数</th>
+            <th style="width:140px">进度</th>
+            <th>来源</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr :class="{ 'running-row': training.running }">
+            <td><span class="stage-badge">{{ training.stage ? getStageName(training.stage) : '-' }}</span></td>
+            <td>{{ training.running && training.target_steps ? training.target_steps.toLocaleString() : params.timesteps.toLocaleString() }}</td>
+            <td>{{ training.timesteps ? training.timesteps.toLocaleString() : '0' }}</td>
+            <td>
+              <div class="table-progress">
+                <div class="table-progress-bar" :class="{ animating: training.running }"
+                     :style="{ width: Math.max(2, training.progress) + '%' }"></div>
+                <span class="table-progress-text">{{ training.progress.toFixed(1) }}%</span>
+              </div>
+            </td>
+            <td><span style="font-size:11px;color:var(--text-secondary)">💻 本地</span></td>
+            <td style="white-space:nowrap">
+              <button v-if="training.running" class="btn btn-sm btn-danger" @click="handleStop" :disabled="loading">⏹ 停止</button>
+              <button v-else-if="training.timesteps > 0 && training.progress < 100" class="btn btn-sm btn-success" @click="resumeTraining" :disabled="loading">🔄 继续</button>
+              <button v-if="!training.running && training.timesteps > 0" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadChecked" :disabled="uploading">☁️ 上传</button>
+              <button v-if="!training.running && training.timesteps > 0" class="btn btn-sm btn-danger" @click="clearTrainingProgress" style="margin-left:3px">🗑</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-if="training.start_time" class="time-info">
+        <span>⏱️ 已用时间: {{ formatDuration(elapsedTime) }}</span>
+        <span v-if="training.running">📅 开始于: {{ training.start_time }}</span>
       </div>
     </div>
 
