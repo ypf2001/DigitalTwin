@@ -96,7 +96,7 @@
             <th>目标步数</th>
             <th>当前步数</th>
             <th style="width:180px">进度</th>
-            <th>状态</th>
+            <th>来源</th>
             <th style="width:120px">操作</th>
           </tr>
         </thead>
@@ -113,20 +113,16 @@
                 <span class="table-progress-text">{{ training.progress.toFixed(1) }}%</span>
               </div>
             </td>
-            <td>
-              <span v-if="training.running" class="status-running">● 运行中</span>
-              <span v-else-if="training.progress >= 100 && training.timesteps >= (training.running ? training.target_steps : params.timesteps)" class="status-done">✓ 完成</span>
-              <span v-else-if="training.timesteps > 0" class="status-stopped">⏹ 已中断</span>
-              <span v-else class="status-idle">○ 待机</span>
-            </td>
-            <td>
+            <td><span style="font-size:11px;color:var(--text-secondary)">💻 本地</span></td>
+            <td style="white-space:nowrap">
               <button v-if="training.running" class="btn btn-sm btn-danger" @click="handleStop" :disabled="loading">
                 ⏹ 停止
               </button>
               <button v-else-if="training.timesteps > 0 && training.progress < 100" class="btn btn-sm btn-success" @click="resumeTraining" :disabled="loading">
                 🔄 继续
               </button>
-              <span v-else class="status-done">✓ 完成</span>
+              <button v-if="!training.running && training.timesteps > 0" class="btn btn-sm btn-danger" @click="clearTrainingProgress" style="margin-left:4px">🗑 清除</button>
+              <span v-else-if="!training.timesteps">○ 待机</span>
             </td>
           </tr>
           <!-- 空状态 -->
@@ -253,7 +249,7 @@
 
 <script>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { getTrainingStatus, startTraining, stopTraining, getTrainingModels, uploadModels, uploadSelected, stopUpload, getUploadProgress, deleteModel } from '../api/index.js'
+import { getTrainingStatus, startTraining, stopTraining, getTrainingModels, uploadModels, uploadSelected, stopUpload, getUploadProgress, deleteModel, clearProgress } from '../api/index.js'
 
 export default {
   name: 'Training',
@@ -573,6 +569,25 @@ export default {
       } catch (e) { showToast(e.message || '网络错误', 'error') }
     }
 
+    async function clearTrainingProgress() {
+      if (!confirm('确定清除训练进度记录吗？（本地 + 云端）')) return
+      try {
+        const res = await clearProgress()
+        if (res.success) {
+          training.timesteps = 0
+          training.progress = 0
+          training.stage = null
+          training.start_time = null
+          training.target_steps = 0
+          training.error = null
+          training.running = false
+          showToast('✅ 训练记录已清除')
+        } else {
+          showToast(res.error || '清除失败', 'error')
+        }
+      } catch (e) { showToast(e.message || '网络错误', 'error') }
+    }
+
     onMounted(async () => {
       await refreshStatus()
       await loadModels()
@@ -622,6 +637,7 @@ export default {
       handleStop,
       selectModel,
       deleteOne,
+      clearTrainingProgress,
       refreshStatus,
       getStageName,
       formatDuration,

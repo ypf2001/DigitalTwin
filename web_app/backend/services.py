@@ -821,3 +821,27 @@ def delete_model(name: str):
         "errors": errors,
     }
 
+
+def clear_training_progress():
+    """清除训练进度（本地 + 云端）"""
+    global _training_state
+    _training_state.update({
+        "running": False, "stage": None, "timesteps": 0,
+        "target_steps": 0, "progress": 0, "start_time": None,
+        "log_lines": [], "error": None,
+    })
+    # 清除云端
+    try:
+        from cloud_storage import sync_training_progress
+        sync_training_progress(False, timesteps=0, target_steps=120000, progress=0)
+    except Exception:
+        pass
+    # 清除本地日志
+    log_file = os.path.join(_get_project_root(), "rl_logs", "train_output.log")
+    try:
+        if os.path.exists(log_file):
+            os.remove(log_file)
+    except Exception:
+        pass
+    return {"success": True, "message": "训练记录已清除"}
+
