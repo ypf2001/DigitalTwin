@@ -16,7 +16,7 @@
         <button class="hamburger" @click="sidebarOpen = !sidebarOpen">☰</button>
         <h1>{{ pageTitle }}</h1>
       </header>
-      <div class="page-content"><router-view /></div>
+      <div class="page-content"><router-view v-slot="{ Component }"><keep-alive :exclude="['Dashboard']"><component :is="Component" /></keep-alive></router-view></div>
     </div>
     <nav class="mobile-nav">
       <div class="mobile-nav-inner">

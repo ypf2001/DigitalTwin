@@ -618,5 +618,6 @@ def get_model_info():
         })
 
     models.sort(key=lambda x: x["mtime"], reverse=True)
+    models = models[:10]
     return {"models": models, "models_dir": models_dir}
 
