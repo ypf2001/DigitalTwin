@@ -150,8 +150,8 @@ if __name__ == "__main__":
                 tmp = SAC.load(final_path if os.path.exists(final_path + ".zip") else
                               os.path.join(args.save_dir,
                                            sorted([f for f in os.listdir(args.save_dir)
-                                                   if f.startswith(f"sac_{model_tag}_") and f.endswith(".zip")],
-                                                  key=lambda x: int(x.split("_")[-1].replace(".zip", "").replace("steps", "")))[-1].replace(".zip", "")))
+                                                   if f.startswith(f"sac_{model_tag}_") and f.endswith(".zip") and "_final" not in f],
+                                                  key=lambda x: int(x.split("_")[-2]))[-1].replace(".zip", "")))
                 if tmp.num_timesteps >= args.timesteps:
                     already_completed = True
                     logger.info(f"检测到上次训练已完成 ({tmp.num_timesteps} >= {args.timesteps})，将从头开始新训练")
@@ -178,8 +178,8 @@ if __name__ == "__main__":
                 else:
                     ckpts = sorted(
                         [f for f in os.listdir(args.save_dir)
-                         if f.startswith(f"sac_{model_tag}_") and f.endswith(".zip")],
-                        key=lambda x: int(x.split("_")[-1].replace(".zip", "").replace("steps", "")),
+                         if f.startswith(f"sac_{model_tag}_") and f.endswith(".zip") and "_final" not in f],
+                        key=lambda x: int(x.split("_")[-2]),
                     )
                     load_path = os.path.join(args.save_dir, ckpts[-1].replace(".zip", ""))
                 model = SAC.load(load_path)
