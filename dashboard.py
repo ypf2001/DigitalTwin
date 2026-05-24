@@ -16,6 +16,8 @@ import argparse
 import logging
 import numpy as np
 
+from config_loader import load_config
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 _error_fh = logging.FileHandler(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rl_logs', 'error.log'), encoding='utf-8')
@@ -142,10 +144,14 @@ def main(interval: float = 2.0):
         logger.info(f"  评估次数: {n_evals}    文件更新: {mtime_str}    刷新间隔: {interval}s")
         logger.info("-" * 62)
 
-        # 训练进度
-        progress_pct = timesteps[-1] / 200000 * 100 if len(timesteps) > 0 else 0
+        # 训练进度（从配置读取总步数，避免硬编码不一致）
+        try:
+            total_steps = load_config().sac()["total_timesteps"]
+        except Exception:
+            total_steps = 120000  # fallback
+        progress_pct = latest_timestep / total_steps * 100 if total_steps > 0 else 0
         logger.info(f"\n  📊 训练进度")
-        logger.info(f"     当前步数: {latest_timestep:,} / 200,000 ({progress_pct:.1f}%)")
+        logger.info(f"     当前步数: {latest_timestep:,} / {total_steps:,} ({progress_pct:.1f}%)")
 
         # 奖励指标
         logger.info(f"\n  🎯 奖励指标")
