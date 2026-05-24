@@ -434,6 +434,7 @@ def _training_worker(stage, timesteps, resume):
                 _training_state["log_lines"] = episode_rewards[-50:]
                 _training_state["running"] = False
                 _training_state["pid"] = None
+                _training_state["target_steps"] = 0
                 if ret != 0 and ret is not None:
                     _training_state["error"] = f"训练进程退出 (code: {ret})"
                 break
@@ -457,6 +458,7 @@ def _training_worker(stage, timesteps, resume):
     except Exception as e:
         _training_state["running"] = False
         _training_state["error"] = str(e)
+        _training_state["target_steps"] = 0
         import traceback as tb
         tb.print_exc()
 
@@ -556,6 +558,7 @@ def stop_training():
 
     _training_state["running"] = False
     _training_state["pid"] = None
+    _training_state["target_steps"] = 0
     _training_state["error"] = "用户手动停止"
 
     return {"success": True, "message": "训练已停止"}

@@ -22,7 +22,7 @@
         <h3>⚠️ 继续训练</h3>
         <p>确定要继续当前训练吗？</p>
         <p class="modal-info">
-          当前进度：{{ training.timesteps.toLocaleString() }} / {{ (training.target_steps || params.timesteps).toLocaleString() }} 步
+          当前进度：{{ training.timesteps.toLocaleString() }} / {{ params.timesteps.toLocaleString() }} 步
         </p>
         <div class="modal-buttons">
           <button class="btn btn-primary" @click="confirmResume">确认继续</button>
@@ -106,7 +106,7 @@
           <!-- 当前训练进度 -->
           <tr v-if="training.timesteps > 0 || training.running" :class="{ 'running-row': training.running }">
             <td><span class="stage-badge">{{ training.stage ? getStageName(training.stage) : '-' }}</span></td>
-            <td>{{ training.target_steps ? training.target_steps.toLocaleString() : '120,000' }}</td>
+            <td>{{ training.running && training.target_steps ? training.target_steps.toLocaleString() : params.timesteps.toLocaleString() }}</td>
             <td>{{ training.timesteps ? training.timesteps.toLocaleString() : '0' }}</td>
             <td>
               <div class="table-progress">
@@ -117,7 +117,7 @@
             </td>
             <td>
               <span v-if="training.running" class="status-running">● 运行中</span>
-              <span v-else-if="training.progress >= 100 && training.timesteps >= training.target_steps" class="status-done">✓ 完成</span>
+              <span v-else-if="training.progress >= 100 && training.timesteps >= (training.running ? training.target_steps : params.timesteps)" class="status-done">✓ 完成</span>
               <span v-else-if="training.timesteps > 0" class="status-stopped">⏹ 已中断</span>
               <span v-else class="status-idle">○ 待机</span>
             </td>
@@ -328,7 +328,7 @@ export default {
         // 使用 resume 继续训练
         const res = await startTraining({
           stage: training.stage || params.stage,
-          timesteps: training.target_steps || params.timesteps,
+          timesteps: params.timesteps,
           resume: true,
         })
         if (res.success) {
