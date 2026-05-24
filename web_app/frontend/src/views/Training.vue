@@ -84,8 +84,7 @@
         <span v-if="training.running" class="training-badge">
           <span class="pulse-dot"></span> 训练中
         </span>
-        <span v-else-if="training.progress >= 100 && training.timesteps >= training.target_steps" class="completed-badge">✓ 完成</span>
-        <span v-else-if="training.timesteps > 0" class="stopped-badge">⏹ 已中断</span>
+        <span v-else-if="training.progress >= 100 && training.timesteps >= (training.running ? training.target_steps : params.timesteps)" class="completed-badge">✓ 完成</span>
         <span v-else class="idle-badge">○ 待机</span>
       </div>
 
