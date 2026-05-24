@@ -577,22 +577,20 @@ def stop_training():
 
 
 def get_model_info():
-    """获取模型列表 — 优先从云端 MySQL 读取，失败则回退本地"""
-    try:
-        from cloud_storage import query_all_models
-        return query_all_models()
-    except Exception:
-        import re
-        models = []
-        models_dir = _get_rl_models_dir()
-        stage_names = {
-            "ini": "EMERGENCE (出苗期)",
-            "dev": "VEGETATIVE/TUBER_INIT (营养/块茎形成)",
-            "mid": "BULKING (块茎膨大期)",
-            "late": "STARCH_ACCUMULATION/MATURATION (淀粉积累/成熟)",
-        }
-        if not os.path.isdir(models_dir):
-            return {"models": [], "models_dir": models_dir}
+    """获取模型列表 — 本地+云端合并，本地优先（反映最新训练状态）"""
+    import re
+    stage_names = {
+        "ini": "EMERGENCE (出苗期)",
+        "dev": "VEGETATIVE/TUBER_INIT (营养/块茎形成)",
+        "mid": "BULKING (块茎膨大期)",
+        "late": "STARCH_ACCUMULATION/MATURATION (淀粉积累/成熟)",
+    }
+    models_dir = _get_rl_models_dir()
+    models = {}
+    source = models_dir
+
+    # 1. 本地模型（优先，反映当前状态）
+    if os.path.isdir(models_dir):
         for fname in sorted(os.listdir(models_dir)):
             if not fname.endswith(".zip"):
                 continue
@@ -618,16 +616,33 @@ def get_model_info():
             if stage_short is None:
                 continue
             stage_name = stage_names.get(stage_short, stage_short)
-            models.append({
+            models[fname.replace(".zip", "")] = {
                 "name": fname.replace(".zip", ""),
                 "stage": stage_name,
                 "steps": steps_label,
                 "steps_num": steps_num,
                 "size_mb": round(size_mb, 2),
                 "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime)),
-            })
-        models.sort(key=lambda x: x["mtime"], reverse=True)
-        return {"models": models, "models_dir": models_dir}
+                "source": "local",
+            }
+
+    # 2. 云端模型（本地没有的则补充）
+    try:
+        from cloud_storage import query_all_models
+        cloud = query_all_models()
+        for cm in cloud["models"]:
+            if cm["name"] not in models:
+                cm["source"] = "cloud"
+                models[cm["name"]] = cm
+        if cloud.get("models_dir"):
+            source = cloud["models_dir"]
+    except Exception:
+        pass
+
+    model_list = sorted(models.values(), key=lambda x: x["mtime"], reverse=True)
+    return {"models": model_list, "models_dir": source}
+
+
 
 
 def _auto_upload_models():
