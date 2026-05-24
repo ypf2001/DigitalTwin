@@ -155,13 +155,14 @@
       </div>
       <div v-else style="overflow-x:auto">
         <table class="stats-table">
-          <thead>
-            <tr><th>模型名称</th><th>阶段</th><th>大小</th><th>更新时间</th><th>操作</th></tr>
+            <thead>
+            <tr><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th><th>操作</th></tr>
           </thead>
           <tbody>
             <tr v-for="m in models" :key="m.name">
               <td><code>{{ m.name }}</code></td>
               <td>{{ m.stage }}</td>
+              <td>{{ m.steps }}</td>
               <td>{{ m.size_mb }} MB</td>
               <td>{{ m.mtime }}</td>
               <td><button class="btn btn-sm" @click="selectModel(m)">选择</button></td>

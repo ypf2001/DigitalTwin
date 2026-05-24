@@ -565,7 +565,8 @@ def stop_training():
 
 
 def get_model_info():
-    """获取已有模型信息"""
+    """获取已有模型信息 — 扫描 rl_models 下所有 zip"""
+    import re
     models = []
     models_dir = _get_rl_models_dir()
 
@@ -576,17 +577,46 @@ def get_model_info():
         "late": "STARCH_ACCUMULATION/MATURATION (淀粉积累/成熟)",
     }
 
-    for short, full_name in stage_names.items():
-        model_path = os.path.join(models_dir, f"sac_{short}_final.zip")
-        if os.path.exists(model_path):
-            mtime = os.path.getmtime(model_path)
-            size_mb = os.path.getsize(model_path) / (1024 * 1024)
-            models.append({
-                "name": f"sac_{short}_final",
-                "stage": full_name,
-                "size_mb": round(size_mb, 2),
-                "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime)),
-            })
+    if not os.path.isdir(models_dir):
+        return {"models": [], "models_dir": models_dir}
 
+    for fname in sorted(os.listdir(models_dir)):
+        if not fname.endswith(".zip"):
+            continue
+
+        filepath = os.path.join(models_dir, fname)
+        mtime = os.path.getmtime(filepath)
+        size_mb = os.path.getsize(filepath) / (1024 * 1024)
+
+        # 解析文件名: sac_{stage}_{steps}_steps.zip 或 sac_{stage}_final.zip 或 best_model.zip
+        stage_short = None
+        steps_label = ""
+
+        m = re.match(r"sac_(ini|dev|mid|late)_(\d+)_steps\.zip", fname)
+        if m:
+            stage_short = m.group(1)
+            steps = int(m.group(2))
+            steps_label = f"{steps:,} 步"
+        elif re.match(r"sac_(ini|dev|mid|late)_final\.zip", fname):
+            m2 = re.match(r"sac_(ini|dev|mid|late)_final\.zip", fname)
+            stage_short = m2.group(1)
+            steps_label = "最终版"
+        elif fname == "best_model.zip":
+            stage_short = "mid"
+            steps_label = "最佳模型"
+
+        if stage_short is None:
+            continue
+
+        stage_name = stage_names.get(stage_short, stage_short)
+        models.append({
+            "name": fname.replace(".zip", ""),
+            "stage": stage_name,
+            "steps": steps_label,
+            "size_mb": round(size_mb, 2),
+            "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime)),
+        })
+
+    models.sort(key=lambda x: x["mtime"], reverse=True)
     return {"models": models, "models_dir": models_dir}
 
