@@ -77,67 +77,69 @@
       <div v-if="message" class="success-box" style="margin-top:12px">{{ message }}</div>
     </div>
 
-    <!-- 训练进度列表 -->
+    <!-- 训练进度 + 日志 -->
     <div class="card" style="margin-top:16px">
       <div class="card-title">
         <span>📈 训练进度</span>
         <span v-if="training.running" class="training-badge">
           <span class="pulse-dot"></span> 训练中
         </span>
-        <span v-else-if="training.progress >= 100 && training.timesteps >= (training.running ? training.target_steps : params.timesteps)" class="completed-badge">✓ 完成</span>
+        <span v-else-if="training.progress >= 100 && training.timesteps >= params.timesteps" class="completed-badge">✓ 完成</span>
         <span v-else class="idle-badge">○ 待机</span>
       </div>
-
-      <!-- 进度表格 - 多阶段显示 -->
-      <table class="progress-table">
-        <thead>
-          <tr>
-            <th>阶段</th>
-            <th>目标步数</th>
-            <th>当前步数</th>
-            <th style="width:180px">进度</th>
-            <th>来源</th>
-            <th style="width:120px">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <!-- 当前训练进度 -->
-          <tr v-if="training.timesteps > 0 || training.running" :class="{ 'running-row': training.running }">
-            <td><span class="stage-badge">{{ training.stage ? getStageName(training.stage) : '-' }}</span></td>
-            <td>{{ training.running && training.target_steps ? training.target_steps.toLocaleString() : params.timesteps.toLocaleString() }}</td>
-            <td>{{ training.timesteps ? training.timesteps.toLocaleString() : '0' }}</td>
-            <td>
-              <div class="table-progress">
-                <div class="table-progress-bar" :class="{ animating: training.running }"
-                     :style="{ width: Math.max(2, training.progress) + '%' }"></div>
-                <span class="table-progress-text">{{ training.progress.toFixed(1) }}%</span>
-              </div>
-            </td>
-            <td><span style="font-size:11px;color:var(--text-secondary)">💻 本地</span></td>
-            <td style="white-space:nowrap">
-              <button v-if="training.running" class="btn btn-sm btn-danger" @click="handleStop" :disabled="loading">
-                ⏹ 停止
-              </button>
-              <button v-else-if="training.timesteps > 0 && training.progress < 100" class="btn btn-sm btn-success" @click="resumeTraining" :disabled="loading">
-                🔄 继续
-              </button>
-              <button v-if="!training.running && training.timesteps > 0" class="btn btn-sm btn-danger" @click="clearTrainingProgress" style="margin-left:4px">🗑 清除</button>
-              <span v-else-if="!training.timesteps">○ 待机</span>
-            </td>
-          </tr>
-          <!-- 空状态 -->
-          <tr v-else>
-            <td colspan="6" style="text-align:center;color:var(--text-secondary);padding:24px">
-              暂无训练记录，点击上方"开始新训练"启动
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <!-- 时间信息 -->
-      <div v-if="training.start_time" class="time-info">
-        <span>⏱️ 已用时间: {{ formatDuration(elapsedTime) }}</span>
-        <span v-if="training.running">📅 开始于: {{ training.start_time }}</span>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <!-- 左：进度表 -->
+        <div style="flex:1;min-width:400px">
+          <table class="progress-table">
+            <thead>
+              <tr>
+                <th>阶段</th>
+                <th>目标步数</th>
+                <th>当前步数</th>
+                <th style="width:140px">进度</th>
+                <th>来源</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :class="{ 'running-row': training.running }">
+                <td><span class="stage-badge">{{ training.stage ? getStageName(training.stage) : '-' }}</span></td>
+                <td>{{ training.running && training.target_steps ? training.target_steps.toLocaleString() : params.timesteps.toLocaleString() }}</td>
+                <td>{{ training.timesteps ? training.timesteps.toLocaleString() : '0' }}</td>
+                <td>
+                  <div class="table-progress">
+                    <div class="table-progress-bar" :class="{ animating: training.running }"
+                         :style="{ width: Math.max(2, training.progress) + '%' }"></div>
+                    <span class="table-progress-text">{{ training.progress.toFixed(1) }}%</span>
+                  </div>
+                </td>
+                <td><span style="font-size:11px;color:var(--text-secondary)">💻 本地</span></td>
+                <td style="white-space:nowrap">
+                  <button v-if="training.running" class="btn btn-sm btn-danger" @click="handleStop" :disabled="loading">⏹ 停止</button>
+                  <button v-else-if="training.timesteps > 0 && training.progress < 100" class="btn btn-sm btn-success" @click="resumeTraining" :disabled="loading">🔄 继续</button>
+                  <button v-if="!training.running && training.timesteps > 0" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadChecked" :disabled="uploading">☁️ 上传</button>
+                  <button v-if="!training.running && training.timesteps > 0" class="btn btn-sm btn-danger" @click="clearTrainingProgress" style="margin-left:3px">🗑</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="training.start_time" class="time-info">
+            <span>⏱️ 已用时间: {{ formatDuration(elapsedTime) }}</span>
+            <span v-if="training.running">📅 开始于: {{ training.start_time }}</span>
+          </div>
+        </div>
+        <!-- 右：日志终端 -->
+        <div style="flex:1;min-width:300px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text-secondary)">📋 训练日志</div>
+          <div class="log-container" style="height:240px">
+            <div v-if="training.logLines && training.logLines.length > 0">
+              <div v-for="(line, i) in training.logLines" :key="i" class="log-line">{{ line }}</div>
+            </div>
+            <div v-else style="color:#666;padding:20px;text-align:center;font-size:12px">
+              {{ training.running ? '等待日志输出...' : '暂无日志' }}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -218,14 +220,6 @@
           </div>
         </div>
       </template>
-    </div>
-
-    <!-- 训练日志 -->
-    <div v-if="training.logLines && training.logLines.length > 0" class="card" style="margin-top:16px">
-      <div class="card-title">训练日志</div>
-      <div class="log-container">
-        <div v-for="(line, i) in training.logLines" :key="i" class="log-line">{{ line }}</div>
-      </div>
     </div>
 
     <!-- SAC 参数参考 -->
@@ -432,6 +426,10 @@ export default {
     function uncheckAll() { checkedModels.clear() }
 
     async function uploadChecked() {
+      // 没勾选时自动全选已完成模型中未上传的
+      if (checkedModels.size === 0) {
+        checkAllCompleted()
+      }
       const names = [...checkedModels].filter(n => {
         const m = models.value.find(x => x.name === n)
         return m && !m.in_cloud
