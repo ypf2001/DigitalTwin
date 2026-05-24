@@ -22,7 +22,7 @@
         <h3>⚠️ 继续训练</h3>
         <p>确定要继续当前训练吗？</p>
         <p class="modal-info">
-          当前进度：{{ training.timesteps.toLocaleString() }} / {{ training.target_steps.toLocaleString() }} 步
+          当前进度：{{ training.timesteps.toLocaleString() }} / {{ (training.target_steps || params.timesteps).toLocaleString() }} 步
         </p>
         <div class="modal-buttons">
           <button class="btn btn-primary" @click="confirmResume">确认继续</button>
