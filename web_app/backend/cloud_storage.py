@@ -1,4 +1,4 @@
-"""云端 MySQL 存储 — 模型文件 + 元数据上传，自动去重"""
+"""云端 MySQL 存储 — 模型文件 + 元数据上传，自动去重，查询"""
 import os
 import time
 import pymysql
@@ -82,6 +82,31 @@ def upload_model(name, stage, steps, steps_num, size_mb, mtime, file_data):
         conn.close()
 
 
+def query_all_models():
+    """从 MySQL 读取所有模型记录，返回与 get_model_info 相同格式"""
+    ensure_database()
+    conn = _get_db_conn()
+    models = []
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT name, stage, steps, steps_num, size_mb, mtime, uploaded_at "
+                "FROM trained_models ORDER BY uploaded_at DESC"
+            )
+            for row in cur.fetchall():
+                models.append({
+                    "name": row[0],
+                    "stage": row[1],
+                    "steps": row[2],
+                    "steps_num": row[3] or 0,
+                    "size_mb": float(row[4]) if row[4] else 0,
+                    "mtime": str(row[6] or row[5])[:16],
+                })
+    finally:
+        conn.close()
+    return {"models": models, "models_dir": f"mysql://{CLOUD_CONFIG['host']}"}
+
+
 def upload_all_models(models_dir, completed_only=True, progress=None):
     ensure_database()
 
@@ -91,7 +116,6 @@ def upload_all_models(models_dir, completed_only=True, progress=None):
             progress["errors"].append("目录不存在")
         return
 
-    # 收集所有模型元数据，先过滤
     import re
     stage_map = {"ini": "EMERGENCE", "dev": "VEGETATIVE/TUBER_INIT",
                  "mid": "BULKING", "late": "STARCH_ACCUMULATION/MATURATION"}
@@ -101,6 +125,8 @@ def upload_all_models(models_dir, completed_only=True, progress=None):
         if not fname.endswith(".zip"):
             continue
         filepath = os.path.join(models_dir, fname)
+        if not os.path.isfile(filepath):
+            continue
         stat = os.stat(filepath)
         name = fname.replace(".zip", "")
         size_mb = round(stat.st_size / (1024 * 1024), 2)
@@ -125,7 +151,6 @@ def upload_all_models(models_dir, completed_only=True, progress=None):
 
         if not stage:
             continue
-
         if completed_only and steps_num < 120000:
             continue
 
@@ -136,21 +161,23 @@ def upload_all_models(models_dir, completed_only=True, progress=None):
         })
 
     total = len(model_list)
-    uploaded = 0
-    skipped = 0
-    errors = []
+    uploaded = skipped = errors_count = 0
+    error_list = []
 
     if progress:
         progress["total"] = total
         progress["uploaded"] = 0
         progress["skipped"] = 0
         progress["errors"] = []
+        progress["processed"] = 0
 
-    for i, m in enumerate(model_list):
+    for m in model_list:
         if progress:
             progress["current"] = m["name"]
 
         try:
+            if not os.path.isfile(m["filepath"]):
+                raise FileNotFoundError("文件不存在")
             with open(m["filepath"], "rb") as f:
                 file_data = f.read()
             result = upload_model(
@@ -166,9 +193,14 @@ def upload_all_models(models_dir, completed_only=True, progress=None):
                 if progress:
                     progress["skipped"] = skipped
         except Exception as e:
-            errors.append(f"{m['name']}: {e}")
+            errors_count += 1
+            error_list.append(f"{m['name']}: {str(e)[:80]}")
             if progress:
-                progress["errors"] = errors
+                progress["errors"] = error_list
+                progress["skipped"] = uploaded + skipped + errors_count
+
+        if progress:
+            progress["processed"] = uploaded + skipped + errors_count
 
     if progress:
         progress["done"] = True

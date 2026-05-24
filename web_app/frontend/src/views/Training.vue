@@ -415,8 +415,8 @@ export default {
         const poll = setInterval(async () => {
           try {
             const p = await getUploadProgress()
-            uploadPct.value = Math.min(100, p.total > 0 ? ((p.uploaded + p.skipped) / p.total * 100) : 0)
-            uploadCurrent.value = (p.uploaded + p.skipped).toString()
+            uploadPct.value = Math.min(100, p.total > 0 ? ((p.processed || p.uploaded + p.skipped) / p.total * 100) : 0)
+            uploadCurrent.value = (p.processed || p.uploaded + p.skipped).toString()
             uploadTotal.value = p.total.toString()
             if (p.done) {
               clearInterval(poll)

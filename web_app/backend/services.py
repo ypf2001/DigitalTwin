@@ -439,6 +439,7 @@ def _training_worker(stage, timesteps, resume, load_model=""):
                 _training_state["target_steps"] = 0
                 if ret != 0 and ret is not None:
                     _training_state["error"] = f"训练进程退出 (code: {ret})"
+                _auto_upload_models()
                 break
 
             # 每秒读取一次日志
@@ -461,6 +462,7 @@ def _training_worker(stage, timesteps, resume, load_model=""):
         _training_state["running"] = False
         _training_state["error"] = str(e)
         _training_state["target_steps"] = 0
+        _auto_upload_models()
         import traceback as tb
         tb.print_exc()
 
@@ -569,72 +571,72 @@ def stop_training():
     _training_state["pid"] = None
     _training_state["target_steps"] = 0
     _training_state["error"] = "用户手动停止"
+    _auto_upload_models()
 
     return {"success": True, "message": "训练已停止"}
 
 
 def get_model_info():
-    """获取已有模型信息 — 扫描 rl_models 下所有 zip"""
-    import re
-    models = []
-    models_dir = _get_rl_models_dir()
-
-    stage_names = {
-        "ini": "EMERGENCE (出苗期)",
-        "dev": "VEGETATIVE/TUBER_INIT (营养/块茎形成)",
-        "mid": "BULKING (块茎膨大期)",
-        "late": "STARCH_ACCUMULATION/MATURATION (淀粉积累/成熟)",
-    }
-
-    if not os.path.isdir(models_dir):
-        return {"models": [], "models_dir": models_dir}
-
-    for fname in sorted(os.listdir(models_dir)):
-        if not fname.endswith(".zip"):
-            continue
-
-        filepath = os.path.join(models_dir, fname)
-        mtime = os.path.getmtime(filepath)
-        size_mb = os.path.getsize(filepath) / (1024 * 1024)
-
-        # 解析文件名: sac_{stage}_{steps}_steps.zip 或 sac_{stage}_final.zip 或 best_model.zip
-        stage_short = None
-        steps_label = ""
-
-        steps_num = 0
-
-        m = re.match(r"sac_(ini|dev|mid|late)_(\d+)_steps\.zip", fname)
-        if m:
-            stage_short = m.group(1)
-            steps_num = int(m.group(2))
-            steps_label = f"{steps_num:,} 步"
-        elif re.match(r"sac_(ini|dev|mid|late)_final\.zip", fname):
-            m2 = re.match(r"sac_(ini|dev|mid|late)_final\.zip", fname)
-            stage_short = m2.group(1)
-            steps_num = 999999  # 最终版视作已完成
-            steps_label = "最终版"
-        elif fname == "best_model.zip":
-            stage_short = "mid"
-            steps_label = "最佳模型"
-
-        if stage_short is None:
-            continue
-
-        stage_name = stage_names.get(stage_short, stage_short)
-        models.append({
-            "name": fname.replace(".zip", ""),
-            "stage": stage_name,
-            "steps": steps_label,
-            "steps_num": steps_num,
-            "size_mb": round(size_mb, 2),
-            "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime)),
-        })
-
-    models.sort(key=lambda x: x["mtime"], reverse=True)
-    return {"models": models, "models_dir": models_dir}
+    """获取模型列表 — 优先从云端 MySQL 读取，失败则回退本地"""
+    try:
+        from cloud_storage import query_all_models
+        return query_all_models()
+    except Exception:
+        import re
+        models = []
+        models_dir = _get_rl_models_dir()
+        stage_names = {
+            "ini": "EMERGENCE (出苗期)",
+            "dev": "VEGETATIVE/TUBER_INIT (营养/块茎形成)",
+            "mid": "BULKING (块茎膨大期)",
+            "late": "STARCH_ACCUMULATION/MATURATION (淀粉积累/成熟)",
+        }
+        if not os.path.isdir(models_dir):
+            return {"models": [], "models_dir": models_dir}
+        for fname in sorted(os.listdir(models_dir)):
+            if not fname.endswith(".zip"):
+                continue
+            filepath = os.path.join(models_dir, fname)
+            mtime = os.path.getmtime(filepath)
+            size_mb = os.path.getsize(filepath) / (1024 * 1024)
+            stage_short = None
+            steps_label = ""
+            steps_num = 0
+            m = re.match(r"sac_(ini|dev|mid|late)_(\d+)_steps\.zip", fname)
+            if m:
+                stage_short = m.group(1)
+                steps_num = int(m.group(2))
+                steps_label = f"{steps_num:,} 步"
+            elif re.match(r"sac_(ini|dev|mid|late)_final\.zip", fname):
+                m2 = re.match(r"sac_(ini|dev|mid|late)_final\.zip", fname)
+                stage_short = m2.group(1)
+                steps_num = 999999
+                steps_label = "最终版"
+            elif fname == "best_model.zip":
+                stage_short = "mid"
+                steps_label = "最佳模型"
+            if stage_short is None:
+                continue
+            stage_name = stage_names.get(stage_short, stage_short)
+            models.append({
+                "name": fname.replace(".zip", ""),
+                "stage": stage_name,
+                "steps": steps_label,
+                "steps_num": steps_num,
+                "size_mb": round(size_mb, 2),
+                "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime)),
+            })
+        models.sort(key=lambda x: x["mtime"], reverse=True)
+        return {"models": models, "models_dir": models_dir}
 
 
-# 上传进度状态
+def _auto_upload_models():
+    """训练结束后自动上传完成模型到云端（静默，失败不抛）"""
+    try:
+        from cloud_storage import upload_all_models
+        upload_all_models(_get_rl_models_dir(), completed_only=True)
+    except Exception:
+        pass
 _upload_progress = {"done": True, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": []}
 
 
