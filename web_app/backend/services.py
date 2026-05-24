@@ -601,14 +601,17 @@ def get_model_info():
         stage_short = None
         steps_label = ""
 
+        steps_num = 0
+
         m = re.match(r"sac_(ini|dev|mid|late)_(\d+)_steps\.zip", fname)
         if m:
             stage_short = m.group(1)
-            steps = int(m.group(2))
-            steps_label = f"{steps:,} 步"
+            steps_num = int(m.group(2))
+            steps_label = f"{steps_num:,} 步"
         elif re.match(r"sac_(ini|dev|mid|late)_final\.zip", fname):
             m2 = re.match(r"sac_(ini|dev|mid|late)_final\.zip", fname)
             stage_short = m2.group(1)
+            steps_num = 999999  # 最终版视作已完成
             steps_label = "最终版"
         elif fname == "best_model.zip":
             stage_short = "mid"
@@ -622,6 +625,7 @@ def get_model_info():
             "name": fname.replace(".zip", ""),
             "stage": stage_name,
             "steps": steps_label,
+            "steps_num": steps_num,
             "size_mb": round(size_mb, 2),
             "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime)),
         })

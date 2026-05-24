@@ -153,23 +153,49 @@
       <div v-if="models.length === 0" style="color:var(--text-secondary);padding:16px 0">
         暂无已训练的模型
       </div>
-      <div v-else style="overflow:auto;max-height:400px">
-        <table class="stats-table">
-            <thead>
-            <tr><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th><th>操作</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="m in models" :key="m.name">
-              <td><code>{{ m.name }}</code></td>
-              <td>{{ m.stage }}</td>
-              <td>{{ m.steps }}</td>
-              <td>{{ m.size_mb }} MB</td>
-              <td>{{ m.mtime }}</td>
-              <td><button class="btn btn-sm btn-success" @click="selectModel(m)" :disabled="training.running">继续训练</button></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <template v-else>
+        <!-- 未完成 -->
+        <div v-if="incompleteModels.length > 0" style="margin-bottom:20px">
+          <div class="card-title" style="font-size:14px;color:var(--warning)">⏳ 训练中 / 未完成</div>
+          <div style="overflow:auto;max-height:300px">
+            <table class="stats-table">
+              <thead>
+                <tr><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th><th>操作</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="m in incompleteModels" :key="m.name">
+                  <td><code>{{ m.name }}</code></td>
+                  <td>{{ m.stage }}</td>
+                  <td>{{ m.steps }}</td>
+                  <td>{{ m.size_mb }} MB</td>
+                  <td>{{ m.mtime }}</td>
+                  <td><button class="btn btn-sm btn-success" @click="selectModel(m)" :disabled="training.running">继续训练</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <!-- 已完成 -->
+        <div v-if="completedModels.length > 0">
+          <div class="card-title" style="font-size:14px;color:var(--success)">✓ 已完成 (120,000 步)</div>
+          <div style="overflow:auto;max-height:300px">
+            <table class="stats-table">
+              <thead>
+                <tr><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="m in completedModels" :key="m.name">
+                  <td><code>{{ m.name }}</code></td>
+                  <td>{{ m.stage }}</td>
+                  <td>{{ m.steps }}</td>
+                  <td>{{ m.size_mb }} MB</td>
+                  <td>{{ m.mtime }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- 训练日志 -->
@@ -200,7 +226,7 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { getTrainingStatus, startTraining, stopTraining, getTrainingModels } from '../api/index.js'
 
 export default {
@@ -211,6 +237,8 @@ export default {
     const error = ref('')
     const message = ref('')
     const models = ref([])
+    const incompleteModels = computed(() => models.value.filter(m => (m.steps_num || 0) < 120000))
+    const completedModels = computed(() => models.value.filter(m => (m.steps_num || 0) >= 120000))
     const training = reactive({
       running: false,
       stage: null,
@@ -454,6 +482,8 @@ export default {
       error,
       message,
       models,
+      incompleteModels,
+      completedModels,
       training,
       elapsedTime,
       showNewTrainModal,
