@@ -161,8 +161,7 @@ def upload_all_models(models_dir, completed_only=False, progress=None):
             steps_num = 999999
             steps_label = "最终版"
         elif fname == "best_model.zip":
-            stage = "BULKING"
-            steps_label = "最佳模型"
+            continue  # 忽略
 
         if not stage:
             continue

@@ -618,8 +618,7 @@ def get_model_info():
                 steps_num = 999999
                 steps_label = "最终版"
             elif fname == "best_model.zip":
-                stage_short = "mid"
-                steps_label = "最佳模型"
+                continue  # 忽略，与 _final 重复且无法解析步数
             if stage_short is None:
                 continue
             stage_name = stage_names.get(stage_short, stage_short)
@@ -747,7 +746,7 @@ def upload_selected_models(names):
                     stage = stage_map.get(m2.group(1), m2.group(1))
                     steps_num = 999999; steps_label = "最终版"
                 elif name == "best_model":
-                    stage = "BULKING"; steps_label = "最佳模型"
+                    continue  # 忽略
                 size_mb = round(os.path.getsize(filepath) / (1024 * 1024), 2)
                 mtime = time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(filepath)))
                 result = upload_model(name, stage, steps_label, steps_num, size_mb, mtime, data)
