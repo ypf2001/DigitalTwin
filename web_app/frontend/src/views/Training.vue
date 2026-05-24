@@ -143,7 +143,7 @@
             <span>⏳ 训练中 / 未完成</span>
             <button v-if="!uploading" class="btn btn-sm btn-outline" @click="checkAllIncomplete">☐ 全选</button>
           </div>
-          <div style="overflow:auto;max-height:300px">
+          <div style="width:100%;overflow-x:auto;max-height:300px">
             <table class="stats-table">
               <thead>
                 <tr><th style="width:30px">☐</th><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th><th>云端</th><th>操作</th></tr>
@@ -183,7 +183,7 @@
           <div v-if="uploading" style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">
             {{ uploadCurrent }} / {{ uploadTotal }}
           </div>
-          <div style="overflow:auto;max-height:300px">
+          <div style="width:100%;overflow-x:auto;max-height:300px">
             <table class="stats-table">
               <thead>
                 <tr><th style="width:30px">☐</th><th>模型名称</th><th>阶段</th><th>步数</th><th>大小</th><th>更新时间</th><th>云端</th><th></th></tr>
