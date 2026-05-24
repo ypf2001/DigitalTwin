@@ -5,10 +5,6 @@
       <div class="modal-content">
         <h3>⚠️ 开始新训练</h3>
         <p>确定要开始新的训练吗？</p>
-        <p class="modal-info" v-if="training.timesteps > 0">
-          检测到 {{ training.timesteps.toLocaleString() }} 步历史训练记录。<br/>
-          开始新训练将清空历史，从头训练。
-        </p>
         <div class="modal-buttons">
           <button class="btn btn-primary" @click="confirmNewTrain">确认开始</button>
           <button class="btn btn-outline" @click="showNewTrainModal = false">取消</button>
