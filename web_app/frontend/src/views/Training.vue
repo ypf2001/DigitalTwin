@@ -130,9 +130,10 @@
     </div>
 
     <!-- 模型列表 -->
-    <div class="card" style="margin-top:16px">
+    <div class="card" style="margin-top:16px;min-height:120px">
       <div class="card-title">已训练模型</div>
-      <div v-if="models.length === 0" style="color:var(--text-secondary);padding:16px 0">
+      <div v-if="modelsLoading" class="loading-overlay"><span class="spinner dark"></span>加载中...</div>
+      <div v-else-if="models.length === 0" style="color:var(--text-secondary);padding:16px 0">
         暂无已训练的模型
       </div>
       <template v-else>
@@ -239,6 +240,7 @@ export default {
     const error = ref('')
     const message = ref('')
     const models = ref([])
+    const modelsLoading = ref(false)
     const uploadMsg = ref('')
     const uploading = ref(false)
     const uploadPct = ref(0)
@@ -323,11 +325,14 @@ export default {
     }
 
     async function loadModels() {
+      modelsLoading.value = true
       try {
         const info = await getTrainingModels()
         models.value = info.models || []
       } catch (e) {
         console.error('Failed to load models:', e)
+      } finally {
+        modelsLoading.value = false
       }
     }
 
@@ -595,6 +600,7 @@ export default {
       error,
       message,
       models,
+      modelsLoading,
       incompleteModels,
       completedModels,
       training,
