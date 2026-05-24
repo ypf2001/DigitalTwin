@@ -1,5 +1,8 @@
 <template>
   <div>
+    <!-- Toast 通知 -->
+    <div v-if="toast.show" class="toast" :class="toast.type">{{ toast.msg }}</div>
+
     <!-- 开始新训练确认弹窗 -->
     <div v-if="showNewTrainModal" class="modal-overlay" @click.self="showNewTrainModal = false">
       <div class="modal-content">
@@ -251,6 +254,7 @@ export default {
     const uploadPct = ref(0)
     const uploadCurrent = ref('0')
     const uploadTotal = ref('0')
+    const toast = reactive({ show: false, msg: '', type: 'success', timer: null })
     const incompleteModels = computed(() => models.value.filter(m => (m.steps_num || 0) < 120000))
     const completedModels = computed(() => models.value.filter(m => (m.steps_num || 0) >= 120000))
     const training = reactive({
@@ -393,6 +397,12 @@ export default {
       showResumeModal.value = true
     }
 
+    function showToast(msg, type = 'success') {
+      if (toast.timer) clearTimeout(toast.timer)
+      toast.show = true; toast.msg = msg; toast.type = type
+      toast.timer = setTimeout(() => { toast.show = false }, 3000)
+    }
+
     async function uploadToCloud() {
       uploading.value = true
       uploadMsg.value = ''
@@ -401,8 +411,7 @@ export default {
       uploadTotal.value = '0'
       try {
         const res = await uploadModels()
-        if (!res.success) { uploadMsg.value = '❌ ' + (res.error || '启动失败'); uploading.value = false; return }
-        // 轮询进度
+        if (!res.success) { showToast(res.error || '启动失败', 'error'); uploading.value = false; return }
         const poll = setInterval(async () => {
           try {
             const p = await getUploadProgress()
@@ -412,16 +421,20 @@ export default {
             if (p.done) {
               clearInterval(poll)
               uploading.value = false
-              const parts = [`✅ 上传完成：共 ${p.total} 个`]
+              const parts = []
               if (p.uploaded > 0) parts.push(`新增 ${p.uploaded} 个`)
               if (p.skipped > 0) parts.push(`跳过 ${p.skipped} 个`)
               if (p.errors && p.errors.length > 0) parts.push(`错误 ${p.errors.length} 个`)
-              uploadMsg.value = parts.join('，')
+              if (parts.length > 0) {
+                showToast('✅ ' + parts.join('，'))
+              } else {
+                showToast('✅ 上传完成')
+              }
             }
           } catch (_) {}
         }, 500)
       } catch (e) {
-        uploadMsg.value = '❌ ' + (e.message || '网络错误')
+        showToast(e.message || '网络错误', 'error')
         uploading.value = false
       }
     }
@@ -532,6 +545,8 @@ export default {
       incompleteModels,
       completedModels,
       training,
+      toast,
+      showToast,
       uploadMsg,
       uploading,
       uploadPct,
@@ -827,4 +842,15 @@ export default {
 .btn-sm.btn-danger:hover { background: #d32f2f; }
 .btn-sm.btn-success { background: #4caf50; color: white; border: none; }
 .btn-sm.btn-success:hover { background: #45a049; }
+
+/* Toast */
+.toast {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+  padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 500;
+  z-index: 1001; box-shadow: 0 4px 16px rgba(0,0,0,.15);
+  animation: toastIn .3s ease;
+}
+.toast.success { background: #e8f5e9; color: #2e7d32; }
+.toast.error { background: #fdecea; color: #c62828; }
+@keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-12px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 </style>
