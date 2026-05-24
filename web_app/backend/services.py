@@ -504,7 +504,7 @@ def start_training(stage: str, timesteps: int, resume: bool = False):
             pass
         last_timesteps = 0
 
-    auto_resume = resume or model_exists or (last_timesteps > 0)
+    auto_resume = resume
 
     # 重启时需要先重新加载配置
     reload_config()
@@ -526,13 +526,13 @@ def start_training(stage: str, timesteps: int, resume: bool = False):
     thread.daemon = True
     thread.start()
 
-    msg = f"继续训练 {stage}" if auto_resume else f"开始训练 {stage}"
+    msg = "继续训练" if auto_resume else "开始训练"
     return {
         "success": True,
-        "message": f"{msg}，目标 {timesteps} 步（已训练 {last_timesteps} 步）",
+        "message": f"{msg} {stage}，目标 {timesteps} 步（已训练 {last_timesteps} 步）",
         "stage": stage,
         "target_steps": timesteps,
-        "resume_available": True,
+        "resume_available": model_exists or (last_timesteps > 0),
         "last_timesteps": last_timesteps,
     }
 

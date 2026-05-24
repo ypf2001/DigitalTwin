@@ -74,6 +74,7 @@
         </button>
       </div>
       <div v-if="error" class="error-box" style="margin-top:12px">{{ error }}</div>
+      <div v-if="training.error" class="error-box" style="margin-top:12px">{{ training.error }}</div>
       <div v-if="message" class="success-box" style="margin-top:12px">{{ message }}</div>
     </div>
 
@@ -345,11 +346,12 @@ export default {
       }
     }
 
-    async function resumeTraining() {
+    function resumeTraining() {
       showResumeModal.value = true
     }
 
     async function handleStop() {
+      stopPolling()
       try {
         const res = await stopTraining()
         if (res.success) {
@@ -359,9 +361,11 @@ export default {
           await loadModels()
         } else {
           error.value = res.error || '停止失败'
+          if (training.running) startPolling()
         }
       } catch (e) {
         error.value = e.message || '网络错误'
+        if (training.running) startPolling()
       }
     }
 
@@ -372,7 +376,11 @@ export default {
         if (!training.running && pollTimer) {
           stopPolling()
           await loadModels()
-          message.value = message.value ? '训练已完成' : '训练已完成，模型已保存'
+          if (training.error) {
+            error.value = training.error
+          } else if (!message.value) {
+            message.value = '训练已完成，模型已保存'
+          }
         }
       }, 3000)
       // 额外计时器更新已用时间
@@ -436,157 +444,45 @@ export default {
 </script>
 
 <style scoped>
-/* 进度条容器 */
-.progress-wrapper {
-  margin: 16px 0;
-  position: relative;
-}
-
-.progress-track {
-  height: 28px;
-  background: linear-gradient(180deg, #e9ecef 0%, #dee2e6 100%);
-  border-radius: 14px;
-  overflow: hidden;
-  position: relative;
-  box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-  border-radius: 14px;
-  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-  position: relative;
-  min-width: 28px;
-}
-
-.progress-fill.animating {
-  background: linear-gradient(
-    90deg,
-    #667eea 0%,
-    #764ba2 25%,
-    #f093fb 50%,
-    #764ba2 75%,
-    #667eea 100%
-  );
-  background-size: 200% 100%;
-  animation: gradientMove 2s ease infinite;
-}
-
-.progress-shine {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 50%;
-  background: linear-gradient(180deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0) 100%);
-  border-radius: 14px 14px 0 0;
-}
-
-.progress-stripes {
-  position: absolute;
+/* 弹窗样式 */
+.modal-overlay {
+  position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: repeating-linear-gradient(
-    -45deg,
-    transparent,
-    transparent 8px,
-    rgba(255,255,255,0.1) 8px,
-    rgba(255,255,255,0.1) 16px
-  );
-  animation: stripeMove 1s linear infinite;
-}
-
-@keyframes gradientMove {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-@keyframes stripeMove {
-  0% { background-position: 0 0; }
-  100% { background-position: 22.6px 0; }
-}
-
-.progress-markers {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 6px;
-  padding: 0 4px;
-}
-
-.progress-percent {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 12px;
-  font-weight: 700;
-  color: white;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-  z-index: 10;
-}
-
-.marker {
-  font-size: 11px;
-  color: #adb5bd;
-  transition: all 0.3s ease;
-}
-
-.marker.active {
-  color: #667eea;
-  font-weight: 600;
-}
-
-/* 统计行 */
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 12px;
-  margin-top: 16px;
-}
-
-.stat-item {
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: #fff;
+  padding: 24px;
+  border-radius: 12px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.modal-content h3 { margin: 0 0 12px 0; color: #333; font-size: 18px; }
+.modal-content p { margin: 8px 0; color: #666; font-size: 14px; }
+
+.modal-info {
+  background: #f5f5f5;
   padding: 12px;
-  background: #f8f9fa;
-  border-radius: 10px;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
-.stat-item:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-}
-
-.stat-item.highlight {
-  background: linear-gradient(135deg, #667eea15, #764ba215);
-  border: 1px solid #667eea30;
-}
-
-.stat-icon {
-  font-size: 20px;
-}
-
-.stat-info {
+.modal-buttons {
   display: flex;
-  flex-direction: column;
-}
-
-.stat-value {
-  font-size: 16px;
-  font-weight: 700;
-  color: #2c3e50;
-}
-
-.stat-label {
-  font-size: 11px;
-  color: #6c757d;
-  margin-top: 2px;
+  gap: 12px;
+  margin-top: 20px;
+  justify-content: flex-end;
 }
 
 /* 状态徽章 */
@@ -630,6 +526,14 @@ export default {
   margin-left: 12px;
 }
 
+.idle-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  background: #f5f5f5;
+  color: #9e9e9e;
+  border-radius: 4px;
+}
+
 .pulse-dot {
   width: 8px;
   height: 8px;
@@ -646,86 +550,6 @@ export default {
 @keyframes badgePulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(0,114,255,0.4); }
   50% { box-shadow: 0 0 0 8px rgba(0,114,255,0); }
-}
-
-/* 小旋转器 */
-.mini-spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid #e9ecef;
-  border-top-color: #667eea;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.log-container {
-  max-height: 300px;
-  overflow-y: auto;
-  background: #1e1e1e;
-  border-radius: 6px;
-  padding: 12px;
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 12px;
-}
-
-.log-line {
-  color: #d4d4d4;
-  line-height: 1.6;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.log-line:hover {
-  white-space: normal;
-  overflow: visible;
-}
-
-.success-box {
-  padding: 10px 16px;
-  background: #e8f5e9;
-  color: #2e7d32;
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.btn-danger {
-  background: #e74c3c;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.btn-danger:hover {
-  background: #c0392b;
-}
-
-.input-with-unit {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.unit {
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
-.hint {
-  display: block;
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--text-secondary);
 }
 
 /* 进度表格 */
@@ -749,9 +573,7 @@ export default {
   color: var(--text-secondary);
 }
 
-.progress-table tbody tr:hover {
-  background: #fafafa;
-}
+.progress-table tbody tr:hover { background: #fafafa; }
 
 .stage-badge {
   display: inline-block;
@@ -787,16 +609,8 @@ export default {
 .table-progress-bar.animating::after {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255,255,255,0.3) 50%,
-    transparent 100%
-  );
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%);
   animation: shimmer 1.5s infinite;
 }
 
@@ -820,13 +634,6 @@ export default {
 .status-stopped { color: #ff9800; font-weight: 600; }
 .status-idle { color: #9e9e9e; }
 
-.empty-state {
-  padding: 24px;
-  text-align: center;
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
 .time-info {
   display: flex;
   gap: 16px;
@@ -837,63 +644,63 @@ export default {
   color: var(--text-secondary);
 }
 
-.idle-badge {
+.running-row { background: rgba(76, 175, 80, 0.08); }
+
+/* 日志 */
+.log-container {
+  max-height: 300px;
+  overflow-y: auto;
+  background: #1e1e1e;
+  border-radius: 6px;
+  padding: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
   font-size: 12px;
-  padding: 2px 8px;
-  background: #f5f5f5;
-  color: #9e9e9e;
-  border-radius: 4px;
 }
 
-/* 弹窗样式 */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
+.log-line {
+  color: #d4d4d4;
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.modal-content {
-  background: #fff;
-  padding: 24px;
-  border-radius: 12px;
-  max-width: 400px;
-  width: 90%;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-}
+.log-line:hover { white-space: normal; overflow: visible; }
 
-.modal-content h3 {
-  margin: 0 0 12px 0;
-  color: #333;
-  font-size: 18px;
-}
-
-.modal-content p {
-  margin: 8px 0;
-  color: #666;
+/* 通用 */
+.success-box {
+  padding: 10px 16px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-radius: 6px;
   font-size: 14px;
 }
 
-.modal-info {
-  background: #f5f5f5;
-  padding: 12px;
-  border-radius: 6px;
-  font-size: 13px;
-  line-height: 1.5;
+.input-with-unit { display: flex; align-items: center; gap: 8px; }
+.unit { color: var(--text-secondary); font-size: 14px; }
+
+.hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
-.modal-buttons {
-  display: flex;
-  gap: 12px;
-  margin-top: 20px;
-  justify-content: flex-end;
+/* 按钮 */
+.btn-danger {
+  background: #e74c3c;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
+
+.btn-danger:hover { background: #c0392b; }
 
 .btn-success {
   background: #4caf50;
@@ -901,42 +708,12 @@ export default {
   border: none;
 }
 
-.btn-success:hover {
-  background: #45a049;
-}
+.btn-success:hover { background: #45a049; }
+.btn-success:disabled { background: #ccc; cursor: not-allowed; }
 
-.btn-success:disabled {
-  background: #ccc;
-  cursor: not-allowed;
-}
-
-.btn-sm {
-  padding: 4px 10px;
-  font-size: 12px;
-  border-radius: 4px;
-}
-
-.btn-sm.btn-danger {
-  background: #f44336;
-  color: white;
-  border: none;
-}
-
-.btn-sm.btn-danger:hover {
-  background: #d32f2f;
-}
-
-.btn-sm.btn-success {
-  background: #4caf50;
-  color: white;
-  border: none;
-}
-
-.btn-sm.btn-success:hover {
-  background: #45a049;
-}
-
-.running-row {
-  background: rgba(76, 175, 80, 0.08);
-}
+.btn-sm { padding: 4px 10px; font-size: 12px; border-radius: 4px; }
+.btn-sm.btn-danger { background: #f44336; color: white; border: none; }
+.btn-sm.btn-danger:hover { background: #d32f2f; }
+.btn-sm.btn-success { background: #4caf50; color: white; border: none; }
+.btn-sm.btn-success:hover { background: #45a049; }
 </style>
