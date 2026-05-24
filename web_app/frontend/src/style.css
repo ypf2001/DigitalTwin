@@ -25,7 +25,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 .page-content{padding:24px 32px;max-width:1800px;overflow-x:hidden}
 
 /* Cards */
-.card{background:var(--card-bg);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;margin-bottom:20px;min-width:0}
+.card{background:var(--card-bg);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;margin-bottom:20px;width:100%}
 .card-title{font-size:16px;font-weight:600;margin-bottom:16px}
 .card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px}
 .stat-card{background:var(--card-bg);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;text-align:center}
