@@ -97,8 +97,8 @@
             <th>目标步数</th>
             <th>当前步数</th>
             <th style="width:140px">进度</th>
-            <th>来源</th>
-            <th>操作</th>
+                <th>来源</th>
+                <th style="min-width:180px;white-space:nowrap">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -117,8 +117,8 @@
             <td style="white-space:nowrap">
               <button v-if="training.running" class="btn btn-sm btn-danger" @click="handleStop" :disabled="loading">⏹ 停止</button>
               <button v-else-if="training.timesteps > 0 && training.progress < 100" class="btn btn-sm btn-success" @click="resumeTraining" :disabled="loading">🔄 继续</button>
-              <button v-if="!training.running && training.timesteps > 0" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadChecked" :disabled="uploading">☁️ 上传</button>
-              <button v-if="!training.running && training.timesteps > 0" class="btn btn-sm btn-danger" @click="clearTrainingProgress" style="margin-left:3px">🗑</button>
+              <button v-if="!training.running && training.timesteps > 0" class="btn btn-sm" style="background:#1976d2;color:#fff;margin-left:6px" @click="uploadChecked" :disabled="uploading">☁️ 上传</button>
+              <button v-if="!training.running && training.timesteps > 0" class="btn-icon-delete" @click="clearTrainingProgress" style="margin-left:6px" title="清除记录">✕</button>
             </td>
           </tr>
         </tbody>
@@ -162,7 +162,7 @@
                   <td><span v-if="m.in_cloud" style="color:var(--success)">☁️</span><span v-else style="color:#ccc">—</span></td>
                   <td style="white-space:nowrap">
                     <button class="btn btn-sm btn-success" @click="selectModel(m)" :disabled="training.running">继续训练</button>
-                    <button class="btn btn-sm btn-danger" @click="deleteOne(m)" :disabled="training.running" style="margin-left:3px">🗑</button>
+                    <button class="btn-icon-delete" @click="deleteOne(m)" :disabled="training.running" style="margin-left:6px" title="删除">✕</button>
                   </td>
                 </tr>
               </tbody>
@@ -200,7 +200,7 @@
                   <td>{{ m.size_mb }} MB</td>
                   <td>{{ m.mtime }}</td>
                   <td><span v-if="m.in_cloud" style="color:var(--success)">☁️</span><span v-else style="color:#ccc">—</span></td>
-                  <td><button class="btn btn-sm btn-danger" @click="deleteOne(m)" :disabled="training.running">🗑</button></td>
+                  <td><button class="btn-icon-delete" @click="deleteOne(m)" :disabled="training.running" title="删除">✕</button></td>
                 </tr>
               </tbody>
             </table>
