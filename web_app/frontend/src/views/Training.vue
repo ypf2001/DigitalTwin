@@ -52,16 +52,6 @@
           </div>
           <small class="hint">目标：120,000 步</small>
         </div>
-        <div class="form-group">
-          <label>续训模式</label>
-          <div class="toggle-row">
-            <label class="toggle">
-              <input type="checkbox" v-model="params.resume" />
-              <span class="slider"></span>
-            </label>
-            <span style="font-size:13px;color:var(--text-secondary)">从已有模型继续</span>
-          </div>
-        </div>
       </div>
       <div style="margin-top:16px;display:flex;gap:12px;align-items:center">
         <button v-if="!training.running" class="btn btn-primary" @click="showNewTrainModal = true" :disabled="loading">
@@ -87,8 +77,20 @@
         <span v-else-if="training.progress >= 100 && training.timesteps >= params.timesteps" class="completed-badge">✓ 完成</span>
         <span v-else class="idle-badge">○ 待机</span>
       </div>
-      <div style="display:flex;gap:16px;flex-wrap:wrap">
-        <!-- 左：进度表 -->
+      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:stretch">
+        <!-- 左：日志终端 -->
+        <div style="flex:1;min-width:300px;display:flex;flex-direction:column">
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text-secondary)">📋 训练日志</div>
+          <div class="log-container" style="flex:1;min-height:200px">
+            <div v-if="training.logLines && training.logLines.length > 0">
+              <div v-for="(line, i) in training.logLines" :key="i" class="log-line">{{ line }}</div>
+            </div>
+            <div v-else style="color:#666;padding:20px;text-align:center;font-size:12px">
+              {{ training.running ? '等待日志输出...' : '暂无日志' }}
+            </div>
+          </div>
+        </div>
+        <!-- 右：进度表 -->
         <div style="flex:1;min-width:400px">
           <table class="progress-table">
             <thead>
@@ -126,18 +128,6 @@
           <div v-if="training.start_time" class="time-info">
             <span>⏱️ 已用时间: {{ formatDuration(elapsedTime) }}</span>
             <span v-if="training.running">📅 开始于: {{ training.start_time }}</span>
-          </div>
-        </div>
-        <!-- 右：日志终端 -->
-        <div style="flex:1;min-width:300px">
-          <div style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text-secondary)">📋 训练日志</div>
-          <div class="log-container" style="height:240px">
-            <div v-if="training.logLines && training.logLines.length > 0">
-              <div v-for="(line, i) in training.logLines" :key="i" class="log-line">{{ line }}</div>
-            </div>
-            <div v-else style="color:#666;padding:20px;text-align:center;font-size:12px">
-              {{ training.running ? '等待日志输出...' : '暂无日志' }}
-            </div>
           </div>
         </div>
       </div>
@@ -248,7 +238,7 @@ import { getTrainingStatus, startTraining, stopTraining, getTrainingModels, uplo
 export default {
   name: 'Training',
   setup() {
-    const params = reactive({ stage: 'BULKING', timesteps: 120000, resume: false })
+    const params = reactive({ stage: 'BULKING', timesteps: 120000 })
     const loading = ref(false)
     const error = ref('')
     const message = ref('')
