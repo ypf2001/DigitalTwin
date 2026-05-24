@@ -163,12 +163,13 @@ if __name__ == "__main__":
             if args.resume:
                 should_resume = True
             else:
-                # 交互式询问
+                # 交互式询问（无终端时默认不续训）
                 try:
                     ans = input(f"\n检测到已有模型，是否从上次模型继续训练? [y/N]: ").strip().lower()
                     should_resume = (ans == "y" or ans == "yes")
-                except (EOFError, KeyboardInterrupt):
+                except (EOFError, KeyboardInterrupt, OSError):
                     should_resume = False
+                    logger.info("无交互终端，默认从头训练")
 
             if should_resume:
                 # 优先加载 final，否则找最新的 checkpoint

@@ -409,6 +409,7 @@ def _training_worker(stage, timesteps, resume, load_model=""):
             process = subprocess.Popen(
                 cmd,
                 cwd=project_root,
+                stdin=subprocess.DEVNULL,
                 stdout=f_out,
                 stderr=subprocess.STDOUT,
                 text=True,
