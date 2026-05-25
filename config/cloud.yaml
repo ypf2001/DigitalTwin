@@ -1,0 +1,8 @@
+# 云端存储配置 - MySQL 数据库
+cloud:
+  host: "154.44.26.212"
+  port: 61762
+  user: "root"
+  password: "mysql_dDPsQR"
+  database: "digital_twin"
+  connect_timeout: 10
