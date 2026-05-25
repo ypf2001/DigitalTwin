@@ -36,12 +36,10 @@
         <div class="form-group">
           <label>训练阶段</label>
           <select v-model="params.stage" class="form-select" :disabled="training.running">
-            <option value="EMERGENCE">出苗期 (INI)</option>
-            <option value="VEGETATIVE">营养生长期 (DEV)</option>
-            <option value="TUBER_INIT">块茎形成期 (DEV)</option>
-            <option value="BULKING">块茎膨大期 (MID)</option>
-            <option value="STARCH_ACCUMULATION">淀粉积累期 (LATE)</option>
-            <option value="MATURATION">成熟期 (LATE)</option>
+            <option value="INI">INI - 出苗期</option>
+            <option value="DEV">DEV - 营养/块茎形成期</option>
+            <option value="MID">MID - 块茎膨大期</option>
+            <option value="LATE">LATE - 淀粉积累/成熟期</option>
           </select>
         </div>
         <div class="form-group">
@@ -141,7 +139,9 @@
         <div v-if="incompleteModels.length > 0" style="margin-bottom:20px">
           <div class="card-title" style="font-size:14px;color:var(--warning);display:flex;align-items:center;gap:12px">
             <span>⏳ 训练中 / 未完成</span>
-            <button v-if="!uploading" class="btn btn-sm btn-outline" @click="checkAllIncomplete">☐ 全选</button>
+            <button v-if="!uploading" class="btn btn-sm" :style="allIncompleteChecked ? 'background:#e74c3c;color:#fff' : 'background:#4caf50;color:#fff'" @click="checkAllIncomplete">{{ allIncompleteChecked ? '☑ 全选' : '☐ 全选' }}</button>
+            <button class="btn btn-sm btn-danger" @click="deleteCheckedIncomplete" :disabled="checkedIncomplete.length === 0">🗑 删除选中</button>
+            <button v-if="!uploading" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadCheckedIncomplete" :disabled="checkedIncomplete.length === 0">☁️ 上传选中</button>
           </div>
           <div style="width:100%;overflow-x:auto;max-height:300px">
             <table class="stats-table">
@@ -152,7 +152,7 @@
                 <tr v-for="m in incompleteModels" :key="m.name">
                   <td>
                     <input v-if="m.in_cloud" type="checkbox" checked disabled />
-                    <input v-else type="checkbox" :checked="checkedModels.has(m.name)" @change="toggleCheck(m.name)" />
+                    <input v-else type="checkbox" :checked="checkedIncomplete.includes(m.name)" @change="toggleCheckIncomplete(m.name)" />
                   </td>
                   <td><code>{{ m.name }}</code></td>
                   <td>{{ m.stage }}</td>
@@ -173,8 +173,9 @@
         <div v-if="completedModels.length > 0">
           <div class="card-title" style="font-size:14px;color:var(--success);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
             <span>✓ 已完成 (120,000 步)</span>
-            <button v-if="!uploading" class="btn btn-sm" style="background:#4caf50;color:#fff" @click="checkAllCompleted">☐ 全选</button>
-            <button v-if="!uploading" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadChecked" :disabled="checkedModels.size === 0">☁️ 上传选中</button>
+            <button v-if="!uploading" class="btn btn-sm" :style="allCompletedChecked ? 'background:#e74c3c;color:#fff' : 'background:#4caf50;color:#fff'" @click="checkAllCompleted">{{ allCompletedChecked ? '☑ 全选' : '☐ 全选' }}</button>
+            <button class="btn btn-sm btn-danger" @click="deleteCheckedCompleted" :disabled="checkedCompleted.length === 0">🗑 删除选中</button>
+            <button v-if="!uploading" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadCheckedCompleted" :disabled="checkedCompleted.length === 0">☁️ 上传选中</button>
             <button v-if="uploading" class="btn btn-sm btn-danger" @click="stopUploading">⏹ 停止上传</button>
           </div>
           <div v-if="uploading" style="margin:8px 0;background:#e9ecef;border-radius:6px;height:16px;overflow:hidden">
@@ -186,13 +187,13 @@
           <div style="width:100%;overflow-x:auto;max-height:300px">
             <table class="stats-table">
               <thead>
-                <tr><th style="width:4%">☐</th><th style="width:26%">模型名称</th><th style="width:14%">阶段</th><th style="width:12%">步数</th><th style="width:8%">大小</th><th style="width:16%">更新时间</th><th style="width:6%">云端</th><th style="width:14%"></th></tr>
+                <tr><th style="width:4%">☐</th><th style="width:26%">模型名称</th><th style="width:14%">阶段</th><th style="width:12%">步数</th><th style="width:8%">大小</th><th style="width:16%">更新时间</th><th style="width:6%">云端</th><th style="width:14%">操作</th></tr>
               </thead>
               <tbody>
                 <tr v-for="m in completedModels" :key="m.name">
                   <td>
                     <input v-if="m.in_cloud" type="checkbox" checked disabled />
-                    <input v-else type="checkbox" :checked="checkedModels.has(m.name)" @change="toggleCheck(m.name)" />
+                    <input v-else type="checkbox" :checked="checkedCompleted.includes(m.name)" @change="toggleCheckCompleted(m.name)" />
                   </td>
                   <td><code>{{ m.name }}</code></td>
                   <td>{{ m.stage }}</td>
@@ -229,13 +230,13 @@
 </template>
 
 <script>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { getTrainingStatus, startTraining, stopTraining, getTrainingModels, uploadModels, uploadSelected, stopUpload, getUploadProgress, deleteModel, clearProgress } from '../api/index.js'
 
 export default {
   name: 'Training',
   setup() {
-    const params = reactive({ stage: 'BULKING', timesteps: 120000 })
+    const params = reactive({ stage: 'MID', timesteps: 120000 })
     const loading = ref(false)
     const error = ref('')
     const message = ref('')
@@ -246,11 +247,20 @@ export default {
     const uploadPct = ref(0)
     const uploadCurrent = ref('0')
     const uploadTotal = ref('0')
-    const checkedModels = reactive(new Set())
+    const checkedIncomplete = ref([])
+    const checkedCompleted = ref([])
     let uploadPollTimer = null
     const toast = reactive({ show: false, msg: '', type: 'success', timer: null })
     const incompleteModels = computed(() => models.value.filter(m => (m.steps_num || 0) < 120000))
     const completedModels = computed(() => models.value.filter(m => (m.steps_num || 0) >= 120000))
+    const allCompletedChecked = computed(() => {
+      const names = completedModels.value.filter(m => !m.in_cloud).map(m => m.name)
+      return names.length > 0 && names.every(n => checkedCompleted.value.includes(n))
+    })
+    const allIncompleteChecked = computed(() => {
+      const names = incompleteModels.value.filter(m => !m.in_cloud).map(m => m.name)
+      return names.length > 0 && names.every(n => checkedIncomplete.value.includes(n))
+    })
     const training = reactive({
       running: false,
       stage: null,
@@ -271,12 +281,10 @@ export default {
     const showResumeModal = ref(false)
 
     const stageNames = {
-      'EMERGENCE': '出苗期',
-      'VEGETATIVE': '营养生长期',
-      'TUBER_INIT': '块茎形成期',
-      'BULKING': '块茎膨大期',
-      'STARCH_ACCUMULATION': '淀粉积累期',
-      'MATURATION': '成熟期',
+      'INI': '出苗期',
+      'DEV': '营养/块茎形成期',
+      'MID': '块茎膨大期',
+      'LATE': '淀粉积累/成熟期',
     }
 
     function getStageName(stage) {
@@ -400,28 +408,94 @@ export default {
       toast.timer = setTimeout(() => { toast.show = false }, 3000)
     }
 
-    function toggleCheck(name) {
-      if (checkedModels.has(name)) { checkedModels.delete(name) } else { checkedModels.add(name) }
+    function toggleCheckIncomplete(name) {
+      const idx = checkedIncomplete.value.indexOf(name)
+      if (idx >= 0) { checkedIncomplete.value.splice(idx, 1) } else { checkedIncomplete.value.push(name) }
+    }
+
+    function toggleCheckCompleted(name) {
+      const idx = checkedCompleted.value.indexOf(name)
+      if (idx >= 0) { checkedCompleted.value.splice(idx, 1) } else { checkedCompleted.value.push(name) }
     }
 
     function checkAllCompleted() {
       const names = completedModels.value.filter(m => !m.in_cloud).map(m => m.name)
-      names.forEach(n => checkedModels.add(n))
+      if (names.length === 0) return
+      const allChecked = names.every(n => checkedCompleted.value.includes(n))
+      if (allChecked) {
+        checkedCompleted.value = checkedCompleted.value.filter(n => !names.includes(n))
+      } else {
+        checkedCompleted.value = [...new Set([...checkedCompleted.value, ...names])]
+      }
     }
 
     function checkAllIncomplete() {
       const names = incompleteModels.value.filter(m => !m.in_cloud).map(m => m.name)
-      names.forEach(n => checkedModels.add(n))
+      if (names.length === 0) return
+      const allChecked = names.every(n => checkedIncomplete.value.includes(n))
+      if (allChecked) {
+        checkedIncomplete.value = checkedIncomplete.value.filter(n => !names.includes(n))
+      } else {
+        checkedIncomplete.value = [...new Set([...checkedIncomplete.value, ...names])]
+      }
     }
 
-    function uncheckAll() { checkedModels.clear() }
+    function uncheckAll() { checkedIncomplete.value = []; checkedCompleted.value = [] }
 
-    async function uploadChecked() {
-      // 没勾选时自动全选已完成模型中未上传的
-      if (checkedModels.size === 0) {
+    async function deleteCheckedIncomplete() {
+      const names = [...checkedIncomplete.value]
+      if (names.length === 0) return
+      if (!confirm(`确定删除选中的 ${names.length} 个模型吗？`)) return
+      let ok = 0
+      for (const name of names) {
+        try {
+          const res = await deleteModel(name)
+          if (res.success) ok++
+        } catch (e) { /* skip */ }
+      }
+      showToast(`已删除 ${ok}/${names.length} 个模型`)
+      checkedIncomplete.value = []
+      await loadModels()
+    }
+
+    async function deleteCheckedCompleted() {
+      const names = [...checkedCompleted.value]
+      if (names.length === 0) return
+      if (!confirm(`确定删除选中的 ${names.length} 个模型吗？`)) return
+      let ok = 0
+      for (const name of names) {
+        try {
+          const res = await deleteModel(name)
+          if (res.success) ok++
+        } catch (e) { /* skip */ }
+      }
+      showToast(`已删除 ${ok}/${names.length} 个模型`)
+      checkedCompleted.value = []
+      await loadModels()
+    }
+
+    async function uploadCheckedIncomplete() {
+      const names = [...checkedIncomplete.value].filter(n => {
+        const m = models.value.find(x => x.name === n)
+        return m && !m.in_cloud
+      })
+      if (names.length === 0) { showToast('请勾选未上传的模型', 'error'); return }
+      uploading.value = true
+      uploadPct.value = 0
+      uploadCurrent.value = '0'
+      uploadTotal.value = '0'
+      try {
+        const res = await uploadSelected(names)
+        if (!res.success) { showToast(res.error || '启动失败', 'error'); uploading.value = false; return }
+        startUploadPolling()
+      } catch (e) { showToast(e.message || '网络错误', 'error'); uploading.value = false }
+    }
+
+    async function uploadCheckedCompleted() {
+      if (checkedCompleted.value.length === 0) {
         checkAllCompleted()
       }
-      const names = [...checkedModels].filter(n => {
+      const names = [...checkedCompleted.value].filter(n => {
         const m = models.value.find(x => x.name === n)
         return m && !m.in_cloud
       })
@@ -453,7 +527,7 @@ export default {
             clearInterval(uploadPollTimer)
             uploadPollTimer = null
             uploading.value = false
-            checkedModels.clear()
+            checkedIncomplete.value = []; checkedCompleted.value = []
             await loadModels()
             const parts = []
             if (p.uploaded > 0) parts.push(`新增 ${p.uploaded} 个`)
@@ -461,7 +535,10 @@ export default {
             if (p.errors && p.errors.length > 0) parts.push(`错误 ${p.errors.length} 个`)
             showToast(parts.length > 0 ? '✅ ' + parts.join('，') : '✅ 上传完成')
           }
-        } catch (_) {}
+        } catch (e) {
+          console.error('Upload progress error:', e)
+          showToast('获取上传进度失败', 'error')
+        }
       }, 500)
     }
 
@@ -511,7 +588,7 @@ export default {
       }
       // 从模型名解析 stage（sac_mid_6000_steps → BULKING）
       const name = model.name
-      const stageMap = { ini: 'EMERGENCE', dev: 'VEGETATIVE', mid: 'BULKING', late: 'STARCH_ACCUMULATION' }
+      const stageMap = { ini: 'INI', dev: 'DEV', mid: 'MID', late: 'LATE' }
       let stage = params.stage
       for (const [short, full] of Object.entries(stageMap)) {
         if (name.includes('_' + short + '_') || name.includes('_' + short) || name === 'best_model') {
@@ -589,10 +666,13 @@ export default {
       }
     })
 
-    // 不要在卸载时停止轮询，保持后台训练状态
-    // onUnmounted(() => {
-    //   stopPolling()
-    // })
+    onUnmounted(() => {
+      stopPolling()
+      if (uploadPollTimer) {
+        clearInterval(uploadPollTimer)
+        uploadPollTimer = null
+      }
+    })
 
     return {
       params,
@@ -611,12 +691,17 @@ export default {
       uploadPct,
       uploadCurrent,
       uploadTotal,
-      checkedModels,
-      toggleCheck,
+      checkedIncomplete,
+      checkedCompleted,
+      toggleCheckIncomplete,
+      toggleCheckCompleted,
       checkAllCompleted,
       checkAllIncomplete,
       uncheckAll,
-      uploadChecked,
+      uploadCheckedIncomplete,
+      uploadCheckedCompleted,
+      deleteCheckedIncomplete,
+      deleteCheckedCompleted,
       stopUploading,
       elapsedTime,
       showNewTrainModal,

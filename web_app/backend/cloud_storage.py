@@ -3,14 +3,40 @@ import os
 import time
 import pymysql
 
-CLOUD_CONFIG = {
-    "host": "154.44.26.212",
-    "port": 61762,
-    "user": "root",
-    "password": "mysql_dDPsQR",
-    "database": "digital_twin",
-    "connect_timeout": 10,
-}
+# 从配置文件读取云端数据库配置
+_cLOUD_CONFIG = None
+
+
+def _get_cloud_config():
+    """从配置文件读取云端数据库配置"""
+    global _cloud_CONFIG
+    if _cloud_CONFIG is not None:
+        return _cloud_CONFIG
+    try:
+        import sys
+        config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "config")
+        yaml_path = os.path.join(config_dir, "cloud.yaml")
+        if os.path.exists(yaml_path):
+            with open(yaml_path, "r", encoding="utf-8") as f:
+                import yaml
+                cfg = yaml.safe_load(f)
+                _cloud_CONFIG = cfg["cloud"]
+                return _cloud_CONFIG
+    except Exception:
+        pass
+    # 降级使用硬编码配置
+    _cloud_CONFIG = {
+        "host": "154.44.26.212",
+        "port": 61762,
+        "user": "root",
+        "password": "mysql_dDPsQR",
+        "database": "digital_twin",
+        "connect_timeout": 10,
+    }
+    return _cloud_CONFIG
+
+
+CLOUD_CONFIG = _get_cloud_config()
 
 
 def _get_conn():
@@ -94,7 +120,10 @@ def upload_model(name, stage, steps, steps_num, size_mb, mtime, file_data):
             conn.commit()
             return {"uploaded": True}
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def query_all_models():
@@ -132,9 +161,7 @@ def upload_all_models(models_dir, completed_only=False, progress=None):
         return
 
     import re
-    stage_map = {"ini": "EMERGENCE", "dev": "VEGETATIVE/TUBER_INIT",
-                 "mid": "BULKING", "late": "STARCH_ACCUMULATION/MATURATION"}
-
+    stage_map = {"ini": "INI", "dev": "DEV", "mid": "MID", "late": "LATE"}
     model_list = []
     for fname in sorted(os.listdir(models_dir)):
         if not fname.endswith(".zip"):

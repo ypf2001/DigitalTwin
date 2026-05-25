@@ -125,7 +125,7 @@ def upload_progress():
 def upload_selected(req: UploadSelectedRequest):
     """上传指定模型"""
     try:
-        names = req.get("names", [])
+        names = req.names
         if not names:
             return {"success": False, "error": "未指定模型名称"}
         return upload_selected_models(names)

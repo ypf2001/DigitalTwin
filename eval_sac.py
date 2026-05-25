@@ -57,12 +57,14 @@ except ImportError:
     logger.error("请安装 stable-baselines3: pip install stable-baselines3")
     sys.exit(1)
 
-# 阶段 → 简写
+# 全 6 阶段 → 4 简写
 STAGE_TO_TAG = {
     GrowthStage.EMERGENCE: "ini",
+    GrowthStage.VEGETATIVE: "dev",
     GrowthStage.TUBER_INIT: "dev",
     GrowthStage.BULKING: "mid",
     GrowthStage.STARCH_ACCUMULATION: "late",
+    GrowthStage.MATURATION: "late",
 }
 
 TAG_TO_STAGE = {v: k for k, v in STAGE_TO_TAG.items()}

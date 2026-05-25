@@ -73,10 +73,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SAC 训练")
     parser.add_argument("--timesteps", type=int, default=sac_cfg["total_timesteps"],
                         help="总训练步数")
-    parser.add_argument("--stage", type=str, default="BULKING",
-                        choices=["INI", "DEV", "MID", "LATE",
-                                 "EMERGENCE", "VEGETATIVE", "TUBER_INIT",
-                                 "BULKING", "STARCH_ACCUMULATION", "MATURATION"])
+    parser.add_argument("--stage", type=str, default="MID",
+                         choices=["INI", "DEV", "MID", "LATE"])
     parser.add_argument("--save-dir", type=str, default="./rl_models")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--resume", action="store_true",
@@ -105,15 +103,8 @@ if __name__ == "__main__":
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
 
-    # 阶段名映射到简写
-    stage_short = args.stage
-    full_to_short = {
-        "EMERGENCE": "INI", "VEGETATIVE": "DEV",
-        "TUBER_INIT": "DEV", "BULKING": "MID",
-        "STARCH_ACCUMULATION": "LATE", "MATURATION": "LATE",
-    }
-    if args.stage in full_to_short:
-        stage_short = full_to_short[args.stage]
+    # 阶段名简写
+    stage_short = args.stage.upper()
     model_tag = stage_short.lower()
 
     logger.info("=" * 60)

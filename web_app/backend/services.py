@@ -3,11 +3,19 @@
 import os
 import sys
 import traceback
+import threading
 
 import numpy as np
 import yaml
 
 from config_loader import load_config, reload_config
+
+# 统一的阶段映射（简写格式）
+STAGE_MAP = {"ini": "INI", "dev": "DEV", "mid": "MID", "late": "LATE"}
+
+# 线程锁保护全局状态
+training_lock = threading.Lock()
+upload_lock = threading.Lock()
 
 _IMAGES_DIR = os.path.join(os.path.dirname(__file__), "static", "images")
 
@@ -69,6 +77,10 @@ def run_simulation(mode: str, stage_key: str, use_weather: bool):
     from crop_model import GrowthStage
 
     smap = {
+        "INI": GrowthStage.EMERGENCE,
+        "DEV": GrowthStage.TUBER_INIT,
+        "MID": GrowthStage.BULKING,
+        "LATE": GrowthStage.STARCH_ACCUMULATION,
         "EMERGENCE": GrowthStage.EMERGENCE,
         "VEGETATIVE": GrowthStage.VEGETATIVE,
         "TUBER_INIT": GrowthStage.TUBER_INIT,
@@ -292,7 +304,6 @@ def save_config_section(section: str, updates: dict):
 
 # ============ 训练相关 ============
 
-import threading
 import time
 import json
 import subprocess
@@ -311,6 +322,10 @@ _training_state = {
     "error": None,
 }
 
+# 上传控制
+_upload_cancel = False
+_upload_progress = {"done": False, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": [], "processed": 0}
+
 
 def _get_project_root():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -328,42 +343,42 @@ def get_training_status():
     """获取训练状态"""
     global _training_state
 
-    # 检查子进程是否还在运行
-    if _training_state["running"] and _training_state["pid"]:
-        try:
-            if os.name == "nt":
-                # 检查进程是否还在（不杀死它）
-                result = subprocess.run(f"tasklist /FI \"PID eq {_training_state['pid']}\"",
-                                      shell=True, capture_output=True, text=True)
-                if str(_training_state["pid"]) not in result.stdout:
-                    _training_state["running"] = False
-                    _training_state["pid"] = None
-            else:
-                os.kill(_training_state["pid"], 0)
-        except (ProcessLookupError, PermissionError):
-            _training_state["running"] = False
-            _training_state["pid"] = None
+    with training_lock:
+        # 检查子进程是否还在运行
+        if _training_state["running"] and _training_state["pid"]:
+            try:
+                if os.name == "nt":
+                    result = subprocess.run(f"tasklist /FI \"PID eq {_training_state['pid']}\"",
+                                          shell=True, capture_output=True, text=True)
+                    if str(_training_state["pid"]) not in result.stdout:
+                        _training_state["running"] = False
+                        _training_state["pid"] = None
+                else:
+                    os.kill(_training_state["pid"], 0)
+            except (ProcessLookupError, PermissionError):
+                _training_state["running"] = False
+                _training_state["pid"] = None
 
-    # 从 train_output.log 读取最新进度
-    import locale
-    default_encoding = locale.getpreferredencoding(False) or 'utf-8'
-    log_file = os.path.join(_get_project_root(), "rl_logs", "train_output.log")
-    if os.path.exists(log_file):
-        try:
-            with open(log_file, "r", encoding=default_encoding, errors='replace') as f:
-                content = f.read()
-            # 查找最新的 total_timesteps
-            import re
-            matches = re.findall(r'total_timesteps\s+\|\s+(\d+)', content)
-            if matches:
-                _training_state["timesteps"] = int(matches[-1])
-        except Exception:
-            pass
+        # 从 train_output.log 读取最新进度
+        import locale
+        default_encoding = locale.getpreferredencoding(False) or 'utf-8'
+        log_file = os.path.join(_get_project_root(), "rl_logs", "train_output.log")
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, "r", encoding=default_encoding, errors='replace') as f:
+                    content = f.read()
+                import re
+                matches = re.findall(r'total_timesteps\s+\|\s+(\d+)', content)
+                if matches:
+                    _training_state["timesteps"] = int(matches[-1])
+            except Exception:
+                pass
 
-    # 计算进度百分比
-    target = _training_state["target_steps"] if _training_state["target_steps"] > 0 else 120000
-    if target > 0:
-        _training_state["progress"] = min(100, _training_state["timesteps"] / target * 100)
+        # 计算进度百分比
+        default_steps = load_config().sac().get("total_timesteps", 120000)
+        target = _training_state["target_steps"] if _training_state["target_steps"] > 0 else default_steps
+        if target > 0:
+            _training_state["progress"] = min(100, _training_state["timesteps"] / target * 100)
 
     return {
         "running": _training_state["running"],
@@ -402,7 +417,6 @@ def _training_worker(stage, timesteps, resume, load_model=""):
             cmd.extend(["--load-path", load_model])
 
         # 启动训练进程，输出重定向到文件
-        # 使用系统默认编码（Windows 中文系统通常是 GBK）
         import locale
         default_encoding = locale.getpreferredencoding(False) or 'utf-8'
         with open(log_file, "w", encoding=default_encoding, errors='replace') as f_out:
@@ -415,11 +429,11 @@ def _training_worker(stage, timesteps, resume, load_model=""):
                 text=True,
             )
 
-        _training_state["pid"] = process.pid
-        _training_state["running"] = True
+        with training_lock:
+            _training_state["pid"] = process.pid
+            _training_state["running"] = True
 
         # 定期检查进程状态和读取日志
-        import time
         last_pos = 0
         episode_rewards = []
 
@@ -427,19 +441,19 @@ def _training_worker(stage, timesteps, resume, load_model=""):
             # 检查进程是否结束
             ret = process.poll()
             if ret is not None:
-                # 进程已结束，读取剩余日志
                 with open(log_file, "r", encoding=default_encoding, errors='replace') as f:
                     f.seek(last_pos)
                     for line in f:
                         line = line.strip()
                         if line and ("episode" in line.lower() or "rew" in line.lower() or "step" in line.lower()):
                             episode_rewards.append(line[-100:] if len(line) > 100 else line)
-                _training_state["log_lines"] = episode_rewards[-50:]
-                _training_state["running"] = False
-                _training_state["pid"] = None
-                _training_state["target_steps"] = 0
-                if ret != 0 and ret is not None:
-                    _training_state["error"] = f"训练进程退出 (code: {ret})"
+                with training_lock:
+                    _training_state["log_lines"] = episode_rewards[-50:]
+                    _training_state["running"] = False
+                    _training_state["pid"] = None
+                    _training_state["target_steps"] = 0
+                    if ret != 0 and ret is not None:
+                        _training_state["error"] = f"训练进程退出 (code: {ret})"
                 _auto_upload_models()
                 _sync_progress_cloud()
                 break
@@ -456,15 +470,17 @@ def _training_worker(stage, timesteps, resume, load_model=""):
                         if line and ("episode" in line.lower() or "rew" in line.lower() or "step" in line.lower() or "timestep" in line.lower()):
                             episode_rewards.append(line[-100:] if len(line) > 100 else line)
                     if new_lines:
-                        _training_state["log_lines"] = episode_rewards[-50:]
+                        with training_lock:
+                            _training_state["log_lines"] = episode_rewards[-50:]
                         _sync_progress_cloud()
             except Exception:
                 pass
 
     except Exception as e:
-        _training_state["running"] = False
-        _training_state["error"] = str(e)
-        _training_state["target_steps"] = 0
+        with training_lock:
+            _training_state["running"] = False
+            _training_state["error"] = str(e)
+            _training_state["target_steps"] = 0
         _sync_progress_cloud()
         import traceback as tb
         tb.print_exc()
@@ -477,16 +493,12 @@ def start_training(stage: str, timesteps: int, resume: bool = False, load_model:
     """
     global _training_state
 
-    if _training_state["running"]:
-        return {"success": False, "error": "训练已在进行中"}
+    with training_lock:
+        if _training_state["running"]:
+            return {"success": False, "error": "训练已在进行中"}
 
     # 检查模型文件
-    stage_short_map = {
-        "BULKING": "mid", "STARCH_ACCUMULATION": "late",
-        "EMERGENCE": "ini", "VEGETATIVE": "dev",
-        "TUBER_INIT": "dev", "MATURATION": "late",
-    }
-    model_short = stage_short_map.get(stage, "mid")
+    model_short = stage.lower()
     model_path = os.path.join(_get_rl_models_dir(), f"sac_{model_short}_final.zip")
     model_exists = os.path.exists(model_path)
 
@@ -521,16 +533,17 @@ def start_training(stage: str, timesteps: int, resume: bool = False, load_model:
     reload_config()
 
     # 重置状态
-    _training_state.update({
-        "running": True,
-        "stage": stage,
-        "timesteps": last_timesteps,
-        "target_steps": timesteps,
-        "start_time": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "progress": last_timesteps / timesteps * 100 if timesteps > 0 else 0,
-        "log_lines": [],
-        "error": None,
-    })
+    with training_lock:
+        _training_state.update({
+            "running": True,
+            "stage": stage,
+            "timesteps": last_timesteps,
+            "target_steps": timesteps,
+            "start_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "progress": last_timesteps / timesteps * 100 if timesteps > 0 else 0,
+            "log_lines": [],
+            "error": None,
+        })
 
     # 启动后台线程
     thread = threading.Thread(target=_training_worker, args=(stage, timesteps, auto_resume, load_model))
@@ -561,23 +574,27 @@ def stop_training():
     """停止训练"""
     global _training_state
 
-    if not _training_state["running"]:
-        return {"success": False, "error": "没有正在运行的训练"}
+    with training_lock:
+        if not _training_state["running"]:
+            return {"success": False, "error": "没有正在运行的训练"}
 
-    if _training_state["pid"]:
+        pid = _training_state["pid"]
+
+    if pid:
         try:
             if os.name == "nt":
-                subprocess.run(f"taskkill /F /PID {_training_state['pid']}",
-                             shell=True, capture_output=True)
+                subprocess.run(f"taskkill /F /PID {pid}", shell=True, capture_output=True)
             else:
-                os.kill(_training_state["pid"], signal.SIGTERM)
+                os.kill(pid, signal.SIGTERM)
         except Exception:
             pass
 
-    _training_state["running"] = False
-    _training_state["pid"] = None
-    _training_state["target_steps"] = 0
-    _training_state["error"] = "用户手动停止"
+    with training_lock:
+        _training_state["running"] = False
+        _training_state["pid"] = None
+        _training_state["target_steps"] = 0
+        _training_state["error"] = "用户手动停止"
+
     _sync_progress_cloud()
 
     return {"success": True, "message": "训练已停止"}
@@ -586,12 +603,6 @@ def stop_training():
 def get_model_info():
     """获取模型列表 — 本地+云端合并，本地优先（反映最新训练状态）"""
     import re
-    stage_names = {
-        "ini": "EMERGENCE (出苗期)",
-        "dev": "VEGETATIVE/TUBER_INIT (营养/块茎形成)",
-        "mid": "BULKING (块茎膨大期)",
-        "late": "STARCH_ACCUMULATION/MATURATION (淀粉积累/成熟)",
-    }
     models_dir = _get_rl_models_dir()
     models = {}
     source = models_dir
@@ -618,10 +629,10 @@ def get_model_info():
                 steps_num = 999999
                 steps_label = "最终版"
             elif fname == "best_model.zip":
-                continue  # 忽略，与 _final 重复且无法解析步数
+                continue
             if stage_short is None:
                 continue
-            stage_name = stage_names.get(stage_short, stage_short)
+            stage_name = STAGE_MAP.get(stage_short, stage_short.upper())
             models[fname.replace(".zip", "")] = {
                 "name": fname.replace(".zip", ""),
                 "stage": stage_name,
@@ -659,21 +670,18 @@ def _sync_progress_cloud():
     """同步当前训练状态到云端"""
     try:
         from cloud_storage import sync_training_progress
-        sync_training_progress(
-            running=_training_state["running"],
-            stage=_training_state["stage"],
-            timesteps=_training_state["timesteps"],
-            target_steps=_training_state["target_steps"] or 120000,
-            progress=_training_state["progress"],
-            start_time=_training_state["start_time"],
-            error_msg=_training_state["error"],
-        )
+        with training_lock:
+            sync_training_progress(
+                running=_training_state["running"],
+                stage=_training_state["stage"],
+                timesteps=_training_state["timesteps"],
+                target_steps=_training_state["target_steps"] or load_config().sac().get("total_timesteps", 120000),
+                progress=_training_state["progress"],
+                start_time=_training_state["start_time"],
+                error_msg=_training_state["error"],
+            )
     except Exception:
         pass
-
-
-# 上传控制
-_upload_cancel = False
 
 
 def _auto_upload_models():
@@ -688,17 +696,20 @@ def _auto_upload_models():
 def upload_models_to_cloud():
     """异步上传全部已完成模型，立即返回"""
     global _upload_progress, _upload_cancel
-    _upload_cancel = False
-    _upload_progress = {"done": False, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": [], "processed": 0}
+    with upload_lock:
+        _upload_cancel = False
+        _upload_progress = {"done": False, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": [], "processed": 0}
 
     def _run():
         from cloud_storage import upload_all_models
         try:
             upload_all_models(_get_rl_models_dir(), completed_only=False, progress=_upload_progress)
         except Exception as e:
-            _upload_progress["errors"].append(str(e))
+            with upload_lock:
+                _upload_progress["errors"].append(str(e))
         finally:
-            _upload_progress["done"] = True
+            with upload_lock:
+                _upload_progress["done"] = True
 
     thread = threading.Thread(target=_run)
     thread.daemon = True
@@ -709,19 +720,19 @@ def upload_models_to_cloud():
 def upload_selected_models(names):
     """异步上传指定名称的模型"""
     global _upload_progress, _upload_cancel
-    _upload_cancel = False
-    _upload_progress = {"done": False, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": [], "processed": 0}
+    with upload_lock:
+        _upload_cancel = False
+        _upload_progress = {"done": False, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": [], "processed": 0}
     models_dir = _get_rl_models_dir()
 
     def _run():
-        from cloud_storage import upload_model_by_name
         total = len(names)
-        if _upload_progress:
+        with upload_lock:
             _upload_progress["total"] = total
         for i, name in enumerate(names):
-            if _upload_cancel:
-                break
-            if _upload_progress:
+            with upload_lock:
+                if _upload_cancel:
+                    break
                 _upload_progress["current"] = name
                 _upload_progress["processed"] = i
             try:
@@ -734,30 +745,33 @@ def upload_selected_models(names):
                 ensure_database()
                 # 解析元数据
                 import re
-                stage_map = {"ini": "EMERGENCE", "dev": "VEGETATIVE", "mid": "BULKING", "late": "STARCH_ACCUMULATION"}
                 stage = ""; steps_label = ""; steps_num = 0
                 m1 = re.match(r"sac_(ini|dev|mid|late)_(\d+)_steps", name)
                 if m1:
-                    stage = stage_map.get(m1.group(1), m1.group(1))
+                    stage = STAGE_MAP.get(m1.group(1), m1.group(1).upper())
                     steps_num = int(m1.group(2))
                     steps_label = f"{steps_num:,} 步"
                 elif re.match(r"sac_(ini|dev|mid|late)_final", name):
                     m2 = re.match(r"sac_(ini|dev|mid|late)_final", name)
-                    stage = stage_map.get(m2.group(1), m2.group(1))
+                    stage = STAGE_MAP.get(m2.group(1), m2.group(1).upper())
                     steps_num = 999999; steps_label = "最终版"
                 elif name == "best_model":
-                    continue  # 忽略
+                    continue
                 size_mb = round(os.path.getsize(filepath) / (1024 * 1024), 2)
                 mtime = time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(filepath)))
                 result = upload_model(name, stage, steps_label, steps_num, size_mb, mtime, data)
-                if result.get("uploaded"):
-                    _upload_progress["uploaded"] += 1
-                else:
-                    _upload_progress["skipped"] += 1
+                with upload_lock:
+                    if result.get("uploaded"):
+                        _upload_progress["uploaded"] += 1
+                    else:
+                        _upload_progress["skipped"] += 1
             except Exception as e:
-                _upload_progress["errors"].append(f"{name}: {str(e)[:80]}")
-            _upload_progress["processed"] = i + 1
-        _upload_progress["done"] = True
+                with upload_lock:
+                    _upload_progress["errors"].append(f"{name}: {str(e)[:80]}")
+            with upload_lock:
+                _upload_progress["processed"] = i + 1
+        with upload_lock:
+            _upload_progress["done"] = True
 
     thread = threading.Thread(target=_run)
     thread.daemon = True
@@ -768,13 +782,15 @@ def upload_selected_models(names):
 def stop_upload():
     """取消正在进行的上传"""
     global _upload_cancel, _upload_progress
-    _upload_cancel = True
-    _upload_progress["_cancel"] = True
+    with upload_lock:
+        _upload_cancel = True
+        _upload_progress["_cancel"] = True
     return {"success": True, "message": "上传已停止"}
 
 
 def get_upload_progress():
-    return _upload_progress
+    with upload_lock:
+        return _upload_progress.copy()
 
 
 def delete_model(name: str):
@@ -793,23 +809,30 @@ def delete_model(name: str):
             errors.append(f"本地删除失败: {e}")
 
     # 删除 MySQL 记录
+    conn = None
     try:
         from cloud_storage import ensure_database
         ensure_database()
         import pymysql
+        cfg = cloud_storage._get_cloud_config()
         conn = pymysql.connect(
-            host="154.44.26.212", port=61762,
-            user="root", password="mysql_dDPsQR",
-            database="digital_twin", connect_timeout=5, charset="utf8mb4",
+            host=cfg["host"], port=cfg["port"],
+            user=cfg["user"], password=cfg["password"],
+            database=cfg["database"], connect_timeout=5, charset="utf8mb4",
         )
         with conn.cursor() as cur:
             cur.execute("DELETE FROM trained_models WHERE name = %s", (name,))
             if cur.rowcount > 0:
                 deleted_cloud = True
         conn.commit()
-        conn.close()
     except Exception as e:
         errors.append(f"云端删除失败: {e}")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     if not deleted_local and not deleted_cloud:
         return {"success": False, "error": "模型不存在", "errors": errors}
@@ -825,15 +848,17 @@ def delete_model(name: str):
 def clear_training_progress():
     """清除训练进度（本地 + 云端）"""
     global _training_state
-    _training_state.update({
-        "running": False, "stage": None, "timesteps": 0,
-        "target_steps": 0, "progress": 0, "start_time": None,
-        "log_lines": [], "error": None,
-    })
+    with training_lock:
+        _training_state.update({
+            "running": False, "stage": None, "timesteps": 0,
+            "target_steps": 0, "progress": 0, "start_time": None,
+            "log_lines": [], "error": None,
+        })
     # 清除云端
     try:
         from cloud_storage import sync_training_progress
-        sync_training_progress(False, timesteps=0, target_steps=120000, progress=0)
+        default_steps = load_config().sac().get("total_timesteps", 120000)
+        sync_training_progress(False, timesteps=0, target_steps=default_steps, progress=0)
     except Exception:
         pass
     # 清除本地日志
