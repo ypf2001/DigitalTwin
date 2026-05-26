@@ -1,122 +1,142 @@
 <template>
-  <div>
+  <div class="settings-page">
+    <div class="page-header">
+      <div class="header-titles">
+        <h2>系统设置</h2>
+        <p class="subtitle">全局参数配置与调整</p>
+      </div>
+      <div v-if="data" class="header-actions">
+        <button v-if="editing" class="btn btn-outline" @click="cancelEdit">✖ 取消</button>
+        <button class="btn" :class="editing?'btn-primary':'btn-outline'" @click="toggleEdit">
+          {{ editing ? '💾 保存配置' : '✏️ 编辑模式' }}
+        </button>
+      </div>
+    </div>
+
     <div v-if="loading" class="loading-overlay"><span class="spinner dark"></span>加载中...</div>
     <div v-else-if="error" class="error-box">{{ error }}</div>
+
     <template v-else-if="data">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:16px;gap:10px">
-        <button class="btn" :class="editing?'btn-primary':'btn-outline'" @click="toggleEdit">
-          {{ editing ? '💾 保存全部' : '✏️ 编辑' }}
-        </button>
-        <button v-if="editing" class="btn btn-outline" @click="cancelEdit">✖ 取消</button>
-      </div>
-      <div v-if="saveMsg" class="error-box" style="background:#e8f5e9;color:var(--success)">{{ saveMsg }}</div>
+      <div v-if="saveMsg" class="success-box" style="margin-bottom: 20px;">{{ saveMsg }}</div>
 
-      <!-- Soil -->
-      <div class="card">
-        <div class="card-title">土壤参数</div>
-        <table class="stats-table">
-          <tr v-for="(v, k) in soilFields" :key="k">
-            <th>{{ v.label }}</th>
-            <td>
-              <input v-if="editing" v-model="edits['env.'+k]" class="form-input" style="width:120px" />
-              <span v-else>{{ data.soil?.[k] }}</span>
-            </td>
-          </tr>
-        </table>
-      </div>
-
-      <!-- Fixed Strategy -->
-      <div class="card">
-        <div class="card-title">固定策略</div>
-        <table class="stats-table">
-          <tr><th>q_f (L/min)</th><td>
-            <input v-if="editing" v-model="edits['action.fixed_strategy.0']" class="form-input" style="width:120px" />
-            <span v-else>{{ data.action_fixed?.[0] }}</span>
-          </td></tr>
-          <tr><th>q_a (L/min)</th><td>
-            <input v-if="editing" v-model="edits['action.fixed_strategy.1']" class="form-input" style="width:120px" />
-            <span v-else>{{ data.action_fixed?.[1] }}</span>
-          </td></tr>
-        </table>
-      </div>
-
-      <!-- Crop Stages -->
-      <div v-if="data.stages" class="card">
-        <div class="card-title">生育期参数</div>
-        <div style="overflow-x:auto">
-          <table class="stats-table">
-            <thead><tr><th>生育期</th><th>Kc</th><th>目标 EC (dS/m)</th><th>根深 (mm)</th></tr></thead>
-            <tbody>
-              <tr v-for="(v, k) in data.stages" :key="k">
-                <td>{{ stageNames[k] || k }}</td>
+      <div class="settings-grid">
+        <!-- 左侧列 -->
+        <div class="settings-col">
+          <!-- Soil -->
+          <div class="card">
+            <div class="card-title">土壤初始与物理参数</div>
+            <table class="stats-table config-table">
+              <tr v-for="(v, k) in soilFields" :key="k">
+                <th>{{ v.label }}</th>
                 <td>
-                  <input v-if="editing" v-model="edits['stages.'+k+'.kc']" class="form-input" style="width:80px" />
-                  <span v-else>{{ v.kc }}</span>
-                </td>
-                <td>
-                  <input v-if="editing" v-model="edits['stages.'+k+'.target_ec']" class="form-input" style="width:80px" />
-                  <span v-else>{{ v.target_ec }}</span>
-                </td>
-                <td>
-                  <input v-if="editing" v-model="edits['stages.'+k+'.root_depth']" class="form-input" style="width:80px" />
-                  <span v-else>{{ v.root_depth }}</span>
+                  <input v-if="editing" v-model="edits['env.'+k]" class="form-input" />
+                  <span v-else>{{ data.soil?.[k] }}</span>
                 </td>
               </tr>
-            </tbody>
-          </table>
+            </table>
+          </div>
+
+          <!-- Fixed Strategy -->
+          <div class="card">
+            <div class="card-title">固定灌溉策略</div>
+            <table class="stats-table config-table">
+              <tr><th>q_f (肥料流量 L/min)</th><td>
+                <input v-if="editing" v-model="edits['action.fixed_strategy.0']" class="form-input" />
+                <span v-else>{{ data.action_fixed?.[0] }}</span>
+              </td></tr>
+              <tr><th>q_a (酸液流量 L/min)</th><td>
+                <input v-if="editing" v-model="edits['action.fixed_strategy.1']" class="form-input" />
+                <span v-else>{{ data.action_fixed?.[1] }}</span>
+              </td></tr>
+            </table>
+          </div>
+
+          <!-- Mixing Tank -->
+          <div v-if="data.mixing_tank" class="card">
+            <div class="card-title">混肥罐参数</div>
+            <table class="stats-table config-table">
+              <tr v-for="(v, k) in data.mixing_tank" :key="k">
+                <th>{{ k }}</th>
+                <td>
+                  <input v-if="editing" v-model="edits['mixing_tank.'+k]" class="form-input" />
+                  <span v-else>{{ v }}</span>
+                </td>
+              </tr>
+            </table>
+          </div>
+
+          <!-- Pipe -->
+          <div v-if="data.pipe" class="card">
+            <div class="card-title">管道动态参数 (FOPTD)</div>
+            <table class="stats-table config-table">
+              <tr v-for="(v, k) in data.pipe" :key="k">
+                <th>{{ k }}</th>
+                <td>
+                  <input v-if="editing" v-model="edits['pipe.'+k]" class="form-input" />
+                  <span v-else>{{ v }}</span>
+                </td>
+              </tr>
+            </table>
+          </div>
         </div>
-      </div>
 
-      <!-- Mixing Tank -->
-      <div v-if="data.mixing_tank" class="card"><div class="card-title">混肥罐</div>
-        <table class="stats-table">
-          <tr v-for="(v, k) in data.mixing_tank" :key="k">
-            <th>{{ k }}</th>
-            <td>
-              <input v-if="editing" v-model="edits['mixing_tank.'+k]" class="form-input" style="width:120px" />
-              <span v-else>{{ v }}</span>
-            </td>
-          </tr>
-        </table>
-      </div>
+        <!-- 右侧列 -->
+        <div class="settings-col">
+          <!-- Crop Stages -->
+          <div v-if="data.stages" class="card">
+            <div class="card-title">马铃薯生育期特征</div>
+            <div style="overflow-x:auto">
+              <table class="stats-table config-table compact">
+                <thead><tr><th>生育期</th><th>Kc</th><th>目标 EC</th><th>根深</th></tr></thead>
+                <tbody>
+                  <tr v-for="(v, k) in data.stages" :key="k">
+                    <td>{{ stageNames[k] || k }}</td>
+                    <td>
+                      <input v-if="editing" v-model="edits['stages.'+k+'.kc']" class="form-input" />
+                      <span v-else>{{ v.kc }}</span>
+                    </td>
+                    <td>
+                      <input v-if="editing" v-model="edits['stages.'+k+'.target_ec']" class="form-input" />
+                      <span v-else>{{ v.target_ec }}</span>
+                    </td>
+                    <td>
+                      <input v-if="editing" v-model="edits['stages.'+k+'.root_depth']" class="form-input" />
+                      <span v-else>{{ v.root_depth }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
 
-      <!-- Pipe -->
-      <div v-if="data.pipe" class="card"><div class="card-title">管道 (FOPTD)</div>
-        <table class="stats-table">
-          <tr v-for="(v, k) in data.pipe" :key="k">
-            <th>{{ k }}</th>
-            <td>
-              <input v-if="editing" v-model="edits['pipe.'+k]" class="form-input" style="width:120px" />
-              <span v-else>{{ v }}</span>
-            </td>
-          </tr>
-        </table>
-      </div>
+          <!-- SAC -->
+          <div v-if="data.sac" class="card">
+            <div class="card-title">强化学习 (SAC) 超参数</div>
+            <table class="stats-table config-table">
+              <tr v-for="(v, k) in data.sac" :key="k">
+                <th>{{ k }}</th>
+                <td>
+                  <input v-if="editing" v-model="edits['sac.'+k]" class="form-input" />
+                  <span v-else>{{ v }}</span>
+                </td>
+              </tr>
+            </table>
+          </div>
 
-      <!-- SAC -->
-      <div v-if="data.sac" class="card"><div class="card-title">SAC 参数</div>
-        <table class="stats-table">
-          <tr v-for="(v, k) in data.sac" :key="k">
-            <th>{{ k }}</th>
-            <td>
-              <input v-if="editing" v-model="edits['sac.'+k]" class="form-input" style="width:120px" />
-              <span v-else>{{ v }}</span>
-            </td>
-          </tr>
-        </table>
-      </div>
-
-      <!-- Reward -->
-      <div v-if="data.reward" class="card"><div class="card-title">奖励函数权重</div>
-        <table class="stats-table">
-          <tr v-for="(v, k) in data.reward" :key="k">
-            <th>{{ k }}</th>
-            <td>
-              <input v-if="editing" v-model="edits['reward.'+k]" class="form-input" style="width:120px" />
-              <span v-else>{{ v }}</span>
-            </td>
-          </tr>
-        </table>
+          <!-- Reward -->
+          <div v-if="data.reward" class="card">
+            <div class="card-title">奖励函数权重</div>
+            <table class="stats-table config-table">
+              <tr v-for="(v, k) in data.reward" :key="k">
+                <th>{{ k }}</th>
+                <td>
+                  <input v-if="editing" v-model="edits['reward.'+k]" class="form-input" />
+                  <span v-else>{{ v }}</span>
+                </td>
+              </tr>
+            </table>
+          </div>
+        </div>
       </div>
     </template>
   </div>
@@ -235,3 +255,79 @@ export default {
   },
 }
 </script>
+
+<style scoped>
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.header-titles h2 {
+  margin: 0 0 4px 0;
+  font-size: 24px;
+  color: var(--text-color);
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 1000px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.config-table th {
+  width: 45%;
+  font-weight: 500;
+}
+
+.config-table td {
+  padding: 8px 12px;
+}
+
+.config-table.compact th,
+.config-table.compact td {
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.form-input {
+  width: 100%;
+  max-width: 120px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  transition: border-color 0.2s;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+.success-box {
+  padding: 12px 16px;
+  background-color: #e8f5e9;
+  color: #2e7d32;
+  border-radius: 6px;
+  border: 1px solid #c8e6c9;
+  font-weight: 500;
+}
+</style>

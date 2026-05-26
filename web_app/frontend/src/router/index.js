@@ -1,14 +1,13 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import Dashboard from '../views/Dashboard.vue'
-import Simulation from '../views/Simulation.vue'
-import SeasonCompare from '../views/SeasonCompare.vue'
+import SimulationLab from '../views/SimulationLab.vue' // 新增导入
 import Settings from '../views/Settings.vue'
 import Training from '../views/Training.vue'
 
 const routes = [
   { path: '/', name: 'Dashboard', component: Dashboard },
-  { path: '/simulation', name: 'Simulation', component: Simulation },
-  { path: '/season-compare', name: 'SeasonCompare', component: SeasonCompare },
+  { path: '/simulation', name: 'SimulationLab', component: SimulationLab }, // 修改路由
+  // { path: '/season-compare', name: 'SeasonCompare', component: SeasonCompare }, // 移除此行
   { path: '/training', name: 'Training', component: Training },
   { path: '/settings', name: 'Settings', component: Settings },
 ]

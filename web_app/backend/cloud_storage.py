@@ -4,7 +4,7 @@ import time
 import pymysql
 
 # 从配置文件读取云端数据库配置
-_cLOUD_CONFIG = None
+_cloud_CONFIG = None
 
 
 def _get_cloud_config():
@@ -128,7 +128,6 @@ def upload_model(name, stage, steps, steps_num, size_mb, mtime, file_data):
 
 def query_all_models():
     """从 MySQL 读取所有模型记录，返回与 get_model_info 相同格式"""
-    ensure_database()
     conn = _get_db_conn()
     models = []
     try:
@@ -152,8 +151,6 @@ def query_all_models():
 
 
 def upload_all_models(models_dir, completed_only=False, progress=None):
-    ensure_database()
-
     if not os.path.isdir(models_dir):
         if progress:
             progress["done"] = True
@@ -255,7 +252,6 @@ def upload_all_models(models_dir, completed_only=False, progress=None):
 
 def sync_training_progress(running, stage=None, timesteps=0, target_steps=120000, progress=0, start_time=None, error_msg=None):
     """同步训练进度到云端 MySQL"""
-    ensure_database()
     conn = _get_db_conn()
     try:
         with conn.cursor() as cur:
@@ -274,7 +270,6 @@ def sync_training_progress(running, stage=None, timesteps=0, target_steps=120000
 
 def query_training_progress():
     """从云端读取训练进度"""
-    ensure_database()
     conn = _get_db_conn()
     try:
         with conn.cursor() as cur:

@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from routers import router
+from cloud_storage import ensure_database
 
 app = FastAPI(title="数字孪生 API", version="1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -25,6 +26,19 @@ app.include_router(router)
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+@app.on_event("startup")
+def startup_event():
+    """应用启动时，检查云端数据库和表是否存在"""
+    print("Ensuring cloud database and tables exist...")
+    try:
+        ensure_database()
+        print("Cloud database check complete.")
+    except Exception as e:
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print(f"!!! [WARNING] Cloud database check failed: {e}")
+        print("!!! [WARNING] Cloud-related features will be unavailable.")
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
 if __name__ == '__main__':
     import uvicorn

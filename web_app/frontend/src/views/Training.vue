@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="training-page">
     <!-- Toast 通知 -->
     <div v-if="toast.show" class="toast" :class="toast.type">{{ toast.msg }}</div>
 
@@ -30,28 +30,12 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-title">训练参数设置</div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>训练阶段</label>
-          <select v-model="params.stage" class="form-select" :disabled="training.running">
-            <option value="INI">INI - 出苗期</option>
-            <option value="DEV">DEV - 营养/块茎形成期</option>
-            <option value="MID">MID - 块茎膨大期</option>
-            <option value="LATE">LATE - 淀粉积累/成熟期</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>训练步数</label>
-          <div class="input-with-unit">
-            <input type="number" v-model.number="params.timesteps" class="form-input" min="1000" max="500000" step="1000" style="width:140px" />
-            <span class="unit">步</span>
-          </div>
-          <small class="hint">目标：120,000 步</small>
-        </div>
+    <div class="page-header">
+      <div class="header-titles">
+        <h2>模型训练中心</h2>
+        <p class="subtitle">SAC 强化学习模型训练与管理</p>
       </div>
-      <div style="margin-top:16px;display:flex;gap:12px;align-items:center">
+      <div class="header-actions">
         <button v-if="!training.running" class="btn btn-primary" @click="showNewTrainModal = true" :disabled="loading">
           <span v-if="loading" class="spinner"></span>
           {{ loading ? '启动中...' : '▶ 开始新训练' }}
@@ -60,170 +44,214 @@
           ⏹ 停止训练
         </button>
       </div>
-      <div v-if="error" class="error-box" style="margin-top:12px">{{ error }}</div>
-      <div v-if="training.error" class="error-box" style="margin-top:12px">{{ training.error }}</div>
-      <div v-if="message" class="success-box" style="margin-top:12px">{{ message }}</div>
     </div>
 
-    <!-- 训练日志 -->
-    <div class="card" style="margin-top:16px">
-      <div class="card-title">📋 训练日志</div>
-      <div class="log-container" style="height:200px">
-        <div v-if="training.logLines && training.logLines.length > 0">
-          <div v-for="(line, i) in training.logLines" :key="i" class="log-line">{{ line }}</div>
-        </div>
-        <div v-else style="color:#666;padding:20px;text-align:center;font-size:12px">
-          {{ training.running ? '等待日志输出...' : '暂无日志' }}
-        </div>
-      </div>
-    </div>
+    <div v-if="error" class="error-box">{{ error }}</div>
+    <div v-if="training.error" class="error-box">{{ training.error }}</div>
+    <div v-if="message" class="success-box" style="margin-bottom: 20px;">{{ message }}</div>
 
-    <!-- 训练进度 -->
-    <div class="card" style="margin-top:16px">
-      <div class="card-title">
-        <span>📈 训练进度</span>
-        <span v-if="training.running" class="training-badge">
-          <span class="pulse-dot"></span> 训练中
-        </span>
-        <span v-else-if="training.progress >= 100 && training.timesteps >= params.timesteps" class="completed-badge">✓ 完成</span>
-        <span v-else class="idle-badge">○ 待机</span>
-      </div>
-      <table class="progress-table">
-        <thead>
-          <tr>
-            <th>阶段</th>
-            <th>目标步数</th>
-            <th>当前步数</th>
-            <th style="width:140px">进度</th>
-                <th>来源</th>
-                <th style="min-width:180px;white-space:nowrap">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :class="{ 'running-row': training.running }">
-            <td><span class="stage-badge">{{ training.stage ? getStageName(training.stage) : '-' }}</span></td>
-            <td>{{ training.running && training.target_steps ? training.target_steps.toLocaleString() : params.timesteps.toLocaleString() }}</td>
-            <td>{{ training.timesteps ? training.timesteps.toLocaleString() : '0' }}</td>
-            <td>
-              <div class="table-progress">
-                <div class="table-progress-bar" :class="{ animating: training.running }"
-                     :style="{ width: Math.max(2, training.progress) + '%' }"></div>
-                <span class="table-progress-text">{{ training.progress.toFixed(1) }}%</span>
+    <div class="training-grid">
+      <div class="training-col">
+        <!-- 训练参数设置 -->
+        <div class="card">
+          <div class="card-title">训练参数设置</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>训练阶段</label>
+              <select v-model="params.stage" class="form-select" :disabled="training.running">
+                <option value="INI">INI - 出苗期</option>
+                <option value="DEV">DEV - 营养/块茎形成期</option>
+                <option value="MID">MID - 块茎膨大期</option>
+                <option value="LATE">LATE - 淀粉积累/成熟期</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>训练步数</label>
+              <div class="input-with-unit">
+                <input type="number" v-model.number="params.timesteps" class="form-input" min="1000" max="500000" step="1000" />
+                <span class="unit">步</span>
               </div>
-            </td>
-            <td><span style="font-size:11px;color:var(--text-secondary)">💻 本地</span></td>
-            <td style="white-space:nowrap">
-              <button v-if="training.running" class="btn btn-sm btn-danger" @click="handleStop" :disabled="loading">⏹ 停止</button>
-              <button v-else-if="training.timesteps > 0 && training.progress < 100" class="btn btn-sm btn-success" @click="resumeTraining" :disabled="loading">🔄 继续</button>
-              <button v-if="!training.running && training.timesteps > 0" class="btn btn-sm" style="background:#1976d2;color:#fff;margin-left:6px" @click="uploadChecked" :disabled="uploading">☁️ 上传</button>
-              <button v-if="!training.running && training.timesteps > 0" class="btn-icon-delete" @click="clearTrainingProgress" style="margin-left:6px" title="清除记录">✕</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <div v-if="training.start_time" class="time-info">
-        <span>⏱️ 已用时间: {{ formatDuration(elapsedTime) }}</span>
-        <span v-if="training.running">📅 开始于: {{ training.start_time }}</span>
-      </div>
-    </div>
-
-    <!-- 模型列表 -->
-    <div class="card" style="margin-top:16px;min-height:120px">
-      <div class="card-title">已训练模型</div>
-      <div v-if="modelsLoading" class="loading-overlay"><span class="spinner dark"></span>加载中...</div>
-      <div v-else-if="models.length === 0" style="color:var(--text-secondary);padding:16px 0">
-        暂无已训练的模型
-      </div>
-      <template v-else>
-        <!-- 未完成 -->
-        <div v-if="incompleteModels.length > 0" style="margin-bottom:20px">
-          <div class="card-title" style="font-size:14px;color:var(--warning);display:flex;align-items:center;gap:12px">
-            <span>⏳ 训练中 / 未完成</span>
-            <button v-if="!uploading" class="btn btn-sm" :style="allIncompleteChecked ? 'background:#e74c3c;color:#fff' : 'background:#4caf50;color:#fff'" @click="checkAllIncomplete">{{ allIncompleteChecked ? '☑ 全选' : '☐ 全选' }}</button>
-            <button class="btn btn-sm btn-danger" @click="deleteCheckedIncomplete" :disabled="checkedIncomplete.length === 0">🗑 删除选中</button>
-            <button v-if="!uploading" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadCheckedIncomplete" :disabled="checkedIncomplete.length === 0">☁️ 上传选中</button>
-          </div>
-          <div style="width:100%;overflow-x:auto;max-height:300px">
-            <table class="stats-table">
-              <thead>
-                <tr><th style="width:4%">☐</th><th style="width:26%">模型名称</th><th style="width:14%">阶段</th><th style="width:12%">步数</th><th style="width:8%">大小</th><th style="width:16%">更新时间</th><th style="width:6%">云端</th><th style="width:14%">操作</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="m in incompleteModels" :key="m.name">
-                  <td>
-                    <input v-if="m.in_cloud" type="checkbox" checked disabled />
-                    <input v-else type="checkbox" :checked="checkedIncomplete.includes(m.name)" @change="toggleCheckIncomplete(m.name)" />
-                  </td>
-                  <td><code>{{ m.name }}</code></td>
-                  <td>{{ m.stage }}</td>
-                  <td>{{ m.steps }}</td>
-                  <td>{{ m.size_mb }} MB</td>
-                  <td>{{ m.mtime }}</td>
-                  <td><span v-if="m.in_cloud" style="color:var(--success)">☁️</span><span v-else style="color:#ccc">—</span></td>
-                  <td style="white-space:nowrap">
-                    <button class="btn btn-sm btn-success" @click="selectModel(m)" :disabled="training.running">继续训练</button>
-                    <button class="btn-icon-delete" @click="deleteOne(m)" :disabled="training.running" style="margin-left:6px" title="删除">✕</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+              <small class="hint">目标：120,000 步</small>
+            </div>
           </div>
         </div>
-        <!-- 已完成 -->
-        <div v-if="completedModels.length > 0">
-          <div class="card-title" style="font-size:14px;color:var(--success);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-            <span>✓ 已完成 (120,000 步)</span>
-            <button v-if="!uploading" class="btn btn-sm" :style="allCompletedChecked ? 'background:#e74c3c;color:#fff' : 'background:#4caf50;color:#fff'" @click="checkAllCompleted">{{ allCompletedChecked ? '☑ 全选' : '☐ 全选' }}</button>
-            <button class="btn btn-sm btn-danger" @click="deleteCheckedCompleted" :disabled="checkedCompleted.length === 0">🗑 删除选中</button>
-            <button v-if="!uploading" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadCheckedCompleted" :disabled="checkedCompleted.length === 0">☁️ 上传选中</button>
-            <button v-if="uploading" class="btn btn-sm btn-danger" @click="stopUploading">⏹ 停止上传</button>
-          </div>
-          <div v-if="uploading" style="margin:8px 0;background:#e9ecef;border-radius:6px;height:16px;overflow:hidden">
-            <div :style="{ width: uploadPct + '%', height:'100%', background:'linear-gradient(90deg,#4caf50,#8bc34a)', transition:'width .3s' }"></div>
-          </div>
-          <div v-if="uploading" style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">
-            {{ uploadCurrent }} / {{ uploadTotal }}
-          </div>
-          <div style="width:100%;overflow-x:auto;max-height:300px">
-            <table class="stats-table">
-              <thead>
-                <tr><th style="width:4%">☐</th><th style="width:26%">模型名称</th><th style="width:14%">阶段</th><th style="width:12%">步数</th><th style="width:8%">大小</th><th style="width:16%">更新时间</th><th style="width:6%">云端</th><th style="width:14%">操作</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="m in completedModels" :key="m.name">
-                  <td>
-                    <input v-if="m.in_cloud" type="checkbox" checked disabled />
-                    <input v-else type="checkbox" :checked="checkedCompleted.includes(m.name)" @change="toggleCheckCompleted(m.name)" />
-                  </td>
-                  <td><code>{{ m.name }}</code></td>
-                  <td>{{ m.stage }}</td>
-                  <td>{{ m.steps }}</td>
-                  <td>{{ m.size_mb }} MB</td>
-                  <td>{{ m.mtime }}</td>
-                  <td><span v-if="m.in_cloud" style="color:var(--success)">☁️</span><span v-else style="color:#ccc">—</span></td>
-                  <td><button class="btn-icon-delete" @click="deleteOne(m)" :disabled="training.running" title="删除">✕</button></td>
-                </tr>
-              </tbody>
-            </table>
+
+        <!-- 训练日志 -->
+        <div class="card">
+          <div class="card-title">📋 训练日志</div>
+          <div class="log-container">
+            <div v-if="training.logLines && training.logLines.length > 0">
+              <div v-for="(line, i) in training.logLines" :key="i" class="log-line">{{ line }}</div>
+            </div>
+            <div v-else style="color:#666;padding:20px;text-align:center;font-size:12px">
+              {{ training.running ? '等待日志输出...' : '暂无日志' }}
+            </div>
           </div>
         </div>
-      </template>
-    </div>
 
-    <!-- SAC 参数参考 -->
-    <div class="card" style="margin-top:16px">
-      <div class="card-title">SAC 算法参数说明</div>
-      <table class="stats-table">
-        <tr><th>参数</th><th>说明</th></tr>
-        <tr><td>learning_rate</td><td>学习率，控制策略更新的步长</td></tr>
-        <tr><td>buffer_size</td><td>经验回放缓冲区大小</td></tr>
-        <tr><td>batch_size</td><td>每次更新的批量大小</td></tr>
-        <tr><td>gamma</td><td>折扣因子，影响长期奖励权重</td></tr>
-        <tr><td>tau</td><td>目标网络更新系数</td></tr>
-        <tr><td>ent_coef</td><td>熵正则化系数，探索与利用平衡</td></tr>
-      </table>
-      <div style="margin-top:12px;font-size:13px;color:var(--text-secondary)">
-        💡 提示：训练过程中可以随时点击"停止训练"按钮，模型会自动保存。
+        <!-- SAC 参数参考 -->
+        <div class="card">
+          <div class="card-title">SAC 算法参数说明</div>
+          <table class="stats-table config-table">
+            <tr><th>参数</th><th>说明</th></tr>
+            <tr><td>learning_rate</td><td>学习率，控制策略更新的步长</td></tr>
+            <tr><td>buffer_size</td><td>经验回放缓冲区大小</td></tr>
+            <tr><td>batch_size</td><td>每次更新的批量大小</td></tr>
+            <tr><td>gamma</td><td>折扣因子，影响长期奖励权重</td></tr>
+            <tr><td>tau</td><td>目标网络更新系数</td></tr>
+            <tr><td>ent_coef</td><td>熵正则化系数，探索与利用平衡</td></tr>
+          </table>
+          <div style="margin-top:12px;font-size:13px;color:var(--text-secondary)">
+            💡 提示：训练过程中可以随时点击"停止训练"按钮，模型会自动保存。
+          </div>
+        </div>
+      </div>
+
+      <div class="training-col">
+        <!-- 训练进度 -->
+        <div class="card">
+          <div class="card-title">
+            <span>📈 训练进度</span>
+            <span v-if="training.running" class="training-badge">
+              <span class="pulse-dot"></span> 训练中
+            </span>
+            <span v-else-if="training.progress >= 100 && training.timesteps >= params.timesteps" class="completed-badge">✓ 完成</span>
+            <span v-else class="idle-badge">○ 待机</span>
+          </div>
+          <table class="progress-table">
+            <thead>
+              <tr>
+                <th>阶段</th>
+                <th>目标步数</th>
+                <th>当前步数</th>
+                <th style="width:140px">进度</th>
+                    <th>来源</th>
+                    <th style="min-width:180px;white-space:nowrap">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :class="{ 'running-row': training.running }">
+                <td><span class="stage-badge">{{ training.stage ? getStageName(training.stage) : '-' }}</span></td>
+                <td>{{ training.running && training.target_steps ? training.target_steps.toLocaleString() : params.timesteps.toLocaleString() }}</td>
+                <td>{{ training.timesteps ? training.timesteps.toLocaleString() : '0' }}</td>
+                <td>
+                  <div class="table-progress">
+                    <div class="table-progress-bar" :class="{ animating: training.running }"
+                         :style="{ width: Math.max(2, training.progress) + '%' }"></div>
+                    <span class="table-progress-text">{{ training.progress.toFixed(1) }}%</span>
+                  </div>
+                </td>
+                <td><span style="font-size:11px;color:var(--text-secondary)">💻 本地</span></td>
+                <td style="white-space:nowrap; display:flex; align-items:center; gap:6px;">
+                  <button v-if="training.running" class="btn btn-sm btn-danger" @click="handleStop" :disabled="loading">⏹ 停止</button>
+                  <button v-else-if="training.timesteps > 0 && training.progress < 100" class="btn btn-sm btn-success" @click="resumeTraining" :disabled="loading">🔄 继续</button>
+
+                  <button v-if="!training.running && training.timesteps > 0" class="btn btn-sm" style="background:#1976d2;color:#fff;display:inline-flex;align-items:center;gap:4px;" @click="handleUploadAll" :disabled="uploading">
+                    <span v-if="uploading" class="spinner" style="width:12px;height:12px;border-width:2px;"></span>
+                    {{ uploading ? '上传中...' : '☁️ 一键上传' }}
+                  </button>
+
+                  <button v-if="!training.running && training.timesteps > 0" class="btn-icon-delete" @click="clearTrainingProgress" title="清除记录">✕</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="training.start_time" class="time-info">
+            <span>⏱️ 已用时间: {{ formatDuration(elapsedTime) }}</span>
+            <span v-if="training.running">📅 开始于: {{ training.start_time }}</span>
+          </div>
+        </div>
+
+        <!-- 模型列表 -->
+        <div class="card" style="min-height:120px">
+          <div class="card-title">已训练模型</div>
+
+          <!-- 全局上传进度区域 -->
+          <div v-if="uploading" style="margin-bottom: 16px; padding: 12px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e0e0e0;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+              <span style="font-size:13px; font-weight:600; color:#333;">☁️ 正在连接云端并上传模型...</span>
+              <div>
+                 <span style="font-size:12px; color:var(--text-secondary); margin-right: 12px;">{{ uploadCurrent }} / {{ uploadTotal }}</span>
+                 <button class="btn btn-sm btn-danger" @click="stopUploading">⏹ 停止上传</button>
+              </div>
+            </div>
+            <div style="background:#e9ecef;border-radius:6px;height:12px;overflow:hidden">
+              <div :style="{ width: uploadPct + '%', height:'100%', background:'linear-gradient(90deg,#4caf50,#8bc34a)', transition:'width .3s' }"></div>
+            </div>
+          </div>
+
+          <div v-if="modelsLoading" class="loading-overlay"><span class="spinner dark"></span>加载中...</div>
+          <div v-else-if="models.length === 0" style="color:var(--text-secondary);padding:16px 0">
+            暂无已训练的模型
+          </div>
+          <template v-else>
+            <!-- 未完成 -->
+            <div v-if="incompleteModels.length > 0" style="margin-bottom:20px">
+              <div class="card-title" style="font-size:14px;color:var(--warning);display:flex;align-items:center;gap:12px">
+                <span>⏳ 训练中 / 未完成</span>
+                <button v-if="!uploading" class="btn btn-sm" :style="allIncompleteChecked ? 'background:#e74c3c;color:#fff' : 'background:#4caf50;color:#fff'" @click="checkAllIncomplete">{{ allIncompleteChecked ? '☑ 取消全选' : '☐ 全选' }}</button>
+                <button class="btn btn-sm btn-danger" @click="deleteCheckedIncomplete" :disabled="checkedIncomplete.length === 0">🗑 删除选中</button>
+                <button v-if="!uploading" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadCheckedIncomplete" :disabled="checkedIncomplete.length === 0">☁️ 上传选中</button>
+              </div>
+              <div style="width:100%;overflow-x:auto;max-height:300px">
+                <table class="stats-table">
+                  <thead>
+                    <tr><th style="width:4%">☐</th><th style="width:26%">模型名称</th><th style="width:14%">阶段</th><th style="width:12%">步数</th><th style="width:8%">大小</th><th style="width:16%">更新时间</th><th style="width:6%">云端</th><th style="width:14%">操作</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="m in incompleteModels" :key="m.name">
+                      <td>
+                        <input v-if="m.in_cloud" type="checkbox" checked disabled />
+                        <input v-else type="checkbox" :checked="checkedIncomplete.includes(m.name)" @change="toggleCheckIncomplete(m.name)" />
+                      </td>
+                      <td><code>{{ m.name }}</code></td>
+                      <td>{{ m.stage }}</td>
+                      <td>{{ m.steps }}</td>
+                      <td>{{ m.size_mb }} MB</td>
+                      <td>{{ m.mtime }}</td>
+                      <td><span v-if="m.in_cloud" style="color:var(--success)">☁️</span><span v-else style="color:#ccc">—</span></td>
+                      <td style="white-space:nowrap">
+                        <button class="btn btn-sm btn-success" @click="selectModel(m)" :disabled="training.running">继续训练</button>
+                        <button class="btn-icon-delete" @click="deleteOne(m)" :disabled="training.running" style="margin-left:6px" title="删除">✕</button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <!-- 已完成 -->
+            <div v-if="completedModels.length > 0">
+              <div class="card-title" style="font-size:14px;color:var(--success);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                <span>✓ 已完成 (120,000 步)</span>
+                <button v-if="!uploading" class="btn btn-sm" :style="allCompletedChecked ? 'background:#e74c3c;color:#fff' : 'background:#4caf50;color:#fff'" @click="checkAllCompleted">{{ allCompletedChecked ? '☑ 取消全选' : '☐ 全选' }}</button>
+                <button class="btn btn-sm btn-danger" @click="deleteCheckedCompleted" :disabled="checkedCompleted.length === 0">🗑 删除选中</button>
+                <button v-if="!uploading" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadCheckedCompleted" :disabled="checkedCompleted.length === 0">☁️ 上传选中</button>
+              </div>
+              <div style="width:100%;overflow-x:auto;max-height:300px">
+                <table class="stats-table">
+                  <thead>
+                    <tr><th style="width:4%">☐</th><th style="width:26%">模型名称</th><th style="width:14%">阶段</th><th style="width:12%">步数</th><th style="width:8%">大小</th><th style="width:16%">更新时间</th><th style="width:6%">云端</th><th style="width:14%">操作</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="m in completedModels" :key="m.name">
+                      <td>
+                        <input v-if="m.in_cloud" type="checkbox" checked disabled />
+                        <input v-else type="checkbox" :checked="checkedCompleted.includes(m.name)" @change="toggleCheckCompleted(m.name)" />
+                      </td>
+                      <td><code>{{ m.name }}</code></td>
+                      <td>{{ m.stage }}</td>
+                      <td>{{ m.steps }}</td>
+                      <td>{{ m.size_mb }} MB</td>
+                      <td>{{ m.mtime }}</td>
+                      <td><span v-if="m.in_cloud" style="color:var(--success)">☁️</span><span v-else style="color:#ccc">—</span></td>
+                      <td><button class="btn-icon-delete" @click="deleteOne(m)" :disabled="training.running" title="删除">✕</button></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </template>
+        </div>
       </div>
     </div>
   </div>
@@ -511,6 +539,18 @@ export default {
       } catch (e) { showToast(e.message || '网络错误', 'error'); uploading.value = false }
     }
 
+    async function handleUploadAll() {
+      uploading.value = true
+      uploadPct.value = 0
+      uploadCurrent.value = '0'
+      uploadTotal.value = '0'
+      try {
+        const res = await uploadModels()
+        if (!res.success) { showToast(res.error || '启动失败', 'error'); uploading.value = false; return }
+        startUploadPolling()
+      } catch (e) { showToast(e.message || '网络错误', 'error'); uploading.value = false }
+    }
+
     async function stopUploading() {
       try { await stopUpload(); showToast('上传已停止') } catch (e) { showToast(e.message || '停止失败', 'error') }
     }
@@ -537,7 +577,11 @@ export default {
           }
         } catch (e) {
           console.error('Upload progress error:', e)
-          showToast('获取上传进度失败', 'error')
+          showToast('获取上传进度失败: ' + (e.message || ''), 'error')
+          // 关键修复：当网络请求失败（比如后端正在重启）时，清理定时器并重置状态，防止按钮永久卡死
+          clearInterval(uploadPollTimer)
+          uploadPollTimer = null
+          uploading.value = false
         }
       }, 500)
     }
@@ -703,6 +747,7 @@ export default {
       deleteCheckedIncomplete,
       deleteCheckedCompleted,
       stopUploading,
+      handleUploadAll,
       elapsedTime,
       showNewTrainModal,
       showResumeModal,
@@ -994,6 +1039,16 @@ export default {
 .btn-sm.btn-danger:hover { background: #d32f2f; }
 .btn-sm.btn-success { background: #4caf50; color: white; border: none; }
 .btn-sm.btn-success:hover { background: #45a049; }
+
+/* 修复 Spinner 样式使其更美观 */
+.spinner {
+  display: inline-block;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: spin 1s ease-in-out infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Toast */
 .toast {
