@@ -1040,6 +1040,32 @@ export default {
 .btn-sm.btn-success { background: #4caf50; color: white; border: none; }
 .btn-sm.btn-success:hover { background: #45a049; }
 
+/* 根容器宽度 */
+.training-page {
+  width: 100%;
+}
+
+/* 覆盖全局 page-header，与其他页面对齐 */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+/* 双列网格布局 */
+.training-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 1100px) {
+  .training-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* 修复 Spinner 样式使其更美观 */
 .spinner {
   display: inline-block;

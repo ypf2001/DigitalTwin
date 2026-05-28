@@ -133,20 +133,44 @@ frontend_proc = subprocess.Popen(
     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0,
 )
 
-# 等几秒让服务启动
-time.sleep(3)
+# 轮询等待服务启动（最多 20 秒）
+def wait_for_port(port: int, timeout: int = 20) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if is_port_in_use(port):
+            return True
+        time.sleep(0.5)
+    return False
 
-# 检查服务是否成功启动
-backend_ok = is_port_in_use(5000)
-frontend_ok = is_port_in_use(3000)
+print("  等待后端就绪", end="", flush=True)
+backend_ok = wait_for_port(5000, timeout=20)
+print()
+
+frontend_ok = is_port_in_use(3000) or wait_for_port(3000, timeout=15)
 
 if not backend_ok:
+    # 尝试读取部分输出（非阻塞）
+    import select, os as _os
+    output = ""
+    try:
+        if sys.platform == 'win32':
+            backend_proc.stdout.flush()
+            # Windows 非阻塞读：只读已有内容
+            import msvcrt, ctypes
+            handle = msvcrt.get_osfhandle(backend_proc.stdout.fileno())
+            avail = ctypes.c_ulong(0)
+            ctypes.windll.kernel32.PeekNamedPipe(handle, None, 0, None, ctypes.byref(avail), None)
+            if avail.value:
+                output = backend_proc.stdout.read(min(avail.value, 1000))
+        else:
+            r, _, _ = select.select([backend_proc.stdout], [], [], 0)
+            if r:
+                output = backend_proc.stdout.read(1000)
+    except Exception:
+        pass
     print("[!] 后端启动失败！检查 app.py 是否有错误")
-    # 读取后端输出
-    if backend_proc.stdout:
-        output = backend_proc.stdout.read()
-        if output:
-            print("后端输出:\n" + output[:500])
+    if output:
+        print("后端输出:\n" + output[:500])
 if not frontend_ok:
     print("[!] 前端启动失败！")
     if frontend_proc.stdout:
