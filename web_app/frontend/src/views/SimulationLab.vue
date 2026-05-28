@@ -1,6 +1,11 @@
 <template>
-  <div>
-    <h2>仿真实验室</h2>
+  <div class="page-container">
+    <div class="page-header">
+      <div>
+        <h2>仿真实验室</h2>
+        <p class="subtitle">短期仿真 / 季节对比</p>
+      </div>
+    </div>
     <div class="tabs-container">
       <div class="tabs-header">
         <button :class="{ 'tab-button': true, 'active': activeTab === 'simulation' }" @click="activeTab = 'simulation'">短期仿真</button>
@@ -193,8 +198,24 @@ export default {
 </script>
 
 <style scoped>
+.page-header {
+  margin-bottom: 24px;
+}
+
+.page-header h2 {
+  margin: 0 0 4px 0;
+  font-size: 24px;
+  color: var(--text-color);
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
 .tabs-container {
-  margin-top: 20px;
+  margin-top: 0;
 }
 
 .tabs-header {

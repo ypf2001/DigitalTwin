@@ -257,6 +257,10 @@ export default {
 </script>
 
 <style scoped>
+.settings-page {
+  width: 100%;
+}
+
 .page-header {
   display: flex;
   justify-content: space-between;
