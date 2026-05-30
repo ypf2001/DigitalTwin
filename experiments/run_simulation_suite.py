@@ -163,6 +163,19 @@ def run_season_compare(out_dir: Path, image_dir: Path) -> dict[str, Any]:
     schedule = get_irrigation_schedule()
 
     results = {}
+    planned_cumulative = {"T1": [], "T2": []}
+    planned_days = [0.0]
+    t1_total = 0.0
+    t2_total = 0.0
+    planned_cumulative["T1"].append(t1_total)
+    planned_cumulative["T2"].append(t2_total)
+    for event in schedule:
+        planned_days.append(float(event.day))
+        t1_total += float(event.t1_mm)
+        t2_total += float(event.t2_mm)
+        planned_cumulative["T1"].append(t1_total)
+        planned_cumulative["T2"].append(t2_total)
+
     for strategy in ("T1", "T2"):
         # 每个策略单独创建环境，保证初始条件一致。
         env = DigitalTwinEnv(
@@ -219,6 +232,7 @@ def run_season_compare(out_dir: Path, image_dir: Path) -> dict[str, Any]:
             "simulated_irrigation_mm": float(res["total_simulated_irrigation_mm"]),
             "total_etc_mm": float(res["total_etc_mm"]),
         }
+        res["total_scheduled_irrigation_mm"] = stats[strategy]["planned_irrigation_mm"]
 
     t1 = stats["T1"]
     t2 = stats["T2"]
@@ -230,7 +244,7 @@ def run_season_compare(out_dir: Path, image_dir: Path) -> dict[str, Any]:
     }
 
     season_png = image_dir / "season_t1_t2.png"
-    _plot_season(results, season_png, season_dt_min)
+    _plot_season(results, season_png, planned_days, planned_cumulative)
     return {"T1": t1, "T2": t2, "comparison": comparison, "image": str(season_png)}
 
 
@@ -266,28 +280,58 @@ def _plot_short_fixed(arrays: dict[str, np.ndarray], path: Path) -> None:
     plt.close(fig)
 
 
-def _plot_season(results: dict[str, dict[str, Any]], path: Path, dt_min: float) -> None:
+def _plot_season(
+    results: dict[str, dict[str, Any]],
+    path: Path,
+    planned_days: list[float],
+    planned_cumulative: dict[str, list[float]],
+) -> None:
     """绘制 T1/T2 季节仿真对比图。"""
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    cfg = load_config()
+    soil_cfg = cfg.soil()
+    crop_stages = cfg.crop_stages()
+    schedule = get_irrigation_schedule()
+
     fig, axes = plt.subplots(3, 1, figsize=(9, 8), sharex=True)
     styles = {"T1": "#1f77b4", "T2": "#d62728"}
-    dt_hours = dt_min / 60.0
 
     for strategy, color in styles.items():
         res = results[strategy]
         t = res["time_day"]
         axes[0].plot(t, res["theta"], color=color, label=strategy)
         axes[1].plot(t, res["ec_soil"], color=color, label=strategy)
-        axes[2].plot(t, np.cumsum(res["irrigation_mm_h"]) * dt_hours, color=color, label=strategy)
+        axes[2].step(planned_days, planned_cumulative[strategy], where="post", color=color, label=strategy)
+
+    theta_fc = float(soil_cfg.get("theta_fc", 0.334))
+    theta_safe_upper = float(soil_cfg.get("theta_safe_upper", 0.38))
+    axes[0].axhline(theta_fc, color="#2ca02c", linestyle="--", linewidth=1.1, label="theta_fc")
+    axes[0].axhline(theta_safe_upper, color="#7f7f7f", linestyle=":", linewidth=1.1, label="wet reference")
+
+    target_time = [0.0]
+    target_ec = [float(crop_stages.get(schedule[0].growth_stage.value, {}).get("target_ec", 0.8))]
+    for event in schedule:
+        target_time.extend([event.day, event.day])
+        target_ec.extend([target_ec[-1], float(crop_stages.get(event.growth_stage.value, {}).get("target_ec", target_ec[-1]))])
+    last_day = max(float(np.max(res["time_day"])) for res in results.values())
+    target_time.append(last_day)
+    target_ec.append(target_ec[-1])
+    axes[1].step(target_time, target_ec, where="post", color="#333333", linestyle="--", linewidth=1.2, label="target EC")
+
+    planned_total = float(results["T1"].get("total_scheduled_irrigation_mm", 180.0))
+    axes[2].axhline(planned_total, color="#333333", linestyle="--", linewidth=1.1, label="planned total")
 
     axes[0].set_ylabel("theta")
     axes[1].set_ylabel("EC (dS/m)")
     axes[2].set_ylabel("Cumulative irrigation (mm)")
     axes[2].set_xlabel("Day")
+    axes[0].set_ylim(bottom=0.32)
+    axes[1].set_ylim(bottom=0.0)
+    axes[2].set_ylim(bottom=0.0)
     for ax in axes:
         ax.grid(alpha=0.25)
         ax.legend()
