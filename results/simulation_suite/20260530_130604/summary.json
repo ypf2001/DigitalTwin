@@ -1,0 +1,54 @@
+{
+  "run_id": "20260530_130604",
+  "created_at": "2026-05-30T13:06:04",
+  "short_fixed_mid": {
+    "stage": "bulking",
+    "steps": 7,
+    "theta_mean": 0.28172857142857144,
+    "theta_final": 0.3436999999999999,
+    "ec_soil_mean": 0.11913283903118944,
+    "ec_soil_final": 0.15945053711463264,
+    "ec_mae": 1.3808671609688103,
+    "total_irrigation_mm": 57.47999999999999,
+    "total_etc_mm": 0.0,
+    "q_f": 5.0,
+    "q_a": 1.0
+  },
+  "season_t1_t2": {
+    "T1": {
+      "steps": 8639,
+      "last_day": 89.98958333333333,
+      "theta_mean": 0.3368381331207233,
+      "theta_final": 0.33629828504400633,
+      "ec_soil_mean": 0.41033981539473097,
+      "ec_mae": 0.7271413745578098,
+      "planned_irrigation_mm": 180.0,
+      "simulated_irrigation_mm": 183.8399999999997,
+      "total_etc_mm": 212.93783107597176
+    },
+    "T2": {
+      "steps": 8640,
+      "last_day": 90.0,
+      "theta_mean": 0.3367724953123424,
+      "theta_final": 0.33637598473258623,
+      "ec_soil_mean": 0.33123630353188055,
+      "ec_mae": 0.8073285112829344,
+      "planned_irrigation_mm": 180.0,
+      "simulated_irrigation_mm": 173.63999999999973,
+      "total_etc_mm": 213.0292862132397
+    },
+    "comparison": {
+      "theta_mean_change_pct": -0.01948645409530749,
+      "ec_mae_change_pct": 11.027723001405448,
+      "planned_irrigation_equal": true
+    }
+  },
+  "artifacts": {
+    "summary": "summary.json",
+    "short_csv": "short_fixed_mid_timeseries.csv",
+    "short_png": "short_fixed_mid.png",
+    "season_t1_csv": "season_t1_timeseries.csv",
+    "season_t2_csv": "season_t2_timeseries.csv",
+    "season_png": "season_t1_t2.png"
+  }
+}
