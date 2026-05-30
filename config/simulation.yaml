@@ -8,6 +8,9 @@ env:
   seed: null
   theta_fc: 0.32
   theta_wp: 0.04
+experiment:
+  short_dt_min: 5.0      # 短期仿真实验步长 (分钟)。用于解析 pipe.tau=8 min 的管道延迟，不影响 SAC 默认训练步长
+  season_dt_min: 5.0     # 季节对比实验步长 (分钟)。用于 T1/T2 仿真导出更平滑的曲线，不作为训练默认步长
 day_night:
   night_start: 18.0
   night_end: 6.0

@@ -29,3 +29,7 @@ web_app/backend/static/images/
 .claude/
 .ruff_cache/
 .junie/
+
+# Experiment outputs
+results/
+experiments/images/
