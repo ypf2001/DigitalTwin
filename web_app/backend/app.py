@@ -7,6 +7,7 @@ Spring-style 分层: routers → services → models
 
 import os
 import sys
+import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -29,16 +30,19 @@ app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 @app.on_event("startup")
 def startup_event():
-    """应用启动时，检查云端数据库和表是否存在"""
-    print("Ensuring cloud database and tables exist...")
-    try:
-        ensure_database()
-        print("Cloud database check complete.")
-    except Exception as e:
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        print(f"!!! [WARNING] Cloud database check failed: {e}")
-        print("!!! [WARNING] Cloud-related features will be unavailable.")
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    """应用启动时，后台检查云端数据库，避免阻塞本地仿真接口。"""
+    def _check_cloud():
+        print("Ensuring cloud database and tables exist...")
+        try:
+            ensure_database()
+            print("Cloud database check complete.")
+        except Exception as e:
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            print(f"!!! [WARNING] Cloud database check failed: {e}")
+            print("!!! [WARNING] Cloud-related features will be unavailable.")
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
+    threading.Thread(target=_check_cloud, daemon=True).start()
 
 if __name__ == '__main__':
     import uvicorn

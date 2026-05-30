@@ -9,7 +9,10 @@
 """
 
 from collections import deque
+import logging
 from config_loader import load_config
+
+logger = logging.getLogger(__name__)
 
 
 class PipeDynamics:
@@ -21,8 +24,18 @@ class PipeDynamics:
         self.T = T if T is not None else pipe["T"]
         self.dt = dt
 
-        # 纯滞后所需的缓冲长度 = 滞后时间 / 步长
+        # 纯滞后所需的缓冲长度 = 滞后时间 / 步长。
+        # 当 dt >= tau 时，离散模型无法解析小于一个采样步的纯滞后；
+        # 此时仍保留 1 步缓冲，但该滞后只应理解为步长尺度上的近似。
         self._buffer_len = max(1, round(self.tau / self.dt))
+        self.delay_resolved = self.dt < self.tau
+        if not self.delay_resolved:
+            logger.warning(
+                "PipeDynamics delay is under-resolved: tau=%.3f min, dt=%.3f min. "
+                "Pure delay is approximated by a 1-step buffer.",
+                self.tau,
+                self.dt,
+            )
         self._ec_buffer = deque(maxlen=self._buffer_len)
         self._ph_buffer = deque(maxlen=self._buffer_len)
 

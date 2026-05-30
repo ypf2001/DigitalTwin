@@ -93,10 +93,10 @@ def training_stop():
 
 
 @router.get("/api/training/models")
-def training_models():
+def training_models(query_cloud: bool = False):
     """获取已有模型列表"""
     try:
-        return get_model_info()
+        return get_model_info(query_cloud=query_cloud)
     except Exception as e:
         return {"error": str(e)}
 

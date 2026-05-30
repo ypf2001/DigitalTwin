@@ -68,6 +68,16 @@ for entry in _irr_cfg["schedule"]:
     _SCHEDULE_DATA.append((float(day), _STAGE_KEY_TO_ENUM[stage_key], float(t1), float(t2)))
 
 
+def normalize_obs(obs: np.ndarray) -> np.ndarray:
+    """Normalize raw DigitalTwinEnv observations to the SAC training range."""
+    obs_cfg = load_config().obs()
+    obs_low = np.array(obs_cfg["obs_low"], dtype=np.float32)
+    obs_high = np.array(obs_cfg["obs_high"], dtype=np.float32)
+    eps = 1e-6
+    normalized = 2.0 * (obs - obs_low) / (obs_high - obs_low + eps) - 1.0
+    return np.clip(normalized, -1.0, 1.0).astype(np.float32)
+
+
 def get_irrigation_schedule() -> List[IrrigationEvent]:
     """返回论文的 8 次灌溉事件列表。"""
     return [IrrigationEvent(d, s, t1, t2) for d, s, t1, t2 in _SCHEDULE_DATA]
@@ -106,15 +116,19 @@ def run_season_simulation(
     initial_theta: float = None,
     initial_ec: float = None,
     fixed_action: np.ndarray = None,
+    season_days: float = None,
     verbose: bool = True,
 ) -> dict:
     irr = load_config().irrigation()
+    season_cfg = load_config().season_comparison()
     if rain_mm_day is None:
         rain_mm_day = irr["rain_mm_day"]
     if initial_theta is None:
         initial_theta = irr.get("initial_theta") or env.soil.theta_fc
     if initial_ec is None:
         initial_ec = irr["initial_ec"]
+    if season_days is None:
+        season_days = season_cfg.get("ep_len_days", 90.0)
     """运行完整生育期仿真（8 次灌溉事件）。
 
     参数
@@ -171,6 +185,7 @@ def run_season_simulation(
         env._theta_history.append(initial_theta)
         env._ec_soil_history.append(initial_ec)
     total_irrigation_mm = 0.0
+    total_scheduled_irrigation_mm = 0.0
     total_etc_mm = 0.0
     total_steps = 0
 
@@ -193,13 +208,14 @@ def run_season_simulation(
 
         # 灌溉期：按 event 水量计算持续时长
         amount = event.t1_amount_m3ha if strategy == "T1" else event.t2_amount_m3ha
+        total_scheduled_irrigation_mm += amount / 10.0
         event_hours = event_duration_hours(amount, area_ha)
         event_steps = max(1, int(event_hours / dt_hours))
 
         event_irr_total = 0.0
         for _ in range(event_steps):
             if model is not None:
-                action, _ = model.predict(obs, deterministic=True)
+                action, _ = model.predict(normalize_obs(obs), deterministic=True)
             else:
                 action = fixed_action.copy()
 
@@ -222,6 +238,19 @@ def run_season_simulation(
 
         prev_day = event.day
 
+    # 最后一次灌溉后继续推进到完整生育期，避免统计只到 day 65。
+    current_day = env._time_min / (24.0 * 60.0)
+    tail_hours = max(0.0, (season_days - current_day) * 24.0)
+    tail_steps = int(tail_hours / dt_hours)
+    rain_mm_h = rain_mm_day / 24.0
+    if schedule:
+        env.set_growth_stage(schedule[-1].growth_stage)
+    for _ in range(tail_steps):
+        obs, _, done, info = env.dry_step(rain_mm_h=rain_mm_h)
+        total_steps += 1
+        total_etc_mm += info["etc_mm_h"] * dt_hours
+        _record_step(history, info, np.array([0.0, 0.0]), len(schedule), is_event=False)
+
     results = {
         "time_day": np.array(history["time_day"]),
         "theta": np.array(history["theta"]),
@@ -235,6 +264,8 @@ def run_season_simulation(
         "stage": history["stage"],
         "event_marker": np.array(history["event_marker"]),
         "total_irrigation_mm": total_irrigation_mm,
+        "total_scheduled_irrigation_mm": total_scheduled_irrigation_mm,
+        "total_simulated_irrigation_mm": total_irrigation_mm,
         "total_etc_mm": total_etc_mm,
         "total_steps": total_steps,
     }

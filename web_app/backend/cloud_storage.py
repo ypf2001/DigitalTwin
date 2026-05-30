@@ -209,6 +209,15 @@ def upload_all_models(models_dir, completed_only=False, progress=None):
         progress["errors"] = []
         progress["processed"] = 0
 
+    try:
+        ensure_database()
+    except Exception as e:
+        if progress:
+            progress["errors"].append(f"云端连接失败: {e}")
+            progress["processed"] = total
+            progress["done"] = True
+        return
+
     for m in model_list:
         if progress and progress.get("_cancel"):
             if progress:

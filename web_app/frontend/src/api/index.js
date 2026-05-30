@@ -12,7 +12,7 @@ export function saveConfig(section, updates) { return http.put('/config/save', {
 export function getTrainingStatus() { return http.get('/training/status').then(r => r.data) }
 export function startTraining(params) { return http.post('/training/start', params).then(r => r.data) }
 export function stopTraining() { return http.post('/training/stop').then(r => r.data) }
-export function getTrainingModels() { return http.get('/training/models').then(r => r.data) }
+export function getTrainingModels(queryCloud = false) { return http.get('/training/models', { params: { query_cloud: queryCloud } }).then(r => r.data) }
 export function uploadModels() { return http.post('/training/upload').then(r => r.data) }
 export function uploadSelected(names) { return http.post('/training/upload/selected', { names }).then(r => r.data) }
 export function stopUpload() { return http.post('/training/upload/stop').then(r => r.data) }

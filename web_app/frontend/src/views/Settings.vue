@@ -56,7 +56,7 @@
             <div class="card-title">混肥罐参数</div>
             <table class="stats-table config-table">
               <tr v-for="(v, k) in data.mixing_tank" :key="k">
-                <th>{{ k }}</th>
+                <th>{{ configLabel('mixing_tank.' + k, k) }}</th>
                 <td>
                   <input v-if="editing" v-model="edits['mixing_tank.'+k]" class="form-input" />
                   <span v-else>{{ v }}</span>
@@ -70,7 +70,7 @@
             <div class="card-title">管道动态参数 (FOPTD)</div>
             <table class="stats-table config-table">
               <tr v-for="(v, k) in data.pipe" :key="k">
-                <th>{{ k }}</th>
+                <th>{{ configLabel('pipe.' + k, k) }}</th>
                 <td>
                   <input v-if="editing" v-model="edits['pipe.'+k]" class="form-input" />
                   <span v-else>{{ v }}</span>
@@ -92,15 +92,15 @@
                   <tr v-for="(v, k) in data.stages" :key="k">
                     <td>{{ stageNames[k] || k }}</td>
                     <td>
-                      <input v-if="editing" v-model="edits['stages.'+k+'.kc']" class="form-input" />
+                      <input v-if="editing" v-model="edits['crop.stages.'+k+'.kc']" class="form-input" />
                       <span v-else>{{ v.kc }}</span>
                     </td>
                     <td>
-                      <input v-if="editing" v-model="edits['stages.'+k+'.target_ec']" class="form-input" />
+                      <input v-if="editing" v-model="edits['crop.stages.'+k+'.target_ec']" class="form-input" />
                       <span v-else>{{ v.target_ec }}</span>
                     </td>
                     <td>
-                      <input v-if="editing" v-model="edits['stages.'+k+'.root_depth']" class="form-input" />
+                      <input v-if="editing" v-model="edits['crop.stages.'+k+'.root_depth']" class="form-input" />
                       <span v-else>{{ v.root_depth }}</span>
                     </td>
                   </tr>
@@ -114,7 +114,7 @@
             <div class="card-title">强化学习 (SAC) 超参数</div>
             <table class="stats-table config-table">
               <tr v-for="(v, k) in data.sac" :key="k">
-                <th>{{ k }}</th>
+                <th>{{ configLabel('sac.' + k, k) }}</th>
                 <td>
                   <input v-if="editing" v-model="edits['sac.'+k]" class="form-input" />
                   <span v-else>{{ v }}</span>
@@ -128,7 +128,7 @@
             <div class="card-title">奖励函数权重</div>
             <table class="stats-table config-table">
               <tr v-for="(v, k) in data.reward" :key="k">
-                <th>{{ k }}</th>
+                <th>{{ configLabel('reward.' + k, k) }}</th>
                 <td>
                   <input v-if="editing" v-model="edits['reward.'+k]" class="form-input" />
                   <span v-else>{{ v }}</span>
@@ -154,6 +154,38 @@ const SECTION_KEY_MAP = {
   sac: 'sac', reward: 'reward', irrigation: 'irrigation',
 }
 
+const FALLBACK_LABELS = {
+  'mixing_tank.volume': '混肥罐体积 L',
+  'mixing_tank.ec_conc': '母液 EC 浓度 dS/m',
+  'mixing_tank.ph_acid': '酸液 pH',
+  'mixing_tank.ph_water': '清水 pH',
+  'pipe.tau': '管道滞后时间 min',
+  'pipe.T': '管道时间常数 min',
+  'sac.total_timesteps': '总训练步数',
+  'sac.learning_rate': '学习率',
+  'sac.buffer_size': '经验回放缓冲区容量',
+  'sac.batch_size': '每次采样批次大小',
+  'sac.learning_starts': '随机探索热身步数',
+  'sac.tau': '目标网络软更新系数',
+  'sac.gamma': '折扣因子',
+  'sac.ent_coef': '熵正则化系数',
+  'sac.reward_scale': '奖励缩放因子',
+  'sac.eval_freq': '评估频率 步',
+  'sac.n_eval_episodes': '每次评估 episode 数',
+  'sac.log_interval': '日志输出间隔',
+  'sac.save_freq_div': '模型保存频率除数',
+  'reward.w1': 'EC 跟踪误差权重',
+  'reward.w2': 'pH 跟踪误差权重',
+  'reward.w3': '流量惩罚权重',
+  'reward.w4': 'WUE 奖励权重',
+  'reward.flow_penalty_scale': '流量惩罚缩放系数',
+  'reward.wue_norm': 'WUE 归一化基准流量 L/min',
+  'reward.pH_target': '目标灌溉液 pH 值',
+  'reward.ec_burn_threshold': '烧苗 EC 阈值 dS/m',
+  'reward.ph_burn_threshold': '烧苗 pH 阈值',
+  'reward.hard_penalty': '烧苗惩罚值',
+}
+
 export default {
   name: 'Settings',
   setup() {
@@ -172,6 +204,15 @@ export default {
       bulking: '块茎膨大期', starch_accumulation: '淀粉积累期', maturation: '成熟期',
     }
 
+    function cleanLabel(label) {
+      return String(label || '').replace(/，.*$/, '').replace(/。.*$/, '').trim()
+    }
+
+    function configLabel(path, key) {
+      const label = cleanLabel(data.value?.labels?.[path] || FALLBACK_LABELS[path])
+      return label ? `${key} (${label})` : key
+    }
+
     function initEdits() {
       if (!data.value) return
       const e = {}
@@ -183,9 +224,9 @@ export default {
       // stages
       if (data.value.stages) {
         for (const [k, v] of Object.entries(data.value.stages)) {
-          e['stages.' + k + '.kc'] = v.kc ?? ''
-          e['stages.' + k + '.target_ec'] = v.target_ec ?? ''
-          e['stages.' + k + '.root_depth'] = v.root_depth ?? ''
+          e['crop.stages.' + k + '.kc'] = v.kc ?? ''
+          e['crop.stages.' + k + '.target_ec'] = v.target_ec ?? ''
+          e['crop.stages.' + k + '.root_depth'] = v.root_depth ?? ''
         }
       }
       // mixing_tank
@@ -251,7 +292,7 @@ export default {
       finally { loading.value = false }
     })
 
-    return { data, loading, error, editing, saveMsg, edits, soilFields, stageNames, toggleEdit, cancelEdit }
+    return { data, loading, error, editing, saveMsg, edits, soilFields, stageNames, configLabel, toggleEdit, cancelEdit }
   },
 }
 </script>

@@ -4,6 +4,7 @@ import os
 import sys
 import traceback
 import threading
+import re
 
 import numpy as np
 import yaml
@@ -34,6 +35,153 @@ def _get_config_dir():
     return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
 
 
+def _extract_yaml_inline_comments(filepath: str) -> dict:
+    """Extract same-line YAML comments as lightweight display labels."""
+    labels = {}
+    stack = []
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        for raw_line in f:
+            code, comment = raw_line.split("#", 1) if "#" in raw_line else (raw_line, "")
+            if ":" not in code or not code.strip():
+                continue
+
+            stripped = code.strip()
+            if stripped.startswith("-"):
+                continue
+
+            key = stripped.split(":", 1)[0].strip().strip("'\"")
+            if not key:
+                continue
+
+            indent = len(code) - len(code.lstrip(" "))
+            level = indent // 2
+            stack = stack[:level]
+            stack.append(key)
+
+            label = comment.strip()
+            if label:
+                labels[".".join(stack)] = label
+
+    return labels
+
+
+def get_config_labels():
+    """Return display labels derived from YAML inline comments."""
+    config_dir = _get_config_dir()
+    labels = {}
+
+    for filename in ["simulation.yaml", "crop.yaml", "reward.yaml", "training.yaml", "irrigation.yaml"]:
+        filepath = os.path.join(config_dir, filename)
+        if os.path.exists(filepath):
+            labels.update(_extract_yaml_inline_comments(filepath))
+
+    return labels
+
+
+def _format_yaml_scalar(value):
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _replace_yaml_scalar_line(line: str, value) -> str:
+    newline = "\r\n" if line.endswith("\r\n") else "\n" if line.endswith("\n") else ""
+    body = line[:-len(newline)] if newline else line
+    hash_pos = body.find("#")
+    code = body if hash_pos < 0 else body[:hash_pos]
+    comment = "" if hash_pos < 0 else body[hash_pos:].rstrip()
+    prefix = code.split(":", 1)[0].rstrip()
+    updated = f"{prefix}: {_format_yaml_scalar(value)}"
+    if comment:
+        updated += f"  {comment}"
+    return updated + newline
+
+
+def _replace_yaml_list_line(line: str, value) -> str:
+    newline = "\r\n" if line.endswith("\r\n") else "\n" if line.endswith("\n") else ""
+    body = line[:-len(newline)] if newline else line
+    hash_pos = body.find("#")
+    code = body if hash_pos < 0 else body[:hash_pos]
+    comment = "" if hash_pos < 0 else body[hash_pos:].rstrip()
+    indent = re.match(r"^(\s*)-", code).group(1)
+    updated = f"{indent}- {_format_yaml_scalar(value)}"
+    if comment:
+        updated += f"  {comment}"
+    return updated + newline
+
+
+def _update_yaml_text_value(lines: list[str], key_path: str, value) -> bool:
+    parts = key_path.split(".")
+
+    if parts[-1].isdigit():
+        parent_parts = parts[:-1]
+        target_index = int(parts[-1])
+        stack = []
+        parent_indent = None
+
+        for i, line in enumerate(lines):
+            code = line.split("#", 1)[0]
+            match = re.match(r"^(\s*)([^:\-\s][^:]*):", code)
+            if not match:
+                continue
+            indent = len(match.group(1))
+            level = indent // 2
+            key = match.group(2).strip().strip("'\"")
+            stack = stack[:level]
+            stack.append(key)
+
+            if stack == parent_parts:
+                parent_indent = indent
+                seen = 0
+                for j in range(i + 1, len(lines)):
+                    child_code = lines[j].split("#", 1)[0]
+                    if child_code.strip() and len(child_code) - len(child_code.lstrip(" ")) <= parent_indent:
+                        break
+                    if re.match(r"^\s*-", child_code):
+                        if seen == target_index:
+                            lines[j] = _replace_yaml_list_line(lines[j], value)
+                            return True
+                        seen += 1
+                return False
+        return False
+
+    stack = []
+    for i, line in enumerate(lines):
+        code = line.split("#", 1)[0]
+        match = re.match(r"^(\s*)([^:\-\s][^:]*):", code)
+        if not match:
+            continue
+        indent = len(match.group(1))
+        level = indent // 2
+        key = match.group(2).strip().strip("'\"")
+        stack = stack[:level]
+        stack.append(key)
+
+        if stack == parts:
+            lines[i] = _replace_yaml_scalar_line(lines[i], value)
+            return True
+
+    return False
+
+
+def _save_yaml_preserving_comments(filepath: str, updates: dict) -> bool:
+    with open(filepath, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    for key_path, value in updates.items():
+        if not _update_yaml_text_value(lines, key_path, value):
+            return False
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+    return True
+
+
 def get_weather_data(use_weather: bool = True):
     """返回天气数据 (et0, rain_mm_day, from_weather)"""
     if not use_weather:
@@ -54,6 +202,7 @@ def get_config_data():
     """返回系统配置摘要"""
     cfg = load_config()
     return {
+        "labels": get_config_labels(),
         "stages": cfg.crop_stages(),
         "soil": {
             "theta_fc": cfg.get("env.theta_fc"),
@@ -203,8 +352,9 @@ def run_season_compare(use_weather: bool):
     t1, t2 = results["T1"], results["T2"]
     em1 = float(np.abs(t1["ec_soil"] - t1["target_ec"]).mean())
     em2 = float(np.abs(t2["ec_soil"] - t2["target_ec"]).mean())
-    wue1 = float(t1["total_etc_mm"]) / (float(t1["total_irrigation_mm"]) + 162.5 + 1e-6)
-    wue2 = float(t2["total_etc_mm"]) / (float(t2["total_irrigation_mm"]) + 162.5 + 1e-6)
+    rain_total_mm = float(rain_val) * 90.0
+    wue1 = float(t1["total_etc_mm"]) / (float(t1["total_scheduled_irrigation_mm"]) + rain_total_mm + 1e-6)
+    wue2 = float(t2["total_etc_mm"]) / (float(t2["total_scheduled_irrigation_mm"]) + rain_total_mm + 1e-6)
     dr1 = float(np.maximum(0, t1["theta"] - 0.32).sum() * 15.3)
     dr2 = float(np.maximum(0, t2["theta"] - 0.32).sum() * 15.3)
     t1e = t1["theta"][t1["event_marker"] > 0.5]
@@ -232,8 +382,10 @@ def run_season_compare(use_weather: bool):
             "theta_improve_pct": round(
                 (float(t2["theta"].mean()) - float(t1["theta"].mean()))
                 / (float(t1["theta"].mean()) + 1e-6) * 100, 1),
-            "total_irr_t1": round(float(t1["total_irrigation_mm"]), 1),
-            "total_irr_t2": round(float(t2["total_irrigation_mm"]), 1),
+            "total_irr_t1": round(float(t1["total_scheduled_irrigation_mm"]), 1),
+            "total_irr_t2": round(float(t2["total_scheduled_irrigation_mm"]), 1),
+            "simulated_irr_t1": round(float(t1["total_simulated_irrigation_mm"]), 1),
+            "simulated_irr_t2": round(float(t2["total_simulated_irrigation_mm"]), 1),
             "total_et_t1": round(float(t1["total_etc_mm"]), 1),
             "total_et_t2": round(float(t2["total_etc_mm"]), 1),
             "deep_drain_t1": round(dr1, 1), "deep_drain_t2": round(dr2, 1),
@@ -271,8 +423,13 @@ def save_config_section(section: str, updates: dict):
     with open(filepath, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
 
+    normalized_updates = {}
+
     # 按点号路径设置值
     for key_path, value in updates.items():
+        if section == "crop" and key_path.startswith("stages."):
+            key_path = "crop." + key_path
+
         parts = key_path.split(".")
         node = data
         for i, part in enumerate(parts[:-1]):
@@ -294,9 +451,11 @@ def save_config_section(section: str, updates: dict):
         elif isinstance(old_val, bool):
             value = value if isinstance(value, bool) else str(value).lower() in ("true", "1", "yes")
         node[parts[-1]] = value
+        normalized_updates[key_path] = value
 
-    with open(filepath, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    if not _save_yaml_preserving_comments(filepath, normalized_updates):
+        with open(filepath, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
     reload_config()
     return {"success": True, "section": section}
@@ -600,8 +759,8 @@ def stop_training():
     return {"success": True, "message": "训练已停止"}
 
 
-def get_model_info():
-    """获取模型列表 — 本地+云端合并，本地优先（反映最新训练状态）"""
+def get_model_info(query_cloud: bool = False):
+    """获取模型列表，本地优先，云端查询不阻塞页面加载。"""
     import re
     models_dir = _get_rl_models_dir()
     models = {}
@@ -643,27 +802,51 @@ def get_model_info():
                 "source": "local",
             }
 
-    # 2. 云端模型（本地没有的则补充，同时标记 in_cloud）
     cloud_names = set()
-    try:
-        from cloud_storage import query_all_models
-        cloud = query_all_models()
-        for cm in cloud["models"]:
-            cloud_names.add(cm["name"])
-            if cm["name"] not in models:
-                cm["source"] = "cloud"
-                cm["in_cloud"] = True
-                models[cm["name"]] = cm
-        if cloud.get("models_dir"):
-            source = cloud["models_dir"]
-    except Exception:
-        pass
+    cloud_error = None
+
+    cloud_checked = False
+
+    # 云端数据库偶尔连接慢，本地模型列表不能因此一直转圈。
+    if query_cloud or os.environ.get("DIGITAL_TWIN_QUERY_CLOUD_MODELS") == "1":
+        try:
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError
+            from cloud_storage import query_all_models
+
+            executor = ThreadPoolExecutor(max_workers=1)
+            try:
+                future = executor.submit(query_all_models)
+                cloud = future.result(timeout=2.0)
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
+
+            cloud_checked = True
+
+            for cm in cloud["models"]:
+                cloud_names.add(cm["name"])
+                if cm["name"] not in models:
+                    cm["source"] = "cloud"
+                    cm["in_cloud"] = True
+                    models[cm["name"]] = cm
+            if cloud.get("models_dir"):
+                source = cloud["models_dir"]
+        except TimeoutError:
+            cloud_checked = True
+            cloud_error = "云端模型查询超时，已仅显示本地模型"
+        except Exception as e:
+            cloud_checked = True
+            cloud_error = f"云端模型查询失败，已仅显示本地模型: {e}"
 
     for name, m in models.items():
         m["in_cloud"] = name in cloud_names
 
     model_list = sorted(models.values(), key=lambda x: x["mtime"], reverse=True)
-    return {"models": model_list, "models_dir": source}
+    return {
+        "models": model_list,
+        "models_dir": source,
+        "cloud_checked": cloud_checked,
+        "cloud_error": cloud_error,
+    }
 
 
 def _sync_progress_cloud():
@@ -729,6 +912,16 @@ def upload_selected_models(names):
         total = len(names)
         with upload_lock:
             _upload_progress["total"] = total
+        try:
+            from cloud_storage import ensure_database, upload_model
+            ensure_database()
+        except Exception as e:
+            with upload_lock:
+                _upload_progress["errors"].append(f"云端连接失败: {e}")
+                _upload_progress["processed"] = total
+                _upload_progress["done"] = True
+            return
+
         for i, name in enumerate(names):
             with upload_lock:
                 if _upload_cancel:
@@ -741,8 +934,6 @@ def upload_selected_models(names):
                     raise FileNotFoundError("文件不存在")
                 with open(filepath, "rb") as f:
                     data = f.read()
-                from cloud_storage import upload_model, ensure_database
-                ensure_database()
                 # 解析元数据
                 import re
                 stage = ""; steps_label = ""; steps_num = 0

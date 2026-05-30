@@ -118,6 +118,9 @@
             <span v-else-if="training.progress >= 100 && training.timesteps >= params.timesteps" class="completed-badge">✓ 完成</span>
             <span v-else class="idle-badge">○ 待机</span>
           </div>
+          <div v-if="!training.running && !training.timesteps" class="progress-empty">
+            当前没有正在运行或可继续的训练任务。下面的“已训练模型”是历史 checkpoint 列表。
+          </div>
           <table class="progress-table">
             <thead>
               <tr>
@@ -160,11 +163,24 @@
             <span>⏱️ 已用时间: {{ formatDuration(elapsedTime) }}</span>
             <span v-if="training.running">📅 开始于: {{ training.start_time }}</span>
           </div>
+          <div class="hint" style="margin-top:10px">
+            训练进度只表示当前/最近一次训练任务完成了多少步，不代表下方每个模型文件的训练程度。
+          </div>
         </div>
 
         <!-- 模型列表 -->
         <div class="card" style="min-height:120px">
-          <div class="card-title">已训练模型</div>
+          <div class="card-title models-title">
+            <span>已训练模型</span>
+            <button class="btn btn-sm cloud-check-btn" @click="loadModels(true)" :disabled="modelsLoading || cloudChecking">
+              <span v-if="cloudChecking" class="spinner" style="width:12px;height:12px;border-width:2px;"></span>
+              {{ cloudChecking ? '检测中...' : '检测云端' }}
+            </button>
+          </div>
+          <div class="cloud-note" :class="{ warning: !cloudChecked || cloudError }">
+            云端状态：{{ cloudStatusText }}
+          </div>
+          <div v-if="uploadError" class="error-box upload-error">{{ uploadError }}</div>
 
           <!-- 全局上传进度区域 -->
           <div v-if="uploading" style="margin-bottom: 16px; padding: 12px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e0e0e0;">
@@ -189,14 +205,17 @@
             <div v-if="incompleteModels.length > 0" style="margin-bottom:20px">
               <div class="card-title" style="font-size:14px;color:var(--warning);display:flex;align-items:center;gap:12px">
                 <span>⏳ 训练中 / 未完成</span>
-                <button v-if="!uploading" class="btn btn-sm" :style="allIncompleteChecked ? 'background:#e74c3c;color:#fff' : 'background:#4caf50;color:#fff'" @click="checkAllIncomplete">{{ allIncompleteChecked ? '☑ 取消全选' : '☐ 全选' }}</button>
+                <label v-if="!uploading" class="select-all-control" :class="{ checked: allIncompleteChecked }">
+                  <input type="checkbox" :checked="allIncompleteChecked" @change="checkAllIncomplete" />
+                  <span>全选</span>
+                </label>
                 <button class="btn btn-sm btn-danger" @click="deleteCheckedIncomplete" :disabled="checkedIncomplete.length === 0">🗑 删除选中</button>
                 <button v-if="!uploading" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadCheckedIncomplete" :disabled="checkedIncomplete.length === 0">☁️ 上传选中</button>
               </div>
               <div style="width:100%;overflow-x:auto;max-height:300px">
                 <table class="stats-table">
                   <thead>
-                    <tr><th style="width:4%">☐</th><th style="width:26%">模型名称</th><th style="width:14%">阶段</th><th style="width:12%">步数</th><th style="width:8%">大小</th><th style="width:16%">更新时间</th><th style="width:6%">云端</th><th style="width:14%">操作</th></tr>
+                    <tr><th style="width:5%">☐</th><th style="width:29%">模型名称</th><th style="width:14%">阶段</th><th style="width:13%">步数</th><th style="width:9%">大小</th><th style="width:17%">更新时间</th><th style="width:6%">云端</th><th style="width:7%">操作</th></tr>
                   </thead>
                   <tbody>
                     <tr v-for="m in incompleteModels" :key="m.name">
@@ -209,10 +228,9 @@
                       <td>{{ m.steps }}</td>
                       <td>{{ m.size_mb }} MB</td>
                       <td>{{ m.mtime }}</td>
-                      <td><span v-if="m.in_cloud" style="color:var(--success)">☁️</span><span v-else style="color:#ccc">—</span></td>
+                      <td><span :class="cloudCellClass(m)">{{ cloudCellText(m) }}</span></td>
                       <td style="white-space:nowrap">
                         <button class="btn btn-sm btn-success" @click="selectModel(m)" :disabled="training.running">继续训练</button>
-                        <button class="btn-icon-delete" @click="deleteOne(m)" :disabled="training.running" style="margin-left:6px" title="删除">✕</button>
                       </td>
                     </tr>
                   </tbody>
@@ -223,14 +241,17 @@
             <div v-if="completedModels.length > 0">
               <div class="card-title" style="font-size:14px;color:var(--success);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                 <span>✓ 已完成 (120,000 步)</span>
-                <button v-if="!uploading" class="btn btn-sm" :style="allCompletedChecked ? 'background:#e74c3c;color:#fff' : 'background:#4caf50;color:#fff'" @click="checkAllCompleted">{{ allCompletedChecked ? '☑ 取消全选' : '☐ 全选' }}</button>
+                <label v-if="!uploading" class="select-all-control" :class="{ checked: allCompletedChecked }">
+                  <input type="checkbox" :checked="allCompletedChecked" @change="checkAllCompleted" />
+                  <span>全选</span>
+                </label>
                 <button class="btn btn-sm btn-danger" @click="deleteCheckedCompleted" :disabled="checkedCompleted.length === 0">🗑 删除选中</button>
                 <button v-if="!uploading" class="btn btn-sm" style="background:#1976d2;color:#fff" @click="uploadCheckedCompleted" :disabled="checkedCompleted.length === 0">☁️ 上传选中</button>
               </div>
               <div style="width:100%;overflow-x:auto;max-height:300px">
                 <table class="stats-table">
                   <thead>
-                    <tr><th style="width:4%">☐</th><th style="width:26%">模型名称</th><th style="width:14%">阶段</th><th style="width:12%">步数</th><th style="width:8%">大小</th><th style="width:16%">更新时间</th><th style="width:6%">云端</th><th style="width:14%">操作</th></tr>
+                    <tr><th style="width:5%">☐</th><th style="width:32%">模型名称</th><th style="width:14%">阶段</th><th style="width:14%">步数</th><th style="width:9%">大小</th><th style="width:18%">更新时间</th><th style="width:8%">云端</th></tr>
                   </thead>
                   <tbody>
                     <tr v-for="m in completedModels" :key="m.name">
@@ -243,8 +264,7 @@
                       <td>{{ m.steps }}</td>
                       <td>{{ m.size_mb }} MB</td>
                       <td>{{ m.mtime }}</td>
-                      <td><span v-if="m.in_cloud" style="color:var(--success)">☁️</span><span v-else style="color:#ccc">—</span></td>
-                      <td><button class="btn-icon-delete" @click="deleteOne(m)" :disabled="training.running" title="删除">✕</button></td>
+                      <td><span :class="cloudCellClass(m)">{{ cloudCellText(m) }}</span></td>
                     </tr>
                   </tbody>
                 </table>
@@ -270,8 +290,12 @@ export default {
     const message = ref('')
     const models = ref([])
     const modelsLoading = ref(false)
+    const cloudChecked = ref(false)
+    const cloudChecking = ref(false)
+    const cloudError = ref('')
     const uploadMsg = ref('')
     const uploading = ref(false)
+    const uploadError = ref('')
     const uploadPct = ref(0)
     const uploadCurrent = ref('0')
     const uploadTotal = ref('0')
@@ -288,6 +312,12 @@ export default {
     const allIncompleteChecked = computed(() => {
       const names = incompleteModels.value.filter(m => !m.in_cloud).map(m => m.name)
       return names.length > 0 && names.every(n => checkedIncomplete.value.includes(n))
+    })
+    const cloudStatusText = computed(() => {
+      if (cloudChecking.value) return '正在检测云端...'
+      if (cloudError.value) return cloudError.value
+      if (!cloudChecked.value) return '未检测，本页先显示本地模型，点击“检测云端”后再显示是否已上传'
+      return '已检测，☁️ 表示云端已存在，未上传表示仅本地存在'
     })
     const training = reactive({
       running: false,
@@ -360,16 +390,36 @@ export default {
       }
     }
 
-    async function loadModels() {
+    async function loadModels(queryCloud = false) {
       modelsLoading.value = true
+      cloudChecking.value = queryCloud
+      if (queryCloud) cloudError.value = ''
       try {
-        const info = await getTrainingModels()
+        const timeout = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('模型列表加载超时，请检查后端服务')), 12000)
+        })
+        const info = await Promise.race([getTrainingModels(queryCloud), timeout])
         models.value = info.models || []
+        cloudChecked.value = !!info.cloud_checked
+        cloudError.value = info.cloud_error || ''
       } catch (e) {
         console.error('Failed to load models:', e)
+        error.value = e.message || '模型列表加载失败'
+        if (queryCloud) cloudError.value = e.message || '云端检测失败'
       } finally {
         modelsLoading.value = false
+        cloudChecking.value = false
       }
+    }
+
+    function cloudCellText(model) {
+      if (!cloudChecked.value) return '未检测'
+      return model.in_cloud ? '☁️' : '未上传'
+    }
+
+    function cloudCellClass(model) {
+      if (!cloudChecked.value) return 'cloud-unknown'
+      return model.in_cloud ? 'cloud-ok' : 'cloud-missing'
     }
 
     async function confirmNewTrain() {
@@ -509,6 +559,7 @@ export default {
       })
       if (names.length === 0) { showToast('请勾选未上传的模型', 'error'); return }
       uploading.value = true
+      uploadError.value = ''
       uploadPct.value = 0
       uploadCurrent.value = '0'
       uploadTotal.value = '0'
@@ -529,6 +580,7 @@ export default {
       })
       if (names.length === 0) { showToast('请勾选未上传的模型', 'error'); return }
       uploading.value = true
+      uploadError.value = ''
       uploadPct.value = 0
       uploadCurrent.value = '0'
       uploadTotal.value = '0'
@@ -541,6 +593,7 @@ export default {
 
     async function handleUploadAll() {
       uploading.value = true
+      uploadError.value = ''
       uploadPct.value = 0
       uploadCurrent.value = '0'
       uploadTotal.value = '0'
@@ -572,8 +625,12 @@ export default {
             const parts = []
             if (p.uploaded > 0) parts.push(`新增 ${p.uploaded} 个`)
             if (p.skipped > 0) parts.push(`跳过 ${p.skipped} 个`)
-            if (p.errors && p.errors.length > 0) parts.push(`错误 ${p.errors.length} 个`)
-            showToast(parts.length > 0 ? '✅ ' + parts.join('，') : '✅ 上传完成')
+            if (p.errors && p.errors.length > 0) {
+              const firstError = p.errors[0]
+              uploadError.value = firstError
+              parts.push(`错误 ${p.errors.length} 个：${firstError}`)
+            }
+            showToast(parts.length > 0 ? parts.join('，') : '✅ 上传完成', p.errors && p.errors.length > 0 ? 'error' : 'success')
           }
         } catch (e) {
           console.error('Upload progress error:', e)
@@ -666,19 +723,6 @@ export default {
       }
     }
 
-    async function deleteOne(model) {
-      if (!confirm(`确定删除模型 "${model.name}" 吗？（本地 + 云端）`)) return
-      try {
-        const res = await deleteModel(model.name)
-        if (res.success) {
-          showToast('✅ 已删除 ' + model.name)
-          await loadModels()
-        } else {
-          showToast((res.errors && res.errors[0]) || res.error || '删除失败', 'error')
-        }
-      } catch (e) { showToast(e.message || '网络错误', 'error') }
-    }
-
     async function clearTrainingProgress() {
       if (!confirm('确定清除训练进度记录吗？（本地 + 云端）')) return
       try {
@@ -725,6 +769,10 @@ export default {
       message,
       models,
       modelsLoading,
+      cloudChecked,
+      cloudChecking,
+      cloudError,
+      cloudStatusText,
       incompleteModels,
       completedModels,
       training,
@@ -732,6 +780,7 @@ export default {
       showToast,
       uploadMsg,
       uploading,
+      uploadError,
       uploadPct,
       uploadCurrent,
       uploadTotal,
@@ -756,9 +805,11 @@ export default {
       resumeTraining,
       handleStop,
       selectModel,
-      deleteOne,
       clearTrainingProgress,
       refreshStatus,
+      loadModels,
+      cloudCellText,
+      cloudCellClass,
       getStageName,
       formatDuration,
     }
@@ -969,6 +1020,64 @@ export default {
 
 .running-row { background: rgba(76, 175, 80, 0.08); }
 
+.progress-empty {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  background: #f8f9fa;
+  border: 1px solid #eef1f4;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.models-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cloud-check-btn {
+  background: #1976d2;
+  color: #fff;
+  border: none;
+}
+
+.cloud-check-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.cloud-note {
+  margin: -6px 0 14px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.cloud-note.warning {
+  color: #8a6d3b;
+}
+
+.cloud-ok {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.cloud-missing {
+  color: #9aa3ad;
+  font-size: 12px;
+}
+
+.cloud-unknown {
+  color: #9aa3ad;
+  font-size: 12px;
+}
+
+.upload-error {
+  margin: -4px 0 14px;
+  padding: 10px 12px;
+}
+
 /* 日志 */
 .log-container {
   max-height: 300px;
@@ -1039,6 +1148,31 @@ export default {
 .btn-sm.btn-danger:hover { background: #d32f2f; }
 .btn-sm.btn-success { background: #4caf50; color: white; border: none; }
 .btn-sm.btn-success:hover { background: #45a049; }
+
+.select-all-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: #4caf50;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+
+.select-all-control.checked {
+  background: #2e7d32;
+}
+
+.select-all-control input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: #fff;
+}
 
 /* 根容器宽度 */
 .training-page {
