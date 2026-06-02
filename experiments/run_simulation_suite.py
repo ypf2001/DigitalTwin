@@ -254,27 +254,37 @@ def _plot_short_fixed(arrays: dict[str, np.ndarray], path: Path) -> None:
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import matplotlib.font_manager as fm
+
+    simhei_path = r"C:\Windows\Fonts\simhei.ttf"
+    if Path(simhei_path).exists():
+        fm.fontManager.addfont(simhei_path)
+        plt.rcParams["font.sans-serif"] = ["SimHei"]
+    plt.rcParams["axes.unicode_minus"] = False
 
     t = arrays["time_hours"]
-    fig, axes = plt.subplots(3, 1, figsize=(9, 8), sharex=True)
-    axes[0].plot(t, arrays["theta"], label="theta")
-    axes[0].set_ylabel("theta")
-    axes[0].grid(alpha=0.25)
+    fig, axes = plt.subplots(3, 1, figsize=(8, 7), sharex=True)
+    for ax in axes:
+        ax.grid(False)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.tick_params(direction="out", length=4, width=1)
 
-    axes[1].plot(t, arrays["ec_soil"], label="EC soil")
-    axes[1].plot(t, arrays["target_ec"], "--", label="target EC")
-    axes[1].set_ylabel("EC (dS/m)")
+    axes[0].plot(t, arrays["theta"], color="#333333", linewidth=1.4, label="土壤含水率")
+    axes[0].set_ylabel("土壤含水率")
+
+    axes[1].plot(t, arrays["ec_soil"], color="#333333", linewidth=1.4, label="根区EC")
+    axes[1].plot(t, arrays["target_ec"], color="#666666", linestyle="--", linewidth=1.0, label="目标EC")
+    axes[1].set_ylabel("EC（dS/m）")
     axes[1].legend()
-    axes[1].grid(alpha=0.25)
 
-    axes[2].plot(t, arrays["irrigation_mm_h"], label="irrigation")
-    axes[2].plot(t, arrays["etc_mm_h"], label="ETc")
-    axes[2].set_ylabel("mm/h")
-    axes[2].set_xlabel("Time (h)")
+    axes[2].plot(t, arrays["irrigation_mm_h"], color="#333333", linewidth=1.4, label="灌溉强度")
+    axes[2].plot(t, arrays["etc_mm_h"], color="#777777", linestyle="-.", linewidth=1.1, label="作物蒸散ETc")
+    axes[2].set_ylabel("水量（mm/h）")
+    axes[2].set_xlabel("时间（h）")
     axes[2].legend()
-    axes[2].grid(alpha=0.25)
 
-    fig.suptitle("Short fixed-policy simulation")
+    fig.suptitle("短期固定策略仿真", fontsize=13)
     fig.tight_layout()
     fig.savefig(path, dpi=200)
     plt.close(fig)
@@ -291,26 +301,50 @@ def _plot_season(
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import matplotlib.font_manager as fm
 
     cfg = load_config()
     soil_cfg = cfg.soil()
     crop_stages = cfg.crop_stages()
     schedule = get_irrigation_schedule()
 
-    fig, axes = plt.subplots(3, 1, figsize=(9, 8), sharex=True)
-    styles = {"T1": "#1f77b4", "T2": "#d62728"}
+    simhei_path = r"C:\Windows\Fonts\simhei.ttf"
+    if Path(simhei_path).exists():
+        fm.fontManager.addfont(simhei_path)
+        plt.rcParams["font.sans-serif"] = ["SimHei"]
+    plt.rcParams["axes.unicode_minus"] = False
 
-    for strategy, color in styles.items():
+    fig, axes = plt.subplots(3, 1, figsize=(8, 7), sharex=True)
+    styles = {
+        "T1": {"color": "#4e79a7", "linestyle": "-", "marker": "o"},
+        "T2": {"color": "#f28e2b", "linestyle": "-", "marker": "s"},
+    }
+    marker_every = 900
+
+    # 参考作物生育期图，用浅绿色标出最后一次灌溉后的后期阶段。
+    shade_start = schedule[-1].day if schedule else 65.0
+    for ax in axes:
+        ax.axvspan(shade_start, max(planned_days[-1], 90.0), color="#d8f0d2", alpha=0.55)
+
+    for strategy, style in styles.items():
         res = results[strategy]
         t = res["time_day"]
-        axes[0].plot(t, res["theta"], color=color, label=strategy)
-        axes[1].plot(t, res["ec_soil"], color=color, label=strategy)
-        axes[2].step(planned_days, planned_cumulative[strategy], where="post", color=color, label=strategy)
+        axes[0].plot(t, res["theta"], color=style["color"], linestyle=style["linestyle"],
+                     marker=style["marker"], markevery=marker_every, markersize=3.0,
+                     linewidth=1.4, label=strategy)
+        axes[1].plot(t, res["ec_soil"], color=style["color"], linestyle=style["linestyle"],
+                     marker=style["marker"], markevery=marker_every, markersize=3.0,
+                     linewidth=1.4, label=strategy)
+        axes[2].step(planned_days, planned_cumulative[strategy], where="post",
+                     color=style["color"], linestyle=style["linestyle"], linewidth=1.5,
+                     label=strategy)
+        axes[2].plot(planned_days, planned_cumulative[strategy], color=style["color"],
+                     marker=style["marker"], linestyle="None", markersize=3.4)
 
     theta_fc = float(soil_cfg.get("theta_fc", 0.334))
     theta_safe_upper = float(soil_cfg.get("theta_safe_upper", 0.38))
-    axes[0].axhline(theta_fc, color="#2ca02c", linestyle="--", linewidth=1.1, label="theta_fc")
-    axes[0].axhline(theta_safe_upper, color="#7f7f7f", linestyle=":", linewidth=1.1, label="wet reference")
+    axes[0].axhline(theta_fc, color="#59a14f", linestyle="--", linewidth=1.0, label="田间持水量")
+    axes[0].axhline(theta_safe_upper, color="#76b7b2", linestyle=":", linewidth=1.0, label="偏湿参考线")
 
     target_time = [0.0]
     target_ec = [float(crop_stages.get(schedule[0].growth_stage.value, {}).get("target_ec", 0.8))]
@@ -320,23 +354,29 @@ def _plot_season(
     last_day = max(float(np.max(res["time_day"])) for res in results.values())
     target_time.append(last_day)
     target_ec.append(target_ec[-1])
-    axes[1].step(target_time, target_ec, where="post", color="#333333", linestyle="--", linewidth=1.2, label="target EC")
+    axes[1].step(target_time, target_ec, where="post", color="#59a14f",
+                 linestyle=":", linewidth=1.4, label="目标EC")
 
     planned_total = float(results["T1"].get("total_scheduled_irrigation_mm", 180.0))
-    axes[2].axhline(planned_total, color="#333333", linestyle="--", linewidth=1.1, label="planned total")
+    axes[2].axhline(planned_total, color="#59a14f", linestyle=":", linewidth=1.2, label="计划总灌溉量")
 
-    axes[0].set_ylabel("theta")
-    axes[1].set_ylabel("EC (dS/m)")
-    axes[2].set_ylabel("Cumulative irrigation (mm)")
-    axes[2].set_xlabel("Day")
+    axes[0].set_ylabel("土壤含水率")
+    axes[1].set_ylabel("EC（dS/m）")
+    axes[2].set_ylabel("累计灌溉量（mm）")
+    axes[2].set_xlabel("时间（d）")
     axes[0].set_ylim(bottom=0.32)
     axes[1].set_ylim(bottom=0.0)
     axes[2].set_ylim(bottom=0.0)
+    axes[0].text(shade_start + 1.0, axes[0].get_ylim()[1] * 0.995,
+                 "后期阶段", ha="left", va="top", fontsize=9, color="#2f6b2f")
     for ax in axes:
-        ax.grid(alpha=0.25)
+        ax.grid(False)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.tick_params(direction="out", length=4, width=1)
         ax.legend()
 
-    fig.suptitle("Seasonal irrigation comparison")
+    fig.suptitle("季节尺度灌溉策略对比", fontsize=13)
     fig.tight_layout()
     fig.savefig(path, dpi=200)
     plt.close(fig)
@@ -353,7 +393,7 @@ def main() -> int:
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = Path(args.out_dir) / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    image_dir = ROOT / "experiments" / "images" / run_id
+    image_dir = ROOT / "experiments" / "images" / "simulation_suite" / run_id
     image_dir.mkdir(parents=True, exist_ok=True)
 
     stage = GrowthStage[args.stage]
