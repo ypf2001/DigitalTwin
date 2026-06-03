@@ -68,7 +68,7 @@ class DigitalTwinEnv:
 
     奖励
     --------
-    r = -|EC_soil - target_ec| * 10 - 总流量 * 0.01
+    r = -|EC_drip - target_ec| * 10 - 总流量 * 0.01
     """
 
     def __init__(self,
@@ -213,14 +213,18 @@ class DigitalTwinEnv:
 
         return obs
 
-    def _compute_reward(self, ec_soil, ph_drip, total_flow_Lmin):
+    def _compute_reward(self, ec_drip, ec_soil, ph_drip, total_flow_Lmin, control_active=True):
         """计算奖励函数（多目标）。
 
-        r = -w1*|EC_soil - target_ec|^2
+        r = -w1*|EC_drip - target_ec|^2
             - w2*|pH_drip - pH_target|^2
             - w3*total_flow * 0.01
             + w4*WUE_bonus
             + 烧苗硬惩罚（EC_soil>3.0 或 pH_drip<4.5 → -100）
+
+        EC 跟踪使用滴灌出口 EC，因为 q_f 直接控制的是配液出口；
+        根区土壤 EC 变化较慢，仅用于盐害安全判断和长期评价。
+        夜间停肥停酸时 control_active=False，不计算不可实现的 EC/pH 跟踪惩罚。
 
         返回 (reward, ec_reward, ph_reward, burn) 四元组。
         """
@@ -231,12 +235,12 @@ class DigitalTwinEnv:
         target_ec = self.crop.get_target_ec(self.current_stage)
 
         # EC 跟踪惩罚（二次型）
-        ec_error = abs(ec_soil - target_ec)
-        ec_reward = -w1 * ec_error * ec_error
+        ec_error = abs(ec_drip - target_ec)
+        ec_reward = -w1 * ec_error * ec_error if control_active else 0.0
 
         # pH 跟踪惩罚（二次型）
         ph_error = abs(ph_drip - pH_TARGET)
-        ph_reward = -w2 * ph_error * ph_error
+        ph_reward = -w2 * ph_error * ph_error if control_active else 0.0
 
         # 流量惩罚
         flow_penalty = total_flow_Lmin * rw["flow_penalty_scale"] * w3
@@ -294,7 +298,13 @@ class DigitalTwinEnv:
         self._ph_in_history.append(ph_drip)
 
         # ---- 6. 奖励 ----
-        reward, ec_reward_component, ph_reward_component, burn = self._compute_reward(ec_soil, ph_drip, total_flow_Lmin)
+        reward, ec_reward_component, ph_reward_component, burn = self._compute_reward(
+            ec_drip,
+            ec_soil,
+            ph_drip,
+            total_flow_Lmin,
+            control_active=not self._is_nighttime(self._time_min),
+        )
         if burn:
             self._done = True
 

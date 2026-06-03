@@ -8,7 +8,7 @@ crop:
                              # 来源: Allen R.G. et al. (1998) "Crop evapotranspiration—Guidelines
                              #        for computing crop water requirements." FAO Irrigation and
                              #        Drainage Paper No.56, Table 12, p.163 (potato, initial stage)
-      target_ec: 0.8         # 目标土壤 EC (dS/m)，幼苗期耐盐性低
+      target_ec: 0.8         # 目标滴灌出口 EC (dS/m)，幼苗期耐盐性低
                              # 来源: Shock C.C. et al. (1992) "Potato yield and quality response
                              #        to deficit irrigation." HortScience 27(8):923-926.
                              #        幼苗期 EC 阈值 0.7~0.9 dS/m
@@ -20,7 +20,7 @@ crop:
       kc: 0.75               # 作物系数 Kc=0.75 (development stage, mid-point)
                              # 来源: Allen R.G. et al. (1998) FAO-56 Table 12, p.163
                              #        (potato, development stage Kc 0.60→1.15 线性插值中段)
-      target_ec: 1.0         # 目标土壤 EC (dS/m)
+      target_ec: 1.0         # 目标滴灌出口 EC (dS/m)
                              # 来源: Rhoades J.D. & Loveday J. (1990) "Salinity in irrigated
                              #        agriculture." Agronomy Monograph 30, ASA, Madison, WI.
                              #        马铃薯营养生长期 EC 适宜范围 0.8~1.2 dS/m
@@ -32,7 +32,7 @@ crop:
                              # 来源: Allen R.G. et al. (1998) FAO-56 Table 12, p.163
                              #        (potato, mid-season stage Kc=1.05~1.20)
                              #        另见: Doorenbos J. & Pruitt W.O. (1977) FAO-24 Table 20
-      target_ec: 1.2         # 目标土壤 EC (dS/m)，块茎发育需适度养分
+      target_ec: 1.2         # 目标滴灌出口 EC (dS/m)，块茎发育需适度养分
                              # 来源: Westermann D.T. (2005) "Nutritional requirements of
                              #        potatoes." American Journal of Potato Research 82:301-307.
                              #        块茎形成期适宜 EC 1.0~1.4 dS/m
@@ -46,7 +46,7 @@ crop:
                              #        验证: Katerji N. & Rana G. (2006) "Modelling evapotranspiration
                              #        of six irrigated crops under Mediterranean climate conditions."
                              #        Agricultural and Forest Meteorology 138:142-155. Kc=1.10~1.20
-      target_ec: 1.5         # 目标土壤 EC (dS/m)，全周期最高，满足膨大养分需求
+      target_ec: 1.5         # 目标滴灌出口 EC (dS/m)，全周期最高，满足膨大养分需求
                              # 来源: Shock C.C. & Feibert E.B.G. (2002) "Deficit irrigation of
                              #        potato." In: Deficit Irrigation Practices, FAO Water Reports
                              #        No.22, pp.47-55. 膨大期 EC 1.3~1.7 dS/m
@@ -67,7 +67,7 @@ crop:
                              #        另见: Liu Y. et al. (2012) "Crop coefficient and
                              #        evapotranspiration of potato in a semi-arid region."
                              #        Agricultural Water Management 103:1-8.
-      target_ec: 1.0         # 目标土壤 EC (dS/m)，养分需求回落
+      target_ec: 1.0         # 目标滴灌出口 EC (dS/m)，养分需求回落
                              # 来源: Westermann D.T. (2005) American Journal of Potato Research
                              #        82:301-307. 淀粉积累期 EC 0.8~1.2 dS/m
       root_depth: 300        # 根区深度 (mm)
@@ -76,7 +76,7 @@ crop:
       kc: 0.70               # 作物系数进一步降低
                              # 来源: Allen R.G. et al. (1998) FAO-56 Table 12, p.163
                              #        (potato, end-season Kc_end=0.70~0.75)
-      target_ec: 0.8         # 目标土壤 EC (dS/m)，成熟期低盐利于块茎品质
+      target_ec: 0.8         # 目标滴灌出口 EC (dS/m)，成熟期低盐利于块茎品质
                              # 来源: Levy D. & Veilleux R.E. (2007) "Adaptation of potato to
                              #        high temperatures and salinity—a review."
                              #        American Journal of Potato Research 84:487-506.

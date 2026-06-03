@@ -79,9 +79,16 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--resume", action="store_true",
                         help="从上次保存的模型继续训练")
+    parser.add_argument("--fresh", action="store_true",
+                        help="忽略已有模型并从头训练，适合配置变化后的可重复实验")
     parser.add_argument("--load-path", type=str, default=None,
                         help="从指定模型路径加载 (如 sac_mid_6000_steps)")
     args = parser.parse_args()
+
+    if args.resume and args.fresh:
+        parser.error("--resume 和 --fresh 不能同时使用")
+    if args.load_path and args.fresh:
+        parser.error("--load-path 和 --fresh 不能同时使用")
 
     os.makedirs(args.save_dir, exist_ok=True)
 
@@ -150,7 +157,23 @@ if __name__ == "__main__":
             except Exception:
                 pass
 
-        if model_found and not already_completed:
+        if args.fresh:
+            ent_coef = sac_cfg["ent_coef"]
+            if ent_coef != "auto":
+                ent_coef = float(ent_coef)
+            model = SAC(
+                "MlpPolicy", train_env,
+                learning_rate=float(sac_cfg["learning_rate"]),
+                buffer_size=int(sac_cfg["buffer_size"]),
+                batch_size=int(sac_cfg["batch_size"]),
+                learning_starts=int(sac_cfg["learning_starts"]),
+                tau=float(sac_cfg["tau"]),
+                gamma=float(sac_cfg["gamma"]),
+                ent_coef=ent_coef, verbose=1, seed=args.seed,
+            )
+            trained_steps = 0
+            logger.info("已指定 --fresh，将忽略已有模型并从头训练")
+        elif model_found and not already_completed:
             if args.resume:
                 should_resume = True
             else:

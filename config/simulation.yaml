@@ -30,9 +30,9 @@ soil:
   root_depth_default: 300
 mixing_tank:
   volume: 100.0
-  ec_conc: 35.0
-  ph_acid: 1.5
-  ph_water: 7.2
+  ec_conc: 35.0          # 肥料母液 EC (dS/m)，当前作为高浓度复配肥液的等效参数
+  ph_acid: 3.9           # 预稀释酸液 pH。使约 1 L/min 注酸流量落在可控制范围，避免强酸微小流量导致 pH 骤降
+  ph_water: 7.2          # 清水 pH
 pipe:
   tau: 8.0
   T: 3.5
@@ -42,8 +42,8 @@ action:
   q_a_min: 0.0
   q_a_max: 4.0
   fixed_strategy:
-  - 5.0
-  - 1.0
+  - 6.1                  # 固定策略肥料母液流量 q_f (L/min)，接近块茎膨大期目标 EC=1.5 dS/m
+  - 1.0                  # 固定策略预稀释酸液流量 q_a (L/min)，接近目标 pH=6.0
 obs:
   history_len: 5
   etc_norm: 10.0
