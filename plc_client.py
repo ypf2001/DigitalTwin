@@ -1,72 +1,39 @@
 """
 PLC 通讯客户端 — PLCClient
 ============================
-面向对象的 snap7 通讯封装，提供：
-  1. 双向通讯：db_write 下发动作 + db_read 回读 PLC 状态
-  2. 工业级断线重连：指数退避 (Exponential Backoff) 无限重试
-  3. 精准的 Bytearray 内存偏移读写（set_real / get_real 等）
 
-用法:
-    from plc_client import PLCClient
-
-    plc = PLCClient()
-    plc.connect()
-
-    # 下发动作
-    plc.write_action(valve_f=0.85, valve_a=0.23)
-
-    # 回读状态
-    state = plc.read_state()
-    print(state["Actual_Valve_F"], state["Remote_Comms_OK"])
-
-    plc.disconnect()
+B 方案通讯约定：
+- Python/SAC 写入上层目标值 EC_Set_SP、pH_Set_SP，以及数字孪生/传感器反馈 EC_Actual、pH_Actual；
+- PLC/PLCSIM 内部运行 EC-PID、pH-PID，输出 q_f_cmd、q_a_cmd 或阀门开度；
+- Python 回读 PLC 执行结果，用于驱动数字孪生模型或记录半实物在环试验。
 """
 
-import time
 import logging
 import os
+import time
 
 import snap7
-from snap7.util import set_real, get_real, set_int, get_int, get_bool
+from snap7.util import get_bool, get_int, get_real, set_bool, set_int, set_real
 
 from config_loader import load_config
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 
-# ---- 日志配置 ----
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
-_error_fh = logging.FileHandler(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rl_logs', 'error.log'),
-    encoding='utf-8'
-)
+_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rl_logs")
+os.makedirs(_log_dir, exist_ok=True)
+_error_fh = logging.FileHandler(os.path.join(_log_dir, "error.log"), encoding="utf-8")
 _error_fh.setLevel(logging.ERROR)
-_error_fh.setFormatter(logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s'))
+_error_fh.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
 logging.getLogger().addHandler(_error_fh)
 
 
 class PLCClient:
-    """S7-1200 PLC 通讯客户端，封装 snap7 的双向读写与断线重连。
+    """S7-1200 / PLCSIM Advanced 通讯客户端。"""
 
-    参数
-    ----------
-    ip : str
-        PLC IP 地址，默认从配置文件读取
-    rack : int
-        机架号，默认 0
-    slot : int
-        槽位号，默认 1
-    db_number : int
-        DB 块编号，默认 1
-    cycle_s : float
-        通讯周期 (秒)，默认 1.0
-    addr_map : dict or None
-        DB1 地址映射字典，None 时从配置文件加载
-    """
-
-    # ---- 默认重连参数 ----
-    RECONNECT_BASE_DELAY = 1.0     # 基础等待秒数
-    RECONNECT_BACKOFF_FACTOR = 2.0 # 退避因子
-    RECONNECT_MAX_DELAY = 60.0     # 最大等待秒数
+    RECONNECT_BASE_DELAY = 1.0
+    RECONNECT_BACKOFF_FACTOR = 2.0
+    RECONNECT_MAX_DELAY = 60.0
 
     def __init__(self,
                  ip: str = None,
@@ -82,44 +49,18 @@ class PLCClient:
         self.slot = slot if slot is not None else cfg.get("slot", 1)
         self.db_number = db_number if db_number is not None else cfg.get("db_number", 1)
         self.cycle_s = cycle_s if cycle_s is not None else cfg.get("cycle_s", 1.0)
+        self.addr_map = addr_map if addr_map is not None else cfg.get("addresses", {})
 
-        # 地址映射：从配置文件读取，也可由外部传入覆盖
-        if addr_map is None:
-            self.addr_map = cfg.get("addresses", {})
-        else:
-            self.addr_map = addr_map
-
-        # 内部状态
         self._client = snap7.client.Client()
         self._connected = False
         self._heartbeat = 0
-
-        # 计算读写所需的缓冲区大小
-        self._write_buf_size_reals = self._calc_buf_size([
-            "Valve_F_Opt_SP", "Valve_A_Opt_SP"
-        ])
-        self._write_buf_size_heartbeat = self._calc_buf_size([
-            "Remote_Heartbeat"
-        ])
-        self._read_buf_size = self._calc_buf_size([
-            "Remote_Comms_OK", "Watchdog_Timer",
-            "Actual_Valve_F", "Actual_Valve_A",
-            "AQ_Valve_F_Raw", "AQ_Valve_A_Raw",
-            "System_Alarm_Light",
-        ])
 
     # ================================================================
     #  连接管理
     # ================================================================
 
     def connect(self) -> bool:
-        """连接 PLC，失败则打印诊断信息。
-
-        返回
-        ----------
-        bool
-            连接是否成功
-        """
+        """连接 PLC/PLCSIM。"""
         try:
             self._client.connect(self.ip, self.rack, self.slot)
             self._connected = self._client.get_connected()
@@ -129,11 +70,9 @@ class PLCClient:
 
         if self._connected:
             logger.info(f"[PLC] 连接成功 → {self.ip} (rack={self.rack}, slot={self.slot})")
-            # 诊断：快速验证 DB 可读
             self._diagnose_db()
         else:
             self._print_connection_diag("")
-
         return self._connected
 
     def disconnect(self):
@@ -160,12 +99,11 @@ class PLCClient:
 
     @staticmethod
     def _print_connection_diag(last_error: str):
-        """打印连接失败的排查指南。"""
         logger.error(
             "\n" + "=" * 55 + "\n"
             "  PLC 连接失败，逐项排查：\n"
             "=" * 55 + "\n"
-            "  1. NetToPLCsim / PLCSIM Advanced 是否 Running？\n"
+            "  1. PLCSIM Advanced 是否 Running？\n"
             "  2. TIA Portal 是否已下载到虚拟 PLC？\n"
             "  3. DB 块是否已关闭「优化的块访问」？\n"
             "  4. IP / Rack / Slot 是否匹配？\n"
@@ -173,35 +111,19 @@ class PLCClient:
             "=" * 55
         )
 
-    # ================================================================
-    #  断线重连 (Exponential Backoff)
-    # ================================================================
-
     def reconnect(self) -> bool:
-        """指数退避无限重连，直到成功。
-
-        返回
-        ----------
-        bool
-            始终返回 True（无限重试直到成功）
-        """
+        """指数退避无限重连。"""
         attempt = 0
         delay = self.RECONNECT_BASE_DELAY
-
         while not self._connected:
             attempt += 1
-            logger.warning(
-                f"[PLC] 断线重连 第 {attempt} 次 (等待 {delay:.1f}s)..."
-            )
+            logger.warning(f"[PLC] 断线重连 第 {attempt} 次 (等待 {delay:.1f}s)...")
             time.sleep(delay)
-
             try:
-                # 先尝试清理旧连接
                 try:
                     self._client.disconnect()
                 except Exception:
                     pass
-
                 self._client.connect(self.ip, self.rack, self.slot)
                 self._connected = self._client.get_connected()
             except Exception as e:
@@ -212,70 +134,93 @@ class PLCClient:
                 logger.info(f"[PLC] ✓ 重连成功 (第 {attempt} 次)")
                 self._diagnose_db()
                 return True
-
-            # 指数退避
             delay = min(delay * self.RECONNECT_BACKOFF_FACTOR, self.RECONNECT_MAX_DELAY)
-
-        return True  # unreachable
+        return True
 
     def _ensure_connected(self):
-        """执行操作前确保已连接，否则触发重连。"""
         if not self._connected:
             logger.warning("[PLC] 未连接，尝试重连...")
             self.reconnect()
 
     # ================================================================
-    #  数据写入 (Python → PLC)
+    #  通用 DB 读写辅助
     # ================================================================
 
-    def write_action(self, valve_f: float, valve_a: float) -> bool:
-        """下发阀门目标开度与心跳到 PLC。
+    def _addr(self, name: str) -> dict:
+        if name not in self.addr_map:
+            raise KeyError(f"PLC 地址映射缺少变量: {name}")
+        return self.addr_map[name]
+
+    def _write_real(self, name: str, value: float):
+        addr = self._addr(name)
+        buf = bytearray(4)
+        set_real(buf, 0, float(value))
+        self._client.db_write(self.db_number, int(addr["offset"]), buf)
+
+    def _write_int(self, name: str, value: int):
+        addr = self._addr(name)
+        buf = bytearray(2)
+        set_int(buf, 0, int(value))
+        self._client.db_write(self.db_number, int(addr["offset"]), buf)
+
+    def _write_bool(self, name: str, value: bool):
+        addr = self._addr(name)
+        offset = int(addr["offset"])
+        raw = self._client.db_read(self.db_number, offset, 1)
+        buf = bytearray(raw)
+        set_bool(buf, 0, int(addr.get("bit", 0)), bool(value))
+        self._client.db_write(self.db_number, offset, buf)
+
+    def _calc_read_range(self, var_names: list) -> tuple[int, int]:
+        min_off = float("inf")
+        max_end = 0
+        for name in var_names:
+            if name in self.addr_map:
+                addr = self.addr_map[name]
+                off = int(addr["offset"])
+                size = int(addr["bytes"])
+                min_off = min(min_off, off)
+                max_end = max(max_end, off + size)
+        return int(min_off), int(max_end - min_off)
+
+    # ================================================================
+    #  B 方案写入：Python/SAC → PLC/PLCSIM
+    # ================================================================
+
+    def write_setpoints(self,
+                        ec_set: float,
+                        ph_set: float,
+                        ec_actual: float,
+                        ph_actual: float,
+                        sac_enable: bool = True) -> bool:
+        """写入 EC/pH 目标值与虚拟/真实传感器反馈。
 
         参数
         ----------
-        valve_f : float
-            母液阀门开度 (0.0 ~ 1.0 或 0 ~ 100，取决于 PLC 端约定)
-        valve_a : float
-            酸液阀门开度
-
-        返回
-        ----------
-        bool
-            写入是否成功
+        ec_set, ph_set : float
+            SAC 输出的上层目标值。
+        ec_actual, ph_actual : float
+            数字孪生或在线传感器反馈值，用作 PLC-PID 的 PV。
+        sac_enable : bool
+            SAC/远程模式使能位。
         """
         try:
             self._ensure_connected()
-
             self._heartbeat = (self._heartbeat + 1) % 32000
 
-            # ---- 分两次写入，只碰需要改的字节 ----
-            #   offset 0~3:  Valve_F_Opt_SP (Real)
-            #   offset 4~7:  Valve_A_Opt_SP (Real)
-            #   offset 8~9:  ← 不碰！Remote_Comms_OK 完全由 PLC 管理
-            #   offset 10~11: Remote_Heartbeat (Int)
-            #   offset 12~15: ← 不碰！Last_Heartbeat、Watchdog_Timer 由 PLC 管理
-            #
-            #   分次写入顺序：先写阀门，再写心跳。
-            #   PLC 在两次写入之间扫描到旧心跳无影响，
-            #   心跳信号只要最终进入新值就能被 PLC 检测到。
-
-            # 写入阀门目标值 (offset 0~7)
-            buf_v = bytearray(8)
-            set_real(buf_v, 0, valve_f)
-            set_real(buf_v, 4, valve_a)
-            self._client.db_write(self.db_number, 0, buf_v)
-
-            # 写入心跳 (offset 10~11)，不碰中间 byte 8~9
-            buf_h = bytearray(2)
-            set_int(buf_h, 0, self._heartbeat)
-            self._client.db_write(self.db_number, 10, buf_h)
+            self._write_real("EC_Set_SP", ec_set)
+            self._write_real("pH_Set_SP", ph_set)
+            self._write_real("EC_Actual", ec_actual)
+            self._write_real("pH_Actual", ph_actual)
+            if "SAC_Enable" in self.addr_map:
+                self._write_bool("SAC_Enable", sac_enable)
+            self._write_int("Remote_Heartbeat", self._heartbeat)
 
             logger.info(
-                f"[PLC] 写入 → Valve_F={valve_f:.3f}, Valve_A={valve_a:.3f}, "
-                f"Heartbeat={self._heartbeat}"
+                f"[PLC] 写入 → EC_set={ec_set:.3f}, pH_set={ph_set:.3f}, "
+                f"EC_actual={ec_actual:.3f}, pH_actual={ph_actual:.3f}, Heartbeat={self._heartbeat}"
             )
             return True
-
         except (OSError, ConnectionError, AttributeError) as e:
             logger.error(f"[PLC] 写入失败 (网络断开): {e}")
             self._connected = False
@@ -285,78 +230,82 @@ class PLCClient:
             logger.error(f"[PLC] 写入异常: {e}")
             return False
 
+    def write_action(self, valve_f: float, valve_a: float) -> bool:
+        """兼容旧 A 方案接口。
+
+        新代码建议使用 write_setpoints()。如果配置仍保留 Valve_F_Opt_SP/Valve_A_Opt_SP，
+        该函数可继续写入旧变量；否则返回 False。
+        """
+        if "Valve_F_Opt_SP" not in self.addr_map or "Valve_A_Opt_SP" not in self.addr_map:
+            logger.error("当前 PLC 地址映射为 B 方案，write_action 已不适用，请使用 write_setpoints。")
+            return False
+        try:
+            self._ensure_connected()
+            self._heartbeat = (self._heartbeat + 1) % 32000
+            self._write_real("Valve_F_Opt_SP", valve_f)
+            self._write_real("Valve_A_Opt_SP", valve_a)
+            self._write_int("Remote_Heartbeat", self._heartbeat)
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] write_action 异常: {e}")
+            return False
+
     # ================================================================
-    #  数据读取 (PLC → Python)
+    #  读取：PLC/PLCSIM → Python
     # ================================================================
 
     def read_state(self) -> dict:
-        """从 PLC 回读当前状态。
+        """从 PLC 回读执行层状态。"""
+        preferred = [
+            "Remote_Comms_OK", "Watchdog_Timer",
+            "q_f_cmd", "q_a_cmd",
+            "Valve_F_Actual", "Valve_A_Actual",
+            "AQ_Valve_F_Raw", "AQ_Valve_A_Raw",
+            "System_Alarm_Light",
+        ]
+        legacy = [
+            "Remote_Comms_OK", "Watchdog_Timer",
+            "Actual_Valve_F", "Actual_Valve_A",
+            "AQ_Valve_F_Raw", "AQ_Valve_A_Raw",
+            "System_Alarm_Light",
+        ]
+        read_vars = [name for name in preferred if name in self.addr_map]
+        if "q_f_cmd" not in self.addr_map and "Actual_Valve_F" in self.addr_map:
+            read_vars = [name for name in legacy if name in self.addr_map]
 
-        读取变量:
-            Remote_Comms_OK   — 通讯正常标志
-            Watchdog_Timer    — 看门狗计时
-            Actual_Valve_F    — 实际阀门开度 F（经过 PLC 斜坡处理后的值）
-            Actual_Valve_A    — 实际阀门开度 A
-            AQ_Valve_F_Raw    — 模拟量输出原始值 F
-            AQ_Valve_A_Raw    — 模拟量输出原始值 A
-            System_Alarm_Light— 系统报警灯
-
-        返回
-        ----------
-        dict
-            {
-                "Remote_Comms_OK": bool,
-                "Watchdog_Timer": int,
-                "Actual_Valve_F": float,
-                "Actual_Valve_A": float,
-                "AQ_Valve_F_Raw": int,
-                "AQ_Valve_A_Raw": int,
-                "System_Alarm_Light": bool,
-            }
-            读取失败时返回 None
-        """
         try:
             self._ensure_connected()
-
-            # ---- 计算需要读取的最小连续区域 ----
-            read_vars = [
-                "Remote_Comms_OK", "Watchdog_Timer",
-                "Actual_Valve_F", "Actual_Valve_A",
-                "AQ_Valve_F_Raw", "AQ_Valve_A_Raw",
-                "System_Alarm_Light",
-            ]
             start_offset, total_size = self._calc_read_range(read_vars)
-
-            # ---- 一次性 db_read ----
             raw = self._client.db_read(self.db_number, start_offset, total_size)
-
-            # ---- 逐变量解析 ----
             state = {}
-
             for var_name in read_vars:
                 addr = self.addr_map[var_name]
-                # 计算该变量在 raw buffer 中的相对偏移
-                rel_offset = addr["offset"] - start_offset
+                rel_offset = int(addr["offset"]) - start_offset
                 var_type = addr["type"]
-
                 if var_type == "real":
                     state[var_name] = get_real(raw, rel_offset)
                 elif var_type == "int":
                     state[var_name] = get_int(raw, rel_offset)
                 elif var_type == "bool":
-                    # get_bool 返回 (byte_index, bit_index) 的布尔值
-                    state[var_name] = get_bool(raw, rel_offset, 0)
+                    state[var_name] = get_bool(raw, rel_offset, int(addr.get("bit", 0)))
                 else:
                     state[var_name] = None
 
+            # 统一别名，便于 PLCGymEnv 使用
+            if "q_f_cmd" not in state and "Actual_Valve_F" in state:
+                state["q_f_cmd"] = state["Actual_Valve_F"]
+            if "q_a_cmd" not in state and "Actual_Valve_A" in state:
+                state["q_a_cmd"] = state["Actual_Valve_A"]
+            if "Valve_F_Actual" not in state and "Actual_Valve_F" in state:
+                state["Valve_F_Actual"] = state["Actual_Valve_F"]
+            if "Valve_A_Actual" not in state and "Actual_Valve_A" in state:
+                state["Valve_A_Actual"] = state["Actual_Valve_A"]
+
             logger.info(
-                f"[PLC] 读取 ← CommOK={state['Remote_Comms_OK']}, "
-                f"Watchdog={state['Watchdog_Timer']}, "
-                f"ValveF={state['Actual_Valve_F']:.3f}, "
-                f"ValveA={state['Actual_Valve_A']:.3f}"
+                f"[PLC] 读取 ← CommOK={state.get('Remote_Comms_OK')}, "
+                f"q_f={state.get('q_f_cmd', 0):.3f}, q_a={state.get('q_a_cmd', 0):.3f}"
             )
             return state
-
         except (OSError, ConnectionError, AttributeError) as e:
             logger.error(f"[PLC] 读取失败 (网络断开): {e}")
             self._connected = False
@@ -368,39 +317,4 @@ class PLCClient:
 
     @property
     def is_connected(self) -> bool:
-        """返回当前连接状态。"""
         return self._connected
-
-    # ================================================================
-    #  辅助方法
-    # ================================================================
-
-    def _calc_buf_size(self, var_names: list) -> int:
-        """计算覆盖指定变量所需的总字节数。"""
-        if not var_names:
-            return 0
-        max_end = 0
-        for name in var_names:
-            if name in self.addr_map:
-                addr = self.addr_map[name]
-                end = addr["offset"] + addr["bytes"]
-                if end > max_end:
-                    max_end = end
-        return max_end
-
-    def _calc_read_range(self, var_names: list) -> tuple:
-        """计算一次 db_read 能覆盖所有目标变量的 [起始偏移, 总大小]。
-
-        返回 (start_offset, total_size)。
-        """
-        min_off = float('inf')
-        max_end = 0
-        for name in var_names:
-            if name in self.addr_map:
-                addr = self.addr_map[name]
-                if addr["offset"] < min_off:
-                    min_off = addr["offset"]
-                end = addr["offset"] + addr["bytes"]
-                if end > max_end:
-                    max_end = end
-        return int(min_off), int(max_end - min_off)
