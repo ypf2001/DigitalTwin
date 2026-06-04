@@ -1,8 +1,9 @@
 """
 SAC 闭环评估脚本 — eval_sac.py
 ================================
+
 加载训练好的 SAC 模型，在全生育期（8 次灌溉事件）上做确定性推演，
-录制全部状态和控制数据，生成对比图。
+录制 EC_set/pH_set、执行层 q_f/q_a、土壤水盐状态和灌溉过程数据。
 """
 
 import argparse
@@ -10,30 +11,31 @@ import io
 import logging
 import os
 import sys
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-_error_fh = logging.FileHandler(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rl_logs', 'error.log'), encoding='utf-8')
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rl_logs")
+os.makedirs(_log_dir, exist_ok=True)
+_error_fh = logging.FileHandler(os.path.join(_log_dir, "error.log"), encoding="utf-8")
 _error_fh.setLevel(logging.ERROR)
-_error_fh.setFormatter(logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s'))
+_error_fh.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
 logging.getLogger().addHandler(_error_fh)
 
-# Windows GBK 修复
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 
-# 中文字体
 try:
     simhei_path = r"C:\Windows\Fonts\simhei.ttf"
     if os.path.exists(simhei_path):
         fm.fontManager.addfont(simhei_path)
-        plt.rcParams['font.sans-serif'] = ['SimHei'] + plt.rcParams.get('font.sans-serif', [])
-    plt.rcParams['axes.unicode_minus'] = False
+        plt.rcParams["font.sans-serif"] = ["SimHei"] + plt.rcParams.get("font.sans-serif", [])
+    plt.rcParams["axes.unicode_minus"] = False
 except Exception:
     pass
 
@@ -46,7 +48,6 @@ from plot_style import (
     FC_LINE, WP_LINE, ERROR_BAND,
 )
 
-# 观测归一化边界（对齐 digital_twin_gym_env.py）
 cfg_obs = load_config().obs()
 OBS_LOW = np.array(cfg_obs["obs_low"], dtype=np.float32)
 OBS_HIGH = np.array(cfg_obs["obs_high"], dtype=np.float32)
@@ -57,7 +58,7 @@ except ImportError:
     logger.error("请安装 stable-baselines3: pip install stable-baselines3")
     sys.exit(1)
 
-# 全 6 阶段 → 4 简写
+
 STAGE_TO_TAG = {
     GrowthStage.EMERGENCE: "ini",
     GrowthStage.VEGETATIVE: "dev",
@@ -66,30 +67,17 @@ STAGE_TO_TAG = {
     GrowthStage.STARCH_ACCUMULATION: "late",
     GrowthStage.MATURATION: "late",
 }
-
 TAG_TO_STAGE = {v: k for k, v in STAGE_TO_TAG.items()}
 
 
 def normalize_obs(obs: np.ndarray) -> np.ndarray:
-    """与 DigitalTwinGymEnv 完全一致的归一化。"""
     eps = 1e-6
     norm = 2.0 * (obs - OBS_LOW) / (OBS_HIGH - OBS_LOW + eps) - 1.0
     return np.clip(norm, -1.0, 1.0).astype(np.float32)
 
 
 class SACSeasonRunner:
-    """加载 SAC 模型，在完整生育期上闭环运行。
-
-    参数
-    ----------
-    model_dir : str
-        模型目录，如 ./rl_models
-    stage_models : dict or None
-        指定每个阶段的模型后缀，如 {"ini": "sac_ini_final", ...}
-        None 则自动查找
-    single_model : str or None
-        单一模型用于所有阶段（优先于 stage_models）
-    """
+    """加载 SAC 模型，在完整生育期上闭环运行。"""
 
     def __init__(self, model_dir="./rl_models", stage_models=None, single_model=None):
         self.model_dir = model_dir
@@ -102,22 +90,14 @@ class SACSeasonRunner:
         elif stage_models:
             self.models = stage_models
         else:
-            # 自动查找：sac_{tag}_final.zip
-            event_tags = ["ini", "ini", "dev", "dev", "mid", "mid", "mid", "late"]
-            for tag in set(event_tags):
-                for key, gt in TAG_TO_STAGE.items():
-                    # 尝试简写 → 完整阶段名
-                    pass
             self._auto_discover()
 
     def _auto_discover(self):
-        """自动查找各阶段的 final 模型。"""
         for tag in ["ini", "dev", "mid", "late"]:
             path = os.path.join(self.model_dir, f"sac_{tag}_final")
             if os.path.exists(path + ".zip"):
                 self.models[tag] = path
         if not self.models:
-            # 找不到四阶段模型，尝试单模型
             for tag in ["mid", "ini", "dev", "late"]:
                 path = os.path.join(self.model_dir, f"sac_{tag}_final")
                 if os.path.exists(path + ".zip"):
@@ -125,21 +105,15 @@ class SACSeasonRunner:
                     logger.info(f"[INFO] 未找到全部阶段模型，使用单一模型: {path}")
                     break
 
-    def _load_model(self, model_path: str, env):
-        if not os.path.exists(model_path + ".zip"):
-            return None
-        return SAC.load(model_path, env=env)
-
     def get_action(self, obs: np.ndarray, stage_tag: str) -> np.ndarray:
-        """给定原始观测和阶段标签，返回确定性的 SAC 动作。"""
+        """给定原始观测和阶段标签，返回确定性的 SAC 动作 [EC_set, pH_set]。"""
         if stage_tag not in self.models or self.models[stage_tag] is None:
-            return np.array([5.0, 1.0], dtype=np.float32)  # 回退固定策略
+            fixed = load_config().action().get("fixed_strategy", [1.5, 6.0])
+            return np.array(fixed, dtype=np.float32)
 
         path = self.models[stage_tag]
-        # 缓存加载
         if not hasattr(self, "_loaded_models"):
             self._loaded_models = {}
-
         if stage_tag not in self._loaded_models:
             self._loaded_models[stage_tag] = SAC.load(path)
             logger.info(f"  [加载] {path}.zip")
@@ -151,29 +125,24 @@ class SACSeasonRunner:
 
 
 def run_eval(args):
-    """主评估流程。"""
     cfg = load_config()
     irr_cfg = cfg.irrigation()
 
     logger.info("=" * 60)
-    logger.info("SAC 闭环评估 — 全生育期推演")
+    logger.info("SAC-PID 闭环评估 — 全生育期推演")
     logger.info("=" * 60)
 
-    # ---- 1. 初始化模型加载器 ----
     runner = SACSeasonRunner(
         model_dir=args.model_dir,
         single_model=args.model if args.model else None,
     )
-
     if not runner.models:
         logger.error("[ERROR] 未找到任何 SAC 模型，请先训练。")
         logger.error(f"  检查目录: {os.path.abspath(args.model_dir)}")
         sys.exit(1)
 
-    logger.info(f"阶段模型配置: {runner.models}")
-    logger.info("")
+    logger.info(f"阶段模型配置: {runner.models}\n")
 
-    # ---- 2. 创建环境（DigitalTwinEnv，需要用 Gym 的归一化） ----
     schedule = get_irrigation_schedule()
     env = DigitalTwinEnv(
         growth_stage=schedule[0].growth_stage,
@@ -184,11 +153,10 @@ def run_eval(args):
         seed=args.seed,
     )
 
-    # ---- 3. 录制数据结构 ----
     history = {
         "time_day": [], "theta": [], "ec_soil": [], "target_ec": [],
-        "q_f": [], "q_a": [], "irrigation_mm_h": [], "etc_mm_h": [],
-        "ec_drip": [], "ph_drip": [],
+        "ec_set": [], "ph_set": [], "q_f": [], "q_a": [],
+        "irrigation_mm_h": [], "etc_mm_h": [], "ec_drip": [], "ph_drip": [],
         "stage_tag": [], "event_idx": [],
     }
 
@@ -206,7 +174,6 @@ def run_eval(args):
     prev_day = 0.0
     dt_hours = args.dt_min / 60.0
     rain_mm_h = irr_cfg.get("rain_mm_day", 2.0) / 24.0
-
     event_tags = ["ini", "ini", "dev", "dev", "mid", "mid", "mid", "late"]
 
     logger.info("按灌溉事件推进...")
@@ -216,45 +183,42 @@ def run_eval(args):
         env.set_growth_stage(event.growth_stage)
         stage_name = event.growth_stage.value
 
-        # ---- 干旱期（蒸发 + 降雨） ----
         dry_hours = (event.day - prev_day) * 24.0
         dry_steps = int(dry_hours / dt_hours)
         for _ in range(dry_steps):
-            obs, _, done, info = env.dry_step(rain_mm_h=rain_mm_h)
+            obs, _, _done, info = env.dry_step(rain_mm_h=rain_mm_h)
             total_etc_mm += info["etc_mm_h"] * dt_hours
-            _append(history, info, np.array([0.0, 0.0]), tag, i)
+            _append(history, info, tag, i)
 
-        # ---- 灌溉期（SAC 控制） ----
-        amount = event.t2_amount_m3ha  # 用 T2 水量确定时长
+        amount = event.t2_amount_m3ha
         event_hours = event_duration_hours(amount, args.area_ha)
         event_steps = max(1, int(event_hours / dt_hours))
         event_irr = 0.0
 
-        for step in range(event_steps):
+        for _ in range(event_steps):
             action = runner.get_action(obs, tag)
-            obs, reward, done, info = env.step(action)
+            obs, _reward, _done, info = env.step(action)
             total_irr_mm += info["irrigation_mm_h"] * dt_hours
             event_irr += info["irrigation_mm_h"] * dt_hours
             total_etc_mm += info["etc_mm_h"] * dt_hours
-            _append(history, info, action, tag, i)
+            _append(history, info, tag, i)
 
         target_ec = env.crop.get_target_ec(event.growth_stage)
-        theta = info.get("theta", 0)
-        ec = info.get("ec_soil", 0)
-        logger.info(f"  事件 {i+1}/8  day {event.day:3.0f}  "
-                    f"stage={stage_name:20s}  tag={tag}  "
-                    f"irr={event_irr:.1f}mm  theta={theta:.3f}  EC={ec:.3f}  target={target_ec:.2f}")
-
+        logger.info(
+            f"  事件 {i+1}/8  day {event.day:3.0f}  stage={stage_name:20s}  tag={tag}  "
+            f"irr={event_irr:.1f}mm  theta={info.get('theta', 0):.3f}  "
+            f"EC={info.get('ec_soil', 0):.3f}  target={target_ec:.2f}"
+        )
         prev_day = event.day
 
-    # ---- 4. 统计摘要 ----
-    logger.info("")
-    logger.info("=" * 60)
+    logger.info("\n" + "=" * 60)
     logger.info("评估汇总")
     logger.info("=" * 60)
     theta_arr = np.array(history["theta"])
     ec_arr = np.array(history["ec_soil"])
     target_arr = np.array(history["target_ec"])
+    ec_set_arr = np.array(history["ec_set"])
+    ph_set_arr = np.array(history["ph_set"])
     qf_arr = np.array(history["q_f"])
     qa_arr = np.array(history["q_a"])
 
@@ -263,17 +227,16 @@ def run_eval(args):
     logger.info(f"  总灌溉量:        {total_irr_mm:.1f} mm")
     logger.info(f"  总蒸散发:        {total_etc_mm:.1f} mm")
     logger.info(f"  平均 theta:      {theta_arr.mean():.4f} ± {theta_arr.std():.4f}")
-    logger.info(f"  EC 跟踪 MAE:     {ec_mae:.4f} dS/m")
+    logger.info(f"  根区 EC MAE:     {ec_mae:.4f} dS/m")
+    logger.info(f"  EC_set 范围:     [{ec_set_arr.min():.2f}, {ec_set_arr.max():.2f}] dS/m")
+    logger.info(f"  pH_set 范围:     [{ph_set_arr.min():.2f}, {ph_set_arr.max():.2f}]")
     logger.info(f"  q_f 均值/范围:   {qf_arr.mean():.2f} / [{qf_arr.min():.2f}, {qf_arr.max():.2f}]")
     logger.info(f"  q_a 均值/范围:   {qa_arr.mean():.2f} / [{qa_arr.min():.2f}, {qa_arr.max():.2f}]")
 
-    # WUE 代理
     wue = total_etc_mm / (total_irr_mm + irr_cfg.get("rain_mm_day", 2.0) * 65 + 1e-6)
     logger.info(f"  WUE 代理:        {wue:.4f}")
 
-    # ---- 5. 对比 T1/T2 基线 ----
-    logger.info("")
-    logger.info("--- 对比基线 (T1/T2) ---")
+    logger.info("\n--- 对比基线 (T1/T2) ---")
     for strategy in ["T1", "T2"]:
         env2 = DigitalTwinEnv(
             growth_stage=schedule[0].growth_stage,
@@ -290,119 +253,92 @@ def run_eval(args):
         )
         ec_m = np.abs(res["ec_soil"] - res["target_ec"]).mean()
         w = res["total_etc_mm"] / (res["total_irrigation_mm"] + irr_cfg.get("rain_mm_day", 2.0) * 65 + 1e-6)
-        logger.info(f"  {strategy}: 灌溉={res['total_irrigation_mm']:.1f}mm  "
-                    f"EC_MAE={ec_m:.4f}  WUE={w:.4f}  theta_CV={res['theta'].std()/res['theta'].mean():.4f}")
+        logger.info(
+            f"  {strategy}: 灌溉={res['total_irrigation_mm']:.1f}mm  "
+            f"EC_MAE={ec_m:.4f}  WUE={w:.4f}  theta_CV={res['theta'].std()/res['theta'].mean():.4f}"
+        )
 
-    # ---- 6. 绘图 ----
     apply_academic_style()
-
     time_day = np.array(history["time_day"])
     fig, axes = plt.subplots(4, 1, figsize=(9, 12), sharex=True)
     fig.subplots_adjust(hspace=0.38)
 
-    # ================================================================
-    # Subplot 1: Root-zone soil moisture
-    # ================================================================
     ax = axes[0]
     style_axis(ax)
-    ax.plot(time_day, theta_arr, color=THETA, linewidth=1.5, label='θ (soil moisture)')
-    ax.axhline(y=0.32, color=FC_LINE, linestyle='--', linewidth=1.0, alpha=0.8,
-               label='Field capacity')
-    ax.axhline(y=0.04, color=WP_LINE, linestyle=':', linewidth=1.0, alpha=0.8,
-               label='Wilting point')
+    ax.plot(time_day, theta_arr, color=THETA, linewidth=1.5, label="θ (soil moisture)")
+    ax.axhline(y=0.32, color=FC_LINE, linestyle="--", linewidth=1.0, alpha=0.8, label="Field capacity")
+    ax.axhline(y=0.04, color=WP_LINE, linestyle=":", linewidth=1.0, alpha=0.8, label="Wilting point")
     set_ylim_tight(ax, theta_arr, pad_pct=5, min_val=0.0)
-    ax.set_ylabel('θ (m³/m³)')
-    ax.set_title('Root-zone soil moisture — SAC closed-loop control')
-    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
-              fontsize=8.5, borderpad=0.5)
+    ax.set_ylabel("θ (m³/m³)")
+    ax.set_title("Root-zone soil moisture — SAC-PID closed-loop control")
+    ax.legend(loc="upper right", framealpha=0.55, edgecolor="#aaaaaa", fontsize=8.5, borderpad=0.5)
 
-    # ================================================================
-    # Subplot 2: Root-zone EC tracking
-    # ================================================================
     ax = axes[1]
     style_axis(ax)
-    ax.plot(time_day, ec_arr, color=EC_ACTUAL, linewidth=1.5, label='EC_soil')
-    ax.plot(time_day, target_arr, color=EC_TARGET, linestyle='--', linewidth=1.8,
-            label='Target EC')
-    # Shaded error band where deviation is significant
-    ax.fill_between(time_day, ec_arr, target_arr,
-                    color=ERROR_BAND, alpha=0.35, linewidth=0)
+    ax.plot(time_day, ec_arr, color=EC_ACTUAL, linewidth=1.5, label="EC_soil")
+    ax.plot(time_day, target_arr, color=EC_TARGET, linestyle="--", linewidth=1.8, label="Target EC")
+    ax.fill_between(time_day, ec_arr, target_arr, color=ERROR_BAND, alpha=0.35, linewidth=0)
     set_ylim_tight(ax, np.concatenate([ec_arr, target_arr]), pad_pct=8)
-    ax.set_ylabel('EC (dS/m)')
-    ax.set_title('Root-zone EC tracking')
-    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
-              fontsize=8.5, borderpad=0.5)
+    ax.set_ylabel("EC (dS/m)")
+    ax.set_title("Root-zone EC tracking")
+    ax.legend(loc="upper right", framealpha=0.55, edgecolor="#aaaaaa", fontsize=8.5, borderpad=0.5)
 
-    # ================================================================
-    # Subplot 3: SAC action sequence
-    # ================================================================
     ax = axes[2]
     style_axis(ax)
     n_pts = len(time_day)
     mk_every = max(1, n_pts // 40)
-    ax.plot(time_day, qf_arr, color=QF, linewidth=1.2,
-            marker='o', markersize=3.0, markevery=mk_every,
-            label='q_f (fertilizer)')
-    ax.plot(time_day, qa_arr, color=QA, linewidth=1.2,
-            marker='^', markersize=3.5, markevery=mk_every,
-            label='q_a (acid)')
-    set_ylim_tight(ax, np.concatenate([qf_arr, qa_arr]), pad_pct=10)
-    ax.set_ylabel('Flow (L/min)')
-    ax.set_title('SAC action sequence')
-    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
-              fontsize=8.5, borderpad=0.5)
+    ax.plot(time_day, ec_set_arr, color=QF, linewidth=1.2, marker="o", markersize=3.0,
+            markevery=mk_every, label="EC_set")
+    ax.plot(time_day, ph_set_arr, color=QA, linewidth=1.2, marker="^", markersize=3.5,
+            markevery=mk_every, label="pH_set")
+    set_ylim_tight(ax, np.concatenate([ec_set_arr, ph_set_arr]), pad_pct=10)
+    ax.set_ylabel("Setpoint")
+    ax.set_title("SAC setpoint sequence")
+    ax.legend(loc="upper right", framealpha=0.55, edgecolor="#aaaaaa", fontsize=8.5, borderpad=0.5)
 
-    # ================================================================
-    # Subplot 4: Irrigation and evapotranspiration
-    # ================================================================
     ax = axes[3]
     style_axis(ax)
     irr_arr = np.array(history["irrigation_mm_h"])
     etc_arr = np.array(history["etc_mm_h"])
-    # Semi-transparent fill for irrigation events
-    ax.fill_between(time_day, 0, irr_arr, color=IRRIGATION, alpha=0.30,
-                    linewidth=0, label='Irrigation')
-    # Thick dashed line for ET
-    ax.plot(time_day, etc_arr, color=ET_COLOR, linewidth=2.0, linestyle='--',
-            label='ET (mm/h)')
+    ax.fill_between(time_day, 0, irr_arr, color=IRRIGATION, alpha=0.30, linewidth=0, label="Irrigation")
+    ax.plot(time_day, etc_arr, color=ET_COLOR, linewidth=2.0, linestyle="--", label="ET (mm/h)")
     set_ylim_tight(ax, np.concatenate([irr_arr, etc_arr]), pad_pct=10, min_val=0.0)
-    ax.set_xlabel('Days after emergence')
-    ax.set_ylabel('Rate (mm/h)')
-    ax.set_title('Irrigation and evapotranspiration')
-    ax.legend(loc='upper right', framealpha=0.55, edgecolor='#aaaaaa',
-              fontsize=8.5, borderpad=0.5)
+    ax.set_xlabel("Days after emergence")
+    ax.set_ylabel("Rate (mm/h)")
+    ax.set_title("Irrigation and evapotranspiration")
+    ax.legend(loc="upper right", framealpha=0.55, edgecolor="#aaaaaa", fontsize=8.5, borderpad=0.5)
 
-    # ---- Save ----
     out_dir = os.path.join(os.path.dirname(__file__), "pic_output", "eval_sac")
     os.makedirs(out_dir, exist_ok=True)
     from datetime import datetime
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    fname = os.path.join(out_dir, f"sac_eval_{ts}.png")
+    fname = os.path.join(out_dir, f"sac_pid_eval_{ts}.png")
     plt.savefig(fname, dpi=300)
     logger.info(f"\n图表已保存: {fname}")
     plt.close()
 
 
-def _append(hist, info, action, tag, idx):
+def _append(hist, info, tag, idx):
     hist["time_day"].append(info["time_day"])
     hist["theta"].append(info["theta"])
     hist["ec_soil"].append(info["ec_soil"])
     hist["target_ec"].append(info["target_ec"])
-    hist["q_f"].append(action[0])
-    hist["q_a"].append(action[1])
+    hist["ec_set"].append(info.get("ec_set", 0.0))
+    hist["ph_set"].append(info.get("ph_set", 7.0))
+    hist["q_f"].append(info.get("q_f", 0.0))
+    hist["q_a"].append(info.get("q_a", 0.0))
     hist["irrigation_mm_h"].append(info["irrigation_mm_h"])
     hist["etc_mm_h"].append(info["etc_mm_h"])
-    hist["ec_drip"].append(info.get("ec_drip", 0))
+    hist["ec_drip"].append(info.get("ec_drip", 0.0))
     hist["ph_drip"].append(info.get("ph_drip", 7.0))
     hist["stage_tag"].append(tag)
     hist["event_idx"].append(idx)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="SAC 闭环评估")
+    parser = argparse.ArgumentParser(description="SAC-PID 闭环评估")
     parser.add_argument("--model-dir", default="./rl_models")
-    parser.add_argument("--model", default=None,
-                        help="单一模型路径（不含 .zip）；缺省则自动查找四阶段模型")
+    parser.add_argument("--model", default=None, help="单一模型路径（不含 .zip）；缺省则自动查找四阶段模型")
     parser.add_argument("--area-ha", type=float, default=0.1)
     parser.add_argument("--dt-min", type=float, default=15.0)
     parser.add_argument("--et0", type=float, default=4.0)
