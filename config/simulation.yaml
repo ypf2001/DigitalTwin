@@ -37,13 +37,22 @@ pipe:
   tau: 8.0
   T: 3.5
 action:
+  # B 方案 SAC 动作空间：上层水肥目标值，不直接输出泵阀流量
+  ec_set_min: 0.8        # SAC 输出滴灌/混肥出口目标 EC 下限 (dS/m)
+  ec_set_max: 2.5        # SAC 输出滴灌/混肥出口目标 EC 上限 (dS/m)
+  ph_set_min: 5.8        # SAC 输出滴灌/混肥出口目标 pH 下限
+  ph_set_max: 6.8        # SAC 输出滴灌/混肥出口目标 pH 上限
+
+  # 执行层限幅：纯仿真由 SetpointToFlowController 使用；真实部署由 PLC-PID 使用
   q_f_min: 0.0
   q_f_max: 10.0
   q_a_min: 0.0
   q_a_max: 4.0
+
+  # 固定目标策略 [EC_set, pH_set]，用于无 SAC 对比或模型缺失回退
   fixed_strategy:
-  - 6.1                  # 固定策略肥料母液流量 q_f (L/min)，接近块茎膨大期配液设定 EC=1.5 dS/m
-  - 1.0                  # 固定策略预稀释酸液流量 q_a (L/min)，接近配液设定 pH=6.0
+  - 1.5                  # 固定策略目标 EC_set (dS/m)，接近块茎膨大期目标
+  - 6.0                  # 固定策略目标 pH_set
 obs:
   history_len: 5
   etc_norm: 10.0
@@ -104,43 +113,66 @@ plc:
   cycle_s: 1.0
   max_retries: 5
   addresses:
-    Valve_F_Opt_SP:
+    # B 方案：上位机写 EC/pH 目标值和虚拟传感器反馈，PLC/PLCSIM 内部 PID 执行
+    EC_Set_SP:
       offset: 0
       type: real
       bytes: 4
-    Valve_A_Opt_SP:
+    pH_Set_SP:
       offset: 4
       type: real
       bytes: 4
+    EC_Actual:
+      offset: 8
+      type: real
+      bytes: 4
+    pH_Actual:
+      offset: 12
+      type: real
+      bytes: 4
+    SAC_Enable:
+      offset: 16
+      type: bool
+      bytes: 1
     Remote_Heartbeat:
-      offset: 10
+      offset: 18
       type: int
       bytes: 2
+
+    # PLC/PLCSIM 写回 Python 的执行结果与状态
     Remote_Comms_OK:
-      offset: 8
+      offset: 20
       type: bool
       bytes: 1
     Watchdog_Timer:
-      offset: 14
+      offset: 22
       type: int
       bytes: 2
-    Actual_Valve_F:
-      offset: 30
+    q_f_cmd:
+      offset: 24
       type: real
       bytes: 4
-    Actual_Valve_A:
-      offset: 34
+    q_a_cmd:
+      offset: 28
+      type: real
+      bytes: 4
+    Valve_F_Actual:
+      offset: 32
+      type: real
+      bytes: 4
+    Valve_A_Actual:
+      offset: 36
       type: real
       bytes: 4
     AQ_Valve_F_Raw:
-      offset: 38
-      type: int
-      bytes: 2
-    AQ_Valve_A_Raw:
       offset: 40
       type: int
       bytes: 2
-    System_Alarm_Light:
+    AQ_Valve_A_Raw:
       offset: 42
+      type: int
+      bytes: 2
+    System_Alarm_Light:
+      offset: 44
       type: bool
       bytes: 1
