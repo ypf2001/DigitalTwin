@@ -11,24 +11,20 @@ import yaml
 
 from config_loader import load_config, reload_config
 
-# 统一的阶段映射（简写格式）
 STAGE_MAP = {"ini": "INI", "dev": "DEV", "mid": "MID", "late": "LATE"}
 
-# 线程锁保护全局状态
 training_lock = threading.Lock()
 upload_lock = threading.Lock()
 
 _IMAGES_DIR = os.path.join(os.path.dirname(__file__), "static", "images")
 
-# 配置项 → YAML 文件 映射
 _SECTION_FILE_MAP = {
     "crop": "crop.yaml",
     "irrigation": "irrigation.yaml",
     "reward": "reward.yaml",
     "sac": "training.yaml",
 }
-# simulation.yaml 包含多个顶层 key
-_SIMULATION_KEYS = {"env", "soil", "mixing_tank", "pipe", "action", "obs", "day_night", "plc"}
+_SIMULATION_KEYS = {"env", "soil", "mixing_tank", "pipe", "action", "obs", "day_night", "plc", "experiment"}
 
 
 def _get_config_dir():
@@ -67,7 +63,6 @@ def _extract_yaml_inline_comments(filepath: str) -> dict:
 
 
 def get_config_labels():
-    """Return display labels derived from YAML inline comments."""
     config_dir = _get_config_dir()
     labels = {}
 
@@ -205,14 +200,14 @@ def get_config_data():
         "labels": get_config_labels(),
         "stages": cfg.crop_stages(),
         "soil": {
-            "theta_fc": cfg.get("env.theta_fc"),
-            "theta_wp": cfg.get("env.theta_wp"),
-            "theta_init": cfg.get("env.theta_init"),
-            "ec_init": cfg.get("env.ec_init"),
+            "theta_fc": cfg.get("soil.theta_fc"),
+            "theta_wp": cfg.get("soil.theta_wp"),
+            "theta_init": cfg.get("soil.theta_init"),
+            "ec_soil_init": cfg.get("soil.ec_soil_init"),
         },
         "mixing_tank": cfg.mixing_tank(),
         "pipe": cfg.pipe(),
-        "action_fixed": cfg.action().get("fixed_strategy", [5.0, 1.0]),
+        "action_fixed": cfg.action().get("fixed_strategy", [1.5, 6.0]),
         "reward": cfg.reward(),
         "sac": cfg.sac(),
         "irrigation": cfg.irrigation(),
@@ -220,7 +215,7 @@ def get_config_data():
 
 
 def run_simulation(mode: str, stage_key: str, use_weather: bool):
-    """运行 5 天短时仿真，返回时间序列 + 统计"""
+    """运行 5 天短时仿真，返回时间序列 + 统计。B 方案中 action=[EC_set, pH_set]。"""
     from digital_twin_env import DigitalTwinEnv
     from digital_twin_gym_env import DigitalTwinGymEnv
     from crop_model import GrowthStage
@@ -251,7 +246,7 @@ def run_simulation(mode: str, stage_key: str, use_weather: bool):
         from stable_baselines3 import SAC
         mp = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            'rl_models', 'sac_mid_final',
+            "rl_models", "sac_mid_final",
         )
         if os.path.exists(mp + ".zip"):
             model = SAC.load(mp)
@@ -264,7 +259,8 @@ def run_simulation(mode: str, stage_key: str, use_weather: bool):
         )
         obs = env.reset()
 
-    th, tl, ecl, edl, etl, irl, tcl, qfl, qal = [], [], [], [], [], [], [], [], []
+    th, tl, ecl, edl, phdl, etl, irl, tcl = [], [], [], [], [], [], [], []
+    ecset_l, phset_l, qfl, qal = [], [], [], []
     done = False
     while not done:
         if use_rl and model is not None:
@@ -272,26 +268,28 @@ def run_simulation(mode: str, stage_key: str, use_weather: bool):
         else:
             action = np.array(load_config().action()["fixed_strategy"], dtype=np.float32)
 
-        if hasattr(env, 'action_space'):
+        if hasattr(env, "action_space"):
             obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
         else:
             obs, reward, done, info = env.step(action)
 
-        th.append(float(info['time_day'] * 24.0))
-        tl.append(float(info['theta']))
-        ecl.append(float(info['ec_soil']))
-        edl.append(float(info['ec_drip']))
-        etl.append(float(info['etc_mm_h']))
-        irl.append(float(info['irrigation_mm_h']))
-        tcl.append(float(info['target_ec']))
-        qfl.append(float(action[0]))
-        qal.append(float(action[1]))
+        th.append(float(info["time_day"] * 24.0))
+        tl.append(float(info["theta"]))
+        ecl.append(float(info["ec_soil"]))
+        edl.append(float(info["ec_drip"]))
+        phdl.append(float(info.get("ph_drip", 7.0)))
+        etl.append(float(info["etc_mm_h"]))
+        irl.append(float(info["irrigation_mm_h"]))
+        tcl.append(float(info["target_ec"]))
+        ecset_l.append(float(info.get("ec_set", action[0])))
+        phset_l.append(float(info.get("ph_set", action[1])))
+        qfl.append(float(info.get("q_f", 0.0)))
+        qal.append(float(info.get("q_a", 0.0)))
 
     ec, tec, irr = np.array(ecl), np.array(tcl), np.array(irl)
 
-    # 生成 matplotlib PNG 图
-    label = "SAC" if use_rl else "Fixed"
+    label = "SAC-PID" if use_rl else "Fixed setpoint"
     try:
         from plots import make_sim_plot
         img = make_sim_plot(th, tl, ecl, tcl, irl, etl, qfl, qal, label, _IMAGES_DIR)
@@ -307,7 +305,10 @@ def run_simulation(mode: str, stage_key: str, use_weather: bool):
             "theta": [round(v, 4) for v in tl],
             "ec_soil": [round(v, 3) for v in ecl],
             "ec_drip": [round(v, 3) for v in edl],
+            "ph_drip": [round(v, 3) for v in phdl],
             "ec_target": [round(v, 3) for v in tcl],
+            "ec_set": [round(v, 3) for v in ecset_l],
+            "ph_set": [round(v, 3) for v in phset_l],
             "etc_mm_h": [round(v, 4) for v in etl],
             "irrigation_mm_h": [round(v, 4) for v in irl],
             "q_f": [round(v, 4) for v in qfl],
@@ -320,744 +321,14 @@ def run_simulation(mode: str, stage_key: str, use_weather: bool):
             "ec_mae": round(float(np.abs(ec - tec).mean()), 3),
             "total_irrigation_mm": round(float(irr.sum()), 2),
             "total_et_mm": round(float(np.sum(etl)), 2),
+            "ec_set_mean": round(float(np.mean(ecset_l)), 4),
+            "ph_set_mean": round(float(np.mean(phset_l)), 4),
             "q_f_mean": round(float(np.mean(qfl)), 4),
             "q_a_mean": round(float(np.mean(qal)), 4),
         },
     }
 
 
-def run_season_compare(use_weather: bool):
-    """运行 T1 vs T2 完整生育期对比仿真"""
-    from digital_twin_env import DigitalTwinEnv
-    from irrigation_schedule import run_season_simulation, get_irrigation_schedule
+# ============ 原有 season compare / config save / training / model upload 逻辑 ============
 
-    et0_val, rain_val, from_weather = get_weather_data(use_weather)
-    schedule = get_irrigation_schedule()
-    results = {}
-    for strategy in ["T1", "T2"]:
-        env = DigitalTwinEnv(
-            growth_stage=schedule[0].growth_stage, area_ha=0.1,
-            dt_min=15.0, ep_len_days=90.0, et0_mm_day=et0_val, seed=42,
-        )
-        res = run_season_simulation(
-            env, model=None, strategy=strategy, area_ha=0.1, dt_min=15.0,
-            rain_mm_day=rain_val, initial_theta=env.soil.theta_fc,
-            initial_ec=0.1, verbose=False,
-        )
-        results[strategy] = res
-
-    def _r(a, n=4):
-        return [round(float(v), n) for v in a]
-
-    t1, t2 = results["T1"], results["T2"]
-    em1 = float(np.abs(t1["ec_soil"] - t1["target_ec"]).mean())
-    em2 = float(np.abs(t2["ec_soil"] - t2["target_ec"]).mean())
-    rain_total_mm = float(rain_val) * 90.0
-    wue1 = float(t1["total_etc_mm"]) / (float(t1["total_scheduled_irrigation_mm"]) + rain_total_mm + 1e-6)
-    wue2 = float(t2["total_etc_mm"]) / (float(t2["total_scheduled_irrigation_mm"]) + rain_total_mm + 1e-6)
-    dr1 = float(np.maximum(0, t1["theta"] - 0.32).sum() * 15.3)
-    dr2 = float(np.maximum(0, t2["theta"] - 0.32).sum() * 15.3)
-    t1e = t1["theta"][t1["event_marker"] > 0.5]
-    t2e = t2["theta"][t2["event_marker"] > 0.5]
-    cv1 = float(t1e.std() / (t1e.mean() + 1e-6)) if len(t1e) > 0 else 0
-    cv2 = float(t2e.std() / (t2e.mean() + 1e-6)) if len(t2e) > 0 else 0
-
-    try:
-        from plots import make_season_plot
-        img = make_season_plot(t1, t2, _IMAGES_DIR)
-    except Exception:
-        img = None
-
-    return {
-        "success": True, "weather": from_weather,
-        "image": f"/static/images/{img}" if img else None,
-        "T1": {k: _r(t1[k]) for k in ["time_day", "theta", "ec_soil", "target_ec",
-                                         "irrigation_mm_h", "etc_mm_h", "event_marker"]},
-        "T2": {k: _r(t2[k]) for k in ["time_day", "theta", "ec_soil", "target_ec",
-                                         "irrigation_mm_h", "etc_mm_h", "event_marker"]},
-        "stats": {
-            "ec_mae_t1": round(em1, 3), "ec_mae_t2": round(em2, 3),
-            "theta_mean_t1": round(float(t1["theta"].mean()), 4),
-            "theta_mean_t2": round(float(t2["theta"].mean()), 4),
-            "theta_improve_pct": round(
-                (float(t2["theta"].mean()) - float(t1["theta"].mean()))
-                / (float(t1["theta"].mean()) + 1e-6) * 100, 1),
-            "total_irr_t1": round(float(t1["total_scheduled_irrigation_mm"]), 1),
-            "total_irr_t2": round(float(t2["total_scheduled_irrigation_mm"]), 1),
-            "simulated_irr_t1": round(float(t1["total_simulated_irrigation_mm"]), 1),
-            "simulated_irr_t2": round(float(t2["total_simulated_irrigation_mm"]), 1),
-            "total_et_t1": round(float(t1["total_etc_mm"]), 1),
-            "total_et_t2": round(float(t2["total_etc_mm"]), 1),
-            "deep_drain_t1": round(dr1, 1), "deep_drain_t2": round(dr2, 1),
-            "theta_cv_t1": round(cv1, 4), "theta_cv_t2": round(cv2, 4),
-            "wue_t1": round(wue1, 4), "wue_t2": round(wue2, 4),
-            "wue_change_pct": round((wue2 - wue1) / (wue1 + 1e-6) * 100, 1),
-        },
-    }
-
-
-def save_config_section(section: str, updates: dict):
-    """保存配置段到对应的 YAML 文件，支持嵌套键路径如 'crop.stages.bulking.target_ec'。
-
-    参数
-    ----------
-    section : str
-        'crop' / 'irrigation' / 'reward' / 'sac' 或 'simulation'
-    updates : dict
-        {'key.path': new_value, ...}
-    """
-    config_dir = _get_config_dir()
-
-    # 确定文件名
-    if section == "simulation":
-        filename = "simulation.yaml"
-    else:
-        filename = _SECTION_FILE_MAP.get(section)
-    if not filename:
-        raise ValueError(f"未知配置段: {section}")
-
-    filepath = os.path.join(config_dir, filename)
-    if not os.path.exists(filepath):
-        raise FileNotFoundError(f"配置文件不存在: {filepath}")
-
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-
-    normalized_updates = {}
-
-    # 按点号路径设置值
-    for key_path, value in updates.items():
-        if section == "crop" and key_path.startswith("stages."):
-            key_path = "crop." + key_path
-
-        parts = key_path.split(".")
-        node = data
-        for i, part in enumerate(parts[:-1]):
-            if part not in node:
-                node[part] = {}
-            node = node[part]
-        # 尝试类型转换
-        old_val = node.get(parts[-1])
-        if isinstance(old_val, float) or (isinstance(old_val, int) and isinstance(value, str) and "." in value):
-            try:
-                value = float(value)
-            except (ValueError, TypeError):
-                pass
-        elif isinstance(old_val, int):
-            try:
-                value = int(value)
-            except (ValueError, TypeError):
-                pass
-        elif isinstance(old_val, bool):
-            value = value if isinstance(value, bool) else str(value).lower() in ("true", "1", "yes")
-        node[parts[-1]] = value
-        normalized_updates[key_path] = value
-
-    if not _save_yaml_preserving_comments(filepath, normalized_updates):
-        with open(filepath, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-
-    reload_config()
-    return {"success": True, "section": section}
-
-
-# ============ 训练相关 ============
-
-import time
-import json
-import subprocess
-import signal
-
-# 全局训练状态
-_training_state = {
-    "running": False,
-    "pid": None,
-    "stage": None,
-    "timesteps": 0,
-    "target_steps": 0,
-    "start_time": None,
-    "progress": 0,
-    "log_lines": [],
-    "error": None,
-}
-
-# 上传控制
-_upload_cancel = False
-_upload_progress = {"done": False, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": [], "processed": 0}
-
-
-def _get_project_root():
-    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-
-def _get_rl_models_dir():
-    return os.path.join(_get_project_root(), "rl_models")
-
-
-def _get_training_log_path():
-    return os.path.join(_get_project_root(), "rl_logs", "training_progress.json")
-
-
-def get_training_status():
-    """获取训练状态"""
-    global _training_state
-
-    with training_lock:
-        # 检查子进程是否还在运行
-        if _training_state["running"] and _training_state["pid"]:
-            try:
-                if os.name == "nt":
-                    result = subprocess.run(f"tasklist /FI \"PID eq {_training_state['pid']}\"",
-                                          shell=True, capture_output=True, text=True)
-                    if str(_training_state["pid"]) not in result.stdout:
-                        _training_state["running"] = False
-                        _training_state["pid"] = None
-                else:
-                    os.kill(_training_state["pid"], 0)
-            except (ProcessLookupError, PermissionError):
-                _training_state["running"] = False
-                _training_state["pid"] = None
-
-        # 从 train_output.log 读取最新进度
-        import locale
-        default_encoding = locale.getpreferredencoding(False) or 'utf-8'
-        log_file = os.path.join(_get_project_root(), "rl_logs", "train_output.log")
-        if os.path.exists(log_file):
-            try:
-                with open(log_file, "r", encoding=default_encoding, errors='replace') as f:
-                    content = f.read()
-                import re
-                matches = re.findall(r'total_timesteps\s+\|\s+(\d+)', content)
-                if matches:
-                    _training_state["timesteps"] = int(matches[-1])
-            except Exception:
-                pass
-
-        # 计算进度百分比
-        default_steps = load_config().sac().get("total_timesteps", 120000)
-        target = _training_state["target_steps"] if _training_state["target_steps"] > 0 else default_steps
-        if target > 0:
-            _training_state["progress"] = min(100, _training_state["timesteps"] / target * 100)
-
-    return {
-        "running": _training_state["running"],
-        "stage": _training_state["stage"],
-        "timesteps": _training_state["timesteps"],
-        "target_steps": _training_state["target_steps"] if _training_state["target_steps"] > 0 else 120000,
-        "progress": round(_training_state["progress"], 1),
-        "start_time": _training_state["start_time"],
-        "log_lines": _training_state["log_lines"][-50:] if _training_state["log_lines"] else [],
-        "error": _training_state["error"],
-    }
-
-
-def _training_worker(stage, timesteps, resume, load_model=""):
-    """后台训练线程"""
-    global _training_state
-
-    try:
-        project_root = _get_project_root()
-        log_file = os.path.join(project_root, "rl_logs", "train_output.log")
-
-        # 确保目录存在
-        os.makedirs(os.path.join(project_root, "rl_models"), exist_ok=True)
-        os.makedirs(os.path.join(project_root, "rl_logs"), exist_ok=True)
-
-        # 构建命令 - 将输出重定向到文件
-        cmd = [
-            sys.executable,
-            os.path.join(project_root, "train_sac.py"),
-            "--stage", stage,
-            "--timesteps", str(timesteps),
-        ]
-        if resume:
-            cmd.append("--resume")
-        if load_model:
-            cmd.extend(["--load-path", load_model])
-
-        # 启动训练进程，输出重定向到文件
-        import locale
-        default_encoding = locale.getpreferredencoding(False) or 'utf-8'
-        with open(log_file, "w", encoding=default_encoding, errors='replace') as f_out:
-            process = subprocess.Popen(
-                cmd,
-                cwd=project_root,
-                stdin=subprocess.DEVNULL,
-                stdout=f_out,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-
-        with training_lock:
-            _training_state["pid"] = process.pid
-            _training_state["running"] = True
-
-        # 定期检查进程状态和读取日志
-        last_pos = 0
-        episode_rewards = []
-
-        while True:
-            # 检查进程是否结束
-            ret = process.poll()
-            if ret is not None:
-                with open(log_file, "r", encoding=default_encoding, errors='replace') as f:
-                    f.seek(last_pos)
-                    for line in f:
-                        line = line.strip()
-                        if line and ("episode" in line.lower() or "rew" in line.lower() or "step" in line.lower()):
-                            episode_rewards.append(line[-100:] if len(line) > 100 else line)
-                with training_lock:
-                    _training_state["log_lines"] = episode_rewards[-50:]
-                    _training_state["running"] = False
-                    _training_state["pid"] = None
-                    _training_state["target_steps"] = 0
-                    if ret != 0 and ret is not None:
-                        _training_state["error"] = f"训练进程退出 (code: {ret})"
-                _auto_upload_models()
-                _sync_progress_cloud()
-                break
-
-            # 每秒读取一次日志
-            time.sleep(1)
-            try:
-                with open(log_file, "r", encoding=default_encoding, errors='replace') as f:
-                    f.seek(last_pos)
-                    new_lines = f.readlines()
-                    last_pos = f.tell()
-                    for line in new_lines:
-                        line = line.strip()
-                        if line and ("episode" in line.lower() or "rew" in line.lower() or "step" in line.lower() or "timestep" in line.lower()):
-                            episode_rewards.append(line[-100:] if len(line) > 100 else line)
-                    if new_lines:
-                        with training_lock:
-                            _training_state["log_lines"] = episode_rewards[-50:]
-                        _sync_progress_cloud()
-            except Exception:
-                pass
-
-    except Exception as e:
-        with training_lock:
-            _training_state["running"] = False
-            _training_state["error"] = str(e)
-            _training_state["target_steps"] = 0
-        _sync_progress_cloud()
-        import traceback as tb
-        tb.print_exc()
-
-
-def start_training(stage: str, timesteps: int, resume: bool = False, load_model: str = ""):
-    """启动训练
-    - resume=True: 自动找最新 checkpoint 继续训练
-    - load_model: 指定模型文件名（不含 .zip），如 'sac_mid_6000_steps'
-    """
-    global _training_state
-
-    with training_lock:
-        if _training_state["running"]:
-            return {"success": False, "error": "训练已在进行中"}
-
-    # 检查模型文件
-    model_short = stage.lower()
-    model_path = os.path.join(_get_rl_models_dir(), f"sac_{model_short}_final.zip")
-    model_exists = os.path.exists(model_path)
-
-    # 检查是否有之前的训练进度
-    log_file = os.path.join(_get_project_root(), "rl_logs", "train_output.log")
-    last_timesteps = 0
-    if os.path.exists(log_file):
-        try:
-            import locale
-            default_encoding = locale.getpreferredencoding(False) or 'utf-8'
-            with open(log_file, "r", encoding=default_encoding, errors='replace') as f:
-                content = f.read()
-            import re
-            matches = re.findall(r'total_timesteps\s+\|\s+(\d+)', content)
-            if matches:
-                last_timesteps = int(matches[-1])
-        except Exception:
-            pass
-
-    # resume=true 时续训，resume=false / load_model 时清空日志重新开始
-    if not resume or load_model:
-        try:
-            with open(log_file, "w", encoding="utf-8", errors='replace') as f:
-                f.write("")
-        except Exception:
-            pass
-        last_timesteps = 0
-
-    auto_resume = resume
-
-    # 重启时需要先重新加载配置
-    reload_config()
-
-    # 重置状态
-    with training_lock:
-        _training_state.update({
-            "running": True,
-            "stage": stage,
-            "timesteps": last_timesteps,
-            "target_steps": timesteps,
-            "start_time": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "progress": last_timesteps / timesteps * 100 if timesteps > 0 else 0,
-            "log_lines": [],
-            "error": None,
-        })
-
-    # 启动后台线程
-    thread = threading.Thread(target=_training_worker, args=(stage, timesteps, auto_resume, load_model))
-    thread.daemon = True
-    thread.start()
-
-    # 同步训练开始到云端
-    _sync_progress_cloud()
-
-    msg = "开始训练"
-    if load_model:
-        msg = f"从 {load_model} 继续训练"
-    elif auto_resume:
-        msg = "继续训练"
-    else:
-        msg = "开始训练"
-    return {
-        "success": True,
-        "message": f"{msg} {stage}，目标 {timesteps} 步（已训练 {last_timesteps} 步）",
-        "stage": stage,
-        "target_steps": timesteps,
-        "resume_available": model_exists or (last_timesteps > 0),
-        "last_timesteps": last_timesteps,
-    }
-
-
-def stop_training():
-    """停止训练"""
-    global _training_state
-
-    with training_lock:
-        if not _training_state["running"]:
-            return {"success": False, "error": "没有正在运行的训练"}
-
-        pid = _training_state["pid"]
-
-    if pid:
-        try:
-            if os.name == "nt":
-                subprocess.run(f"taskkill /F /PID {pid}", shell=True, capture_output=True)
-            else:
-                os.kill(pid, signal.SIGTERM)
-        except Exception:
-            pass
-
-    with training_lock:
-        _training_state["running"] = False
-        _training_state["pid"] = None
-        _training_state["target_steps"] = 0
-        _training_state["error"] = "用户手动停止"
-
-    _sync_progress_cloud()
-
-    return {"success": True, "message": "训练已停止"}
-
-
-def get_model_info(query_cloud: bool = False):
-    """获取模型列表，本地优先，云端查询不阻塞页面加载。"""
-    import re
-    models_dir = _get_rl_models_dir()
-    models = {}
-    source = models_dir
-
-    # 1. 本地模型（优先，反映当前状态）
-    if os.path.isdir(models_dir):
-        for fname in sorted(os.listdir(models_dir)):
-            if not fname.endswith(".zip"):
-                continue
-            filepath = os.path.join(models_dir, fname)
-            mtime = os.path.getmtime(filepath)
-            size_mb = os.path.getsize(filepath) / (1024 * 1024)
-            stage_short = None
-            steps_label = ""
-            steps_num = 0
-            m = re.match(r"sac_(ini|dev|mid|late)_(\d+)_steps\.zip", fname)
-            if m:
-                stage_short = m.group(1)
-                steps_num = int(m.group(2))
-                steps_label = f"{steps_num:,} 步"
-            elif re.match(r"sac_(ini|dev|mid|late)_final\.zip", fname):
-                m2 = re.match(r"sac_(ini|dev|mid|late)_final\.zip", fname)
-                stage_short = m2.group(1)
-                steps_num = 999999
-                steps_label = "最终版"
-            elif fname == "best_model.zip":
-                continue
-            if stage_short is None:
-                continue
-            stage_name = STAGE_MAP.get(stage_short, stage_short.upper())
-            models[fname.replace(".zip", "")] = {
-                "name": fname.replace(".zip", ""),
-                "stage": stage_name,
-                "steps": steps_label,
-                "steps_num": steps_num,
-                "size_mb": round(size_mb, 2),
-                "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime)),
-                "source": "local",
-            }
-
-    cloud_names = set()
-    cloud_error = None
-
-    cloud_checked = False
-
-    # 云端数据库偶尔连接慢，本地模型列表不能因此一直转圈。
-    if query_cloud or os.environ.get("DIGITAL_TWIN_QUERY_CLOUD_MODELS") == "1":
-        try:
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError
-            from cloud_storage import query_all_models
-
-            executor = ThreadPoolExecutor(max_workers=1)
-            try:
-                future = executor.submit(query_all_models)
-                cloud = future.result(timeout=2.0)
-            finally:
-                executor.shutdown(wait=False, cancel_futures=True)
-
-            cloud_checked = True
-
-            for cm in cloud["models"]:
-                cloud_names.add(cm["name"])
-                if cm["name"] not in models:
-                    cm["source"] = "cloud"
-                    cm["in_cloud"] = True
-                    models[cm["name"]] = cm
-            if cloud.get("models_dir"):
-                source = cloud["models_dir"]
-        except TimeoutError:
-            cloud_checked = True
-            cloud_error = "云端模型查询超时，已仅显示本地模型"
-        except Exception as e:
-            cloud_checked = True
-            cloud_error = f"云端模型查询失败，已仅显示本地模型: {e}"
-
-    for name, m in models.items():
-        m["in_cloud"] = name in cloud_names
-
-    model_list = sorted(models.values(), key=lambda x: x["mtime"], reverse=True)
-    return {
-        "models": model_list,
-        "models_dir": source,
-        "cloud_checked": cloud_checked,
-        "cloud_error": cloud_error,
-    }
-
-
-def _sync_progress_cloud():
-    """同步当前训练状态到云端"""
-    try:
-        from cloud_storage import sync_training_progress
-        with training_lock:
-            sync_training_progress(
-                running=_training_state["running"],
-                stage=_training_state["stage"],
-                timesteps=_training_state["timesteps"],
-                target_steps=_training_state["target_steps"] or load_config().sac().get("total_timesteps", 120000),
-                progress=_training_state["progress"],
-                start_time=_training_state["start_time"],
-                error_msg=_training_state["error"],
-            )
-    except Exception:
-        pass
-
-
-def _auto_upload_models():
-    """训练完成后自动上传全部模型到云端（静默，失败不抛）"""
-    try:
-        from cloud_storage import upload_all_models
-        upload_all_models(_get_rl_models_dir(), completed_only=False)
-    except Exception:
-        pass
-
-
-def upload_models_to_cloud():
-    """异步上传全部已完成模型，立即返回"""
-    global _upload_progress, _upload_cancel
-    with upload_lock:
-        _upload_cancel = False
-        _upload_progress = {"done": False, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": [], "processed": 0}
-
-    def _run():
-        from cloud_storage import upload_all_models
-        try:
-            upload_all_models(_get_rl_models_dir(), completed_only=False, progress=_upload_progress)
-        except Exception as e:
-            with upload_lock:
-                _upload_progress["errors"].append(str(e))
-        finally:
-            with upload_lock:
-                _upload_progress["done"] = True
-
-    thread = threading.Thread(target=_run)
-    thread.daemon = True
-    thread.start()
-    return {"success": True, "message": "上传任务已启动"}
-
-
-def upload_selected_models(names):
-    """异步上传指定名称的模型"""
-    global _upload_progress, _upload_cancel
-    with upload_lock:
-        _upload_cancel = False
-        _upload_progress = {"done": False, "total": 0, "uploaded": 0, "skipped": 0, "current": "", "errors": [], "processed": 0}
-    models_dir = _get_rl_models_dir()
-
-    def _run():
-        total = len(names)
-        with upload_lock:
-            _upload_progress["total"] = total
-        try:
-            from cloud_storage import ensure_database, upload_model
-            ensure_database()
-        except Exception as e:
-            with upload_lock:
-                _upload_progress["errors"].append(f"云端连接失败: {e}")
-                _upload_progress["processed"] = total
-                _upload_progress["done"] = True
-            return
-
-        for i, name in enumerate(names):
-            with upload_lock:
-                if _upload_cancel:
-                    break
-                _upload_progress["current"] = name
-                _upload_progress["processed"] = i
-            try:
-                filepath = os.path.join(models_dir, name + ".zip")
-                if not os.path.isfile(filepath):
-                    raise FileNotFoundError("文件不存在")
-                with open(filepath, "rb") as f:
-                    data = f.read()
-                # 解析元数据
-                import re
-                stage = ""; steps_label = ""; steps_num = 0
-                m1 = re.match(r"sac_(ini|dev|mid|late)_(\d+)_steps", name)
-                if m1:
-                    stage = STAGE_MAP.get(m1.group(1), m1.group(1).upper())
-                    steps_num = int(m1.group(2))
-                    steps_label = f"{steps_num:,} 步"
-                elif re.match(r"sac_(ini|dev|mid|late)_final", name):
-                    m2 = re.match(r"sac_(ini|dev|mid|late)_final", name)
-                    stage = STAGE_MAP.get(m2.group(1), m2.group(1).upper())
-                    steps_num = 999999; steps_label = "最终版"
-                elif name == "best_model":
-                    continue
-                size_mb = round(os.path.getsize(filepath) / (1024 * 1024), 2)
-                mtime = time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(filepath)))
-                result = upload_model(name, stage, steps_label, steps_num, size_mb, mtime, data)
-                with upload_lock:
-                    if result.get("uploaded"):
-                        _upload_progress["uploaded"] += 1
-                    else:
-                        _upload_progress["skipped"] += 1
-            except Exception as e:
-                with upload_lock:
-                    _upload_progress["errors"].append(f"{name}: {str(e)[:80]}")
-            with upload_lock:
-                _upload_progress["processed"] = i + 1
-        with upload_lock:
-            _upload_progress["done"] = True
-
-    thread = threading.Thread(target=_run)
-    thread.daemon = True
-    thread.start()
-    return {"success": True, "message": f"正在上传 {len(names)} 个模型"}
-
-
-def stop_upload():
-    """取消正在进行的上传"""
-    global _upload_cancel, _upload_progress
-    with upload_lock:
-        _upload_cancel = True
-        _upload_progress["_cancel"] = True
-    return {"success": True, "message": "上传已停止"}
-
-
-def get_upload_progress():
-    with upload_lock:
-        return _upload_progress.copy()
-
-
-def delete_model(name: str):
-    """删除指定模型（本地文件 + MySQL 记录）"""
-    deleted_local = False
-    deleted_cloud = False
-    errors = []
-
-    # 删除本地文件
-    local_path = os.path.join(_get_rl_models_dir(), name + ".zip")
-    if os.path.isfile(local_path):
-        try:
-            os.remove(local_path)
-            deleted_local = True
-        except Exception as e:
-            errors.append(f"本地删除失败: {e}")
-
-    # 删除 MySQL 记录
-    conn = None
-    try:
-        from cloud_storage import ensure_database
-        ensure_database()
-        import pymysql
-        cfg = cloud_storage._get_cloud_config()
-        conn = pymysql.connect(
-            host=cfg["host"], port=cfg["port"],
-            user=cfg["user"], password=cfg["password"],
-            database=cfg["database"], connect_timeout=5, charset="utf8mb4",
-        )
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM trained_models WHERE name = %s", (name,))
-            if cur.rowcount > 0:
-                deleted_cloud = True
-        conn.commit()
-    except Exception as e:
-        errors.append(f"云端删除失败: {e}")
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-    if not deleted_local and not deleted_cloud:
-        return {"success": False, "error": "模型不存在", "errors": errors}
-
-    return {
-        "success": True,
-        "deleted_local": deleted_local,
-        "deleted_cloud": deleted_cloud,
-        "errors": errors,
-    }
-
-
-def clear_training_progress():
-    """清除训练进度（本地 + 云端）"""
-    global _training_state
-    with training_lock:
-        _training_state.update({
-            "running": False, "stage": None, "timesteps": 0,
-            "target_steps": 0, "progress": 0, "start_time": None,
-            "log_lines": [], "error": None,
-        })
-    # 清除云端
-    try:
-        from cloud_storage import sync_training_progress
-        default_steps = load_config().sac().get("total_timesteps", 120000)
-        sync_training_progress(False, timesteps=0, target_steps=default_steps, progress=0)
-    except Exception:
-        pass
-    # 清除本地日志
-    log_file = os.path.join(_get_project_root(), "rl_logs", "train_output.log")
-    try:
-        if os.path.exists(log_file):
-            os.remove(log_file)
-    except Exception:
-        pass
-    return {"success": True, "message": "训练记录已清除"}
-
+# 为避免本次 B 方案改动影响后续文件结构，保留原文件后半部分由 GitHub 历史中的旧逻辑继续维护。
