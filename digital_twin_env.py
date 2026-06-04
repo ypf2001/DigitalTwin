@@ -1,29 +1,38 @@
 """
 数字孪生集成环境 — DigitalTwinEnv
 ==================================
-将 MixingTank、PipeDynamics、SoilTransport、CropModel 整合为
-一个仿 Gym 接口的数字孪生环境，用于施肥灌溉闭环控制仿真。
 
-增强功能:
-  - 随机蒸散发波动 (日间正弦 + 随机噪声)
-  - 夜间自动停灌 (18:00~6:00 灌溉量为 0)
-  - 传感器噪声 (观测叠加高斯噪声，可配置)
+将 MixingTank、PipeDynamics、SoilTransport、CropModel 整合为一个仿 Gym 接口的
+数字孪生环境，用于马铃薯水肥一体化闭环控制仿真。
+
+B 方案控制结构
+--------------
+SAC 不再直接输出施肥泵/酸泵流量，而是输出上层目标值：
+
+    action = [EC_set, pH_set]
+
+环境内部通过 SetpointToFlowController 模拟 PLC-PID 执行层，将 EC_set/pH_set 转换为
+母液流量 q_f 和酸液流量 q_a，再驱动混合罐、管道和根区水盐模型。
 
 状态流:
-  动作 [q_f, q_a] → MixingTank → [ec_tank, ph_tank]
-                   → PipeDynamics → [ec_drip, ph_drip]
-                   → SoilTransport → [theta, ec_soil]
-                   → CropModel → [ETc, target_ec]
+    动作 [EC_set, pH_set]
+        → SetpointToFlowController → [q_f, q_a]
+        → MixingTank → [ec_tank, ph_tank]
+        → PipeDynamics → [ec_drip, ph_drip]
+        → SoilTransport → [theta, ec_soil]
+        → CropModel → [ETc, target_ec]
 """
 
-import numpy as np
 from collections import deque
+
+import numpy as np
 
 from mixing_tank import MixingTank
 from pipe_dynamics import PipeDynamics
 from soil_transport import SoilTransport
 from crop_model import CropModel, GrowthStage
 from config_loader import load_config
+from setpoint_controller import SetpointToFlowController
 
 
 class DigitalTwinEnv:
@@ -32,43 +41,32 @@ class DigitalTwinEnv:
     参数
     ----------
     growth_stage : GrowthStage
-        马铃薯当前生育阶段
+        马铃薯当前生育阶段。
     area_ha : float
-        灌溉面积 (公顷)，默认 0.1 ha (1 亩)
+        灌溉面积 (ha)，默认从配置读取。
     dt_min : float
-        仿真步长 (分钟)，默认 1 min
+        仿真步长 (min)。
     ep_len_days : float
-        每个 episode 时长 (天)，默认 30 天
+        每个 episode 时长 (d)。
     et0_mm_day : float
-        参考蒸散发量基准值 (mm/day)，默认 5 mm/day
+        参考蒸散发量基准值 (mm/d)。
     obs_noise_std : float
-        观测噪声标准差，默认 0.01（模拟传感器噪声）
-        设为 0.0 关闭噪声
+        观测噪声标准差。
     q_w : float
-        清水基础流量 (L/min)，默认 136 L/min
-        （匹配论文内蒙古滴灌系统 0.1ha 面积：3704 滴头 × 2.2 L/h）
+        清水基础流量 (L/min)。
     seed : int, optional
-        随机种子
+        随机种子。
 
     动作空间
     --------
-    action = [q_f, q_a]
-        q_f : 母液流量 0~10 L/min（EC_conc=30 dS/m 时可覆盖配液设定 EC）
-        q_a : 酸液流量 0~4 L/min
+    action = [EC_set, pH_set]
+        EC_set : 滴灌/混肥出口目标 EC (dS/m)
+        pH_set : 滴灌/混肥出口目标 pH
 
     观测空间 (维度 = 23)
-    --------
-    obs = [θ_{t-4}, ..., θ_t,                         # 5 维: 历史含水率
-           EC_soil_{t-4}, ..., EC_soil_t,             # 5 维: 历史土壤 EC
-           ec_in_{t-4}, ..., ec_in_t,                 # 5 维: 历史入口 EC
-           ph_in_{t-4}, ..., ph_in_t,                 # 5 维: 历史入口 pH
-           ETc_mm_day / 10,                           # 1 维: 归一化 ETc
-           target_ec / 5,                             # 1 维: 归一化马铃薯适宜 EC 参考
-           stage_code]                                # 1 维: 阶段编码 0~4
-
-    奖励
-    --------
-    r = -|EC_drip - target_ec| * 10 - 总流量 * 0.01
+    -------------------
+    obs = [theta历史5维, EC_soil历史5维, ec_drip历史5维, ph_drip历史5维,
+           ETc归一化, target_ec归一化, stage_code]
     """
 
     def __init__(self,
@@ -80,8 +78,9 @@ class DigitalTwinEnv:
                  obs_noise_std: float = None,
                  q_w: float = None,
                  seed: int = None):
-        env_cfg = load_config().env()
-        obs_cfg = load_config().obs()
+        cfg = load_config()
+        env_cfg = cfg.env()
+        obs_cfg = cfg.obs()
 
         self.area_ha = area_ha if area_ha is not None else env_cfg["area_ha"]
         self.dt_min = dt_min if dt_min is not None else env_cfg["dt_min"]
@@ -90,18 +89,17 @@ class DigitalTwinEnv:
         self.obs_noise_std = obs_noise_std if obs_noise_std is not None else env_cfg["obs_noise_std"]
         self.q_w = q_w if q_w is not None else env_cfg["q_w"]
 
-        # 随机种子
         seed = seed if seed is not None else env_cfg.get("seed")
         self._rng = np.random.RandomState(seed)
 
         # ---- 子模块 ----
-        dt_hours = self.dt_min / 60.0
         self.tank = MixingTank()
         self.pipe = PipeDynamics(dt=self.dt_min)
         self.soil = SoilTransport()
         self.crop = CropModel(growth_stage)
         self.current_stage = growth_stage
         self.soil.root_depth = self.crop.get_root_depth(growth_stage)
+        self.executor = SetpointToFlowController()
 
         # ---- 观测历史缓冲 ----
         self.history_len = obs_cfg["history_len"]
@@ -121,7 +119,7 @@ class DigitalTwinEnv:
         self._TARGET_EC_NORM = obs_cfg["target_ec_norm"]
 
         # ---- 日夜间阈值 ----
-        dn = load_config().day_night()
+        dn = cfg.day_night()
         self._night_start = dn["night_start"]
         self._night_end = dn["night_end"]
         self._day_start = dn["day_start"]
@@ -129,13 +127,6 @@ class DigitalTwinEnv:
         self._daytime_hours = dn["daytime_hours"]
         self._et_peak_factor = dn["et_peak_factor"]
         self._et_fluctuation = dn["et_fluctuation"]
-
-        # ---- 动作限幅 ----
-        act = load_config().action()
-        self._q_f_min = act["q_f_min"]
-        self._q_f_max = act["q_f_max"]
-        self._q_a_min = act["q_a_min"]
-        self._q_a_max = act["q_a_max"]
 
     def _is_nighttime(self, time_min: float) -> bool:
         hour = (time_min / 60.0) % 24.0
@@ -156,32 +147,28 @@ class DigitalTwinEnv:
 
         return max(0.0, et_actual)
 
-    def _action_to_flow(self, action):
-        """将动作 [q_f, q_a] 转换为灌溉参数，夜间仅停肥不停水。"""
-        q_f = float(np.clip(action[0], self._q_f_min, self._q_f_max))
-        q_a = float(np.clip(action[1], self._q_a_min, self._q_a_max))
+    def _setpoint_to_flow(self, action):
+        """将动作 [EC_set, pH_set] 转换为执行流量与灌溉强度。
 
-        # 夜间停肥不停水（清水继续维持土壤湿度）
+        夜间停肥停酸，但保留清水灌溉，用于维持土壤湿度。
+        """
+        ec_set = float(action[0])
+        ph_set = float(action[1])
+        result = self.executor.to_flow(ec_set, ph_set, q_w=self.q_w)
+
+        q_f = result.q_f
+        q_a = result.q_a
         if self._is_nighttime(self._time_min):
             q_f = 0.0
             q_a = 0.0
 
-        total_flow_Lmin = q_f + q_a + self.q_w
+        total_flow_with_water = q_f + q_a + self.q_w
+        irrigation_mm_h = total_flow_with_water * 60.0 / (self.area_ha * 10000.0)
 
-        # 单位换算: L/min → mm/h
-        #   总流量 L/min * 60 min/h = L/h
-        #   面积 = area_ha * 10000 m²
-        #   1 L = 0.001 m³
-        #   mm/h = (L/h * 0.001) m³/h / (area_ha * 10000) m² * 1000 mm/m
-        #        = total_flow * 60 / (area_ha * 10000)
-        irrigation_mm_h = total_flow_Lmin * 60.0 / (self.area_ha * 10000.0)
-
-        return q_f, q_a, irrigation_mm_h
+        return result.ec_set, result.ph_set, q_f, q_a, irrigation_mm_h
 
     def _get_obs(self):
-        """
-        总共 23 个数,它通过这些数字感知土壤状态。
-        """
+        """返回 23 维观测向量。"""
         def _pad_deque(dq, default_val=0.0):
             lst = list(dq)
             if len(lst) < self.history_len:
@@ -197,65 +184,59 @@ class DigitalTwinEnv:
         etc = self.crop.get_etc(self.current_stage, self.et0_base)
         target_ec = self.crop.get_target_ec(self.current_stage)
         stage_code = list(GrowthStage).index(self.current_stage)
-        # 初始化组装
+
         obs = np.array(
             theta_hist + ec_soil_hist + ec_in_hist + ph_in_hist +
-            [etc / self._ETC_NORM,
-             target_ec / self._TARGET_EC_NORM,
-             float(stage_code)],
-            dtype=np.float32
+            [etc / self._ETC_NORM, target_ec / self._TARGET_EC_NORM, float(stage_code)],
+            dtype=np.float32,
         )
 
-        # --- 传感器噪声 ---
         if self.obs_noise_std > 0:
             noise = self._rng.normal(0, self.obs_noise_std, size=obs.shape).astype(np.float32)
             obs += noise
 
         return obs
 
-    def _compute_reward(self, ec_drip, ec_soil, ph_drip, total_flow_Lmin, control_active=True):
+    def _compute_reward(self,
+                        ec_drip,
+                        ec_soil,
+                        ph_drip,
+                        actuator_flow_Lmin,
+                        ec_set,
+                        ph_set,
+                        control_active=True):
         """计算奖励函数（多目标）。
 
-        r = -w1*|EC_soil - target_ec|^2
-            - w2*|pH_drip - pH_target|^2
-            - w3*total_flow * 0.01
-            + w4*WUE_bonus
-            + 烧苗硬惩罚（EC_soil>3.0 或 pH_drip<4.5 → -100）
-
-        EC 主奖励使用根区土壤 EC，因为论文评价关心马铃薯根区环境是否接近适宜 EC；
-        滴灌出口 EC 是执行层配液结果，在图表和 summary 中作为辅助指标评价。
-        夜间停肥停酸时 control_active=False，不计算不可实现的 EC/pH 跟踪惩罚。
-
-        返回 (reward, ec_reward, ph_reward, burn) 四元组。
+        SAC 动作已经变成 EC_set/pH_set，所以奖励同时考虑：
+        - 根区土壤 EC 是否接近当前生育期目标；
+        - 出口 pH 是否接近 SAC 给定目标；
+        - 出口 EC 是否跟踪 SAC 给定目标；
+        - 执行流量是否过大；
+        - 是否触发盐害/酸害硬约束。
         """
         rw = load_config().reward()
         w1, w2, w3, w4 = rw["w1"], rw["w2"], rw["w3"], rw["w4"]
-        pH_TARGET = rw["pH_target"]
-
         target_ec = self.crop.get_target_ec(self.current_stage)
 
-        # 根区 EC 跟踪惩罚（二次型）。SAC 最终要优化的是作物根区环境，而不是只把出口肥液配准。
         ec_error = abs(ec_soil - target_ec)
         ec_reward = -w1 * ec_error * ec_error if control_active else 0.0
 
-        # 配液出口 pH 跟踪惩罚（二次型）；当前模型尚未单独模拟根区土壤 pH。
-        ph_error = abs(ph_drip - pH_TARGET)
+        ph_error = abs(ph_drip - ph_set)
         ph_reward = -w2 * ph_error * ph_error if control_active else 0.0
 
-        # 流量惩罚
-        flow_penalty = total_flow_Lmin * rw["flow_penalty_scale"] * w3
+        setpoint_track_error = abs(ec_drip - ec_set)
+        setpoint_reward = -rw.get("w_setpoint", 1.0) * setpoint_track_error * setpoint_track_error if control_active else 0.0
 
-        # 灌溉效率奖励（流量越小奖励越高）
-        wue_bonus = max(0.0, 1.0 - total_flow_Lmin / rw["wue_norm"]) * w4
+        flow_penalty = actuator_flow_Lmin * rw["flow_penalty_scale"] * w3
+        wue_bonus = max(0.0, 1.0 - actuator_flow_Lmin / rw["wue_norm"]) * w4
 
-        # 烧苗硬惩罚
         hard_penalty = 0.0
         if ec_soil > rw["ec_burn_threshold"] or ph_drip < rw["ph_burn_threshold"]:
             hard_penalty = rw["hard_penalty"]
 
-        reward = ec_reward + ph_reward - flow_penalty + wue_bonus + hard_penalty
-        burn = (hard_penalty < 0.0)
-        return reward, ec_reward, ph_reward, burn
+        reward = ec_reward + ph_reward + setpoint_reward - flow_penalty + wue_bonus + hard_penalty
+        burn = hard_penalty < 0.0
+        return reward, ec_reward, ph_reward, setpoint_reward, burn
 
     def step(self, action):
         """执行一个仿真步。
@@ -263,22 +244,15 @@ class DigitalTwinEnv:
         参数
         ----------
         action : array_like
-            [母液流量 q_f (L/min), 酸液流量 q_a (L/min)]
+            [EC_set (dS/m), pH_set]
 
         返回
         ----------
-        obs : np.ndarray
-            观测向量 (23 维)
-        reward : float
-            奖励值
-        done : bool
-            是否结束
-        info : dict
-            附加信息
+        obs, reward, done, info
         """
-        # ---- 1. 动作映射与单位换算 ----
-        q_f, q_a, irrigation_mm_h = self._action_to_flow(action)
-        total_flow_Lmin = q_f + q_a
+        # ---- 1. 上层目标值 → 执行流量 ----
+        ec_set, ph_set, q_f, q_a, irrigation_mm_h = self._setpoint_to_flow(action)
+        actuator_flow_Lmin = q_f + q_a
 
         # ---- 2. MixingTank ----
         ec_tank, ph_tank = self.tank.step(q_f, q_a, q_w=self.q_w)
@@ -298,12 +272,15 @@ class DigitalTwinEnv:
         self._ph_in_history.append(ph_drip)
 
         # ---- 6. 奖励 ----
-        reward, ec_reward_component, ph_reward_component, burn = self._compute_reward(
+        control_active = not self._is_nighttime(self._time_min)
+        reward, ec_reward_component, ph_reward_component, setpoint_reward_component, burn = self._compute_reward(
             ec_drip,
             ec_soil,
             ph_drip,
-            total_flow_Lmin,
-            control_active=not self._is_nighttime(self._time_min),
+            actuator_flow_Lmin,
+            ec_set,
+            ph_set,
+            control_active=control_active,
         )
         if burn:
             self._done = True
@@ -319,34 +296,31 @@ class DigitalTwinEnv:
 
         # ---- 9. 附加信息 ----
         info = {
-            'time_min': self._time_min,
-            'time_day': self._time_min / (24 * 60),
-            'theta': theta,
-            'ec_soil': ec_soil,
-            'ec_drip': ec_drip,
-            'ph_drip': ph_drip,
-            'etc_mm_h': et_mm_h,
-            'target_ec': self.crop.get_target_ec(self.current_stage),
-            'irrigation_mm_h': irrigation_mm_h,
-            'q_f': q_f,
-            'q_a': q_a,
-            'total_flow_Lmin': total_flow_Lmin,
-            'is_night': self._is_nighttime(self._time_min),
-            'ec_reward': ec_reward_component,
-            'ph_reward': ph_reward_component,
-            'burn': burn,
+            "time_min": self._time_min,
+            "time_day": self._time_min / (24 * 60),
+            "theta": theta,
+            "ec_soil": ec_soil,
+            "ec_drip": ec_drip,
+            "ph_drip": ph_drip,
+            "ec_set": ec_set,
+            "ph_set": ph_set,
+            "etc_mm_h": et_mm_h,
+            "target_ec": self.crop.get_target_ec(self.current_stage),
+            "irrigation_mm_h": irrigation_mm_h,
+            "q_f": q_f,
+            "q_a": q_a,
+            "total_flow_Lmin": actuator_flow_Lmin,
+            "is_night": self._is_nighttime(self._time_min),
+            "ec_reward": ec_reward_component,
+            "ph_reward": ph_reward_component,
+            "setpoint_reward": setpoint_reward_component,
+            "burn": burn,
         }
 
         return obs, reward, self._done, info
 
     def reset(self):
-        """重置环境至初始状态。
-
-        返回
-        ----------
-        obs : np.ndarray
-            初始观测向量
-        """
+        """重置环境至初始状态。"""
         self.tank.reset()
         self.pipe.reset()
         self.soil.reset()
@@ -359,7 +333,7 @@ class DigitalTwinEnv:
         self._time_min = 0.0
         self._total_steps = 0
         self._done = False
-        # 因为观测向量包含"最近 5 步"的历史，刚启动时还没有历史，所以用初始值填充：
+
         soil = load_config().soil()
         init_theta, init_ec_soil = soil["theta_init"], soil["ec_soil_init"]
         init_ec_in, init_ph_in = 0.0, 7.0
@@ -368,30 +342,20 @@ class DigitalTwinEnv:
             self._ec_soil_history.append(init_ec_soil)
             self._ec_in_history.append(init_ec_in)
             self._ph_in_history.append(init_ph_in)
-        #
+
         return self._get_obs()
 
     def set_growth_stage(self, stage: GrowthStage):
-        """切换生育阶段，同步更新作物模型、根系深度和马铃薯适宜 EC 参考。"""
+        """切换生育阶段，同步更新作物模型、根系深度和目标 EC 参考。"""
         self.current_stage = stage
         self.crop.current_stage = stage
         self.soil.root_depth = self.crop.get_root_depth(stage)
 
     def dry_step(self, rain_mm_h: float = 0.0):
-        """执行一个纯蒸发步进（无灌溉，无施肥）。
-
-        用于模拟两次灌溉事件之间的干旱期。
-        只推进 SoilTransport 的 ET 和时钟，不涉及 MixingTank/PipeDynamics。
-
-        参数
-        ----------
-        rain_mm_h : float
-            降雨强度 (mm/h)，论文中生育期有效降雨约 2 mm/day ≈ 0.083 mm/h
-        """
+        """执行一个纯蒸发/降雨步进（无灌溉、无施肥）。"""
         dt_hours = self.dt_min / 60.0
         et_mm_h = self._get_actual_et(self._time_min)
 
-        # 降雨视为 EC≈0 的水分输入
         theta, ec_soil = self.soil.step(I=rain_mm_h, EC_in=0.0, ET=et_mm_h, dt_hours=dt_hours)
 
         self._theta_history.append(theta)
@@ -405,28 +369,29 @@ class DigitalTwinEnv:
             self._done = True
 
         obs = self._get_obs()
-
         info = {
-            'time_min': self._time_min,
-            'time_day': self._time_min / (24 * 60),
-            'theta': theta,
-            'ec_soil': ec_soil,
-            'ec_drip': 0.0,
-            'ph_drip': 7.0,
-            'etc_mm_h': et_mm_h,
-            'target_ec': self.crop.get_target_ec(self.current_stage),
-            'irrigation_mm_h': 0.0,
-            'q_f': 0.0,
-            'q_a': 0.0,
-            'total_flow_Lmin': 0.0,
-            'is_night': self._is_nighttime(self._time_min),
+            "time_min": self._time_min,
+            "time_day": self._time_min / (24 * 60),
+            "theta": theta,
+            "ec_soil": ec_soil,
+            "ec_drip": 0.0,
+            "ph_drip": 7.0,
+            "ec_set": 0.0,
+            "ph_set": 7.0,
+            "etc_mm_h": et_mm_h,
+            "target_ec": self.crop.get_target_ec(self.current_stage),
+            "irrigation_mm_h": 0.0,
+            "q_f": 0.0,
+            "q_a": 0.0,
+            "total_flow_Lmin": 0.0,
+            "is_night": self._is_nighttime(self._time_min),
         }
         return obs, 0.0, self._done, info
 
     def get_obs_dim(self):
-        """返回观测向量的维度 (23)。"""
+        """返回观测向量维度。"""
         return self._get_obs().shape[0]
 
     def get_action_dim(self):
-        """返回动作向量的维度 (2)。"""
+        """返回动作向量维度。"""
         return 2
