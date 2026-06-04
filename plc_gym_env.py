@@ -1,38 +1,28 @@
 """
 PLC 在环 Gymnasium 环境 — PLCGymEnv
 =====================================
-将 RL 动作写入 PLC 执行，读取 PLC 实际阀门反馈，同时用仿真模型预测
-土壤/作物状态转移。实现完整的硬件在环 (HIL) 闭环。
 
-数据流:
-  Agent action [q_f, q_a]
-    │
-    ├─→ PLC: db_write(Valve_F_Opt_SP, Valve_A_Opt_SP, Heartbeat)
-    │         ↓ (PLC 看门狗 + 斜坡护盾)
-    │   PLC: db_read(Actual_Valve_F, Actual_Valve_A, ...)  ← 真实物理反馈
-    │
-    └─→ DigitalTwinEnv: step()  ← 仿真预测土壤/作物状态
-              │
-              └─→ obs, reward, done, info
+B 方案 HIL/PLCSIM 闭环：
 
-用法:
-    from plc_client import PLCClient
-    from plc_gym_env import PLCGymEnv
+    Agent action [EC_set, pH_set]
+        ↓
+    Python 写入 PLC/PLCSIM：EC_Set_SP、pH_Set_SP、EC_Actual、pH_Actual
+        ↓
+    PLC/PLCSIM 内部 EC-PID、pH-PID 计算 q_f_cmd、q_a_cmd
+        ↓
+    Python 回读 q_f_cmd、q_a_cmd，并驱动数字孪生模型推进田间状态
 
-    plc = PLCClient()
-    plc.connect()
-
-    env = PLCGymEnv(plc_client=plc, growth_stage="MID")
-    obs, _ = env.reset()
-    obs, reward, terminated, truncated, info = env.step([5.0, 1.0])
+说明
+----
+DigitalTwinGymEnv 纯仿真模式仍使用内部 SetpointToFlowController；
+PLCGymEnv 则用 PLC/PLCSIM 作为执行层，更接近真实系统。
 """
 
-import time
 import logging
-import numpy as np
+import time
 
 import gymnasium as gym
-from gymnasium import spaces
+import numpy as np
 
 from digital_twin_gym_env import DigitalTwinGymEnv, STAGE_MAP
 from plc_client import PLCClient
@@ -41,39 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class PLCGymEnv(gym.Env):
-    """硬件在环 Gymnasium 环境。
-
-    将数字孪生仿真与 PLC 实物结合：
-      - step() 先将动作写入 PLC → 等待 PLC 执行 → 回读实际阀门位置
-      - 同时推进仿真模型计算土壤/作物状态转移
-      - 奖励由仿真模型计算
-      - info 字典中附带 PLC 实时反馈数据
-
-    参数
-    ----------
-    plc_client : PLCClient
-        已创建（可未连接）的 PLC 通讯客户端实例
-    growth_stage : str
-        生育阶段: "INI" / "DEV" / "MID" / "LATE"
-    area_ha : float, optional
-        灌溉面积 (公顷)
-    dt_min : float, optional
-        仿真步长 (分钟)，默认 60 min
-    ep_len_days : float, optional
-        episode 长度 (天)
-    et0_mm_day : float, optional
-        参考蒸散发量
-    obs_noise_std : float, optional
-        观测噪声标准差
-    reward_scale : float
-        奖励缩放因子
-    seed : int, optional
-        随机种子
-    plc_enabled : bool
-        是否启用 PLC 通讯。设为 False 时退化为纯仿真模式（调试用）
-    max_action_clip : list
-        动作上界 [q_f_max, q_a_max]，用于将动作缩放为 0~1 开度写入 PLC
-    """
+    """PLC/PLCSIM 在环 Gymnasium 环境。"""
 
     metadata = {"render_modes": []}
 
@@ -87,21 +45,12 @@ class PLCGymEnv(gym.Env):
                  obs_noise_std: float = None,
                  reward_scale: float = 1.0,
                  seed: int = None,
-                 plc_enabled: bool = True,
-                 max_action_clip: list = None):
+                 plc_enabled: bool = True):
         super().__init__()
 
-        # ---- PLC ----
         self.plc = plc_client
         self.plc_enabled = plc_enabled and (self.plc is not None)
 
-        # ---- 动作上界 (用于 PLC 开度缩放) ----
-        if max_action_clip is None:
-            self._act_max = np.array([10.0, 4.0], dtype=np.float32)  # q_f, q_a 上界
-        else:
-            self._act_max = np.array(max_action_clip, dtype=np.float32)
-
-        # ---- 仿真环境 ----
         self._sim_env = DigitalTwinGymEnv(
             growth_stage=growth_stage,
             area_ha=area_ha,
@@ -113,128 +62,174 @@ class PLCGymEnv(gym.Env):
             seed=seed,
         )
 
-        # ---- 观测/动作空间 (透传仿真环境) ----
         self.observation_space = self._sim_env.observation_space
         self.action_space = self._sim_env.action_space
 
-        # ---- PLC 反馈缓存 ----
         self._last_plc_state = {
             "Remote_Comms_OK": False,
             "Watchdog_Timer": 0,
-            "Actual_Valve_F": 0.0,
-            "Actual_Valve_A": 0.0,
+            "q_f_cmd": 0.0,
+            "q_a_cmd": 0.0,
+            "Valve_F_Actual": 0.0,
+            "Valve_A_Actual": 0.0,
             "AQ_Valve_F_Raw": 0,
             "AQ_Valve_A_Raw": 0,
             "System_Alarm_Light": False,
         }
 
-    # ================================================================
-    #  Gymnasium 标准接口
-    # ================================================================
-
     def reset(self, seed=None, options=None):
-        """重置环境：仿真归零 + PLC 阀门归零。
+        """重置仿真环境，并向 PLC 写入安全默认目标。"""
+        obs, _ = self._sim_env.reset(seed=seed, options=options)
+        base = self._sim_env.unwrapped_env
 
-        返回
-        ----------
-        obs : np.ndarray
-            初始观测
-        info : dict
-            含 PLC 初始状态
-        """
-        # ---- 1. 重置仿真 ----
-        obs, sim_info = self._sim_env.reset(seed=seed, options=options)
-
-        # ---- 2. PLC 阀门归零 ----
         if self.plc_enabled:
-            self._safe_plc_write(0.0, 0.0)
+            self._safe_write_setpoints(
+                ec_set=0.8,
+                ph_set=7.0,
+                ec_actual=0.0,
+                ph_actual=7.0,
+                sac_enable=False,
+            )
             time.sleep(self.plc.cycle_s)
-
             plc_state = self.plc.read_state()
             if plc_state is not None:
                 self._last_plc_state = plc_state
 
-        # ---- 3. 组装 info ----
-        info = self._build_info({})
-        return obs, info
+        return obs, self._build_info({
+            "theta": base.soil.theta,
+            "ec_soil": base.soil.ec_soil,
+            "ec_drip": 0.0,
+            "ph_drip": 7.0,
+        })
 
     def step(self, action):
-        """执行一个 HIL 控制步。
+        """执行一个 PLC 在环控制步。
 
-        流程:
-            1. 动作裁剪 + 缩放到 0~1 开度
-            2. 写入 PLC（下发阀门目标 + 心跳）
-            3. 等待 PLC 物理执行 (cycle_s)
-            4. 回读 PLC 实际阀门开度
-            5. 驱动仿真模型 step()
-            6. 返回 (obs, reward, terminated, truncated, info)
-
-        参数
-        ----------
-        action : array_like
-            [母液流量 q_f (0~10 L/min), 酸液流量 q_a (0~4 L/min)]
-
-        返回
-        ----------
-        obs : np.ndarray
-        reward : float
-        terminated : bool
-        truncated : bool
-        info : dict
+        action 为 SAC 输出的 [EC_set, pH_set]。如果启用 PLC，则 PLC 执行层计算 q_f/q_a；
+        如果未启用 PLC，则退化为 DigitalTwinGymEnv 的纯仿真执行层。
         """
         action = np.asarray(action, dtype=np.float32).flatten()
-
-        # ---- 1. 裁剪动作 ----
         action_clipped = np.clip(action, self.action_space.low, self.action_space.high)
+        ec_set = float(action_clipped[0])
+        ph_set = float(action_clipped[1])
 
-        # ---- 2. 写入 PLC ----
-        if self.plc_enabled:
-            # 将 L/min 动作值缩放为 0~1 阀门开度
-            valve_f = float(action_clipped[0] / self._act_max[0])
-            valve_a = float(action_clipped[1] / self._act_max[1])
+        if not self.plc_enabled:
+            obs, reward, terminated, truncated, sim_info = self._sim_env.step(action_clipped)
+            return obs, reward, terminated, truncated, self._build_info(sim_info)
 
-            plc_ok = self._safe_plc_write(valve_f, valve_a)
+        base = self._sim_env.unwrapped_env
 
-            # ---- 3. 等待 PLC 执行 ----
-            time.sleep(self.plc.cycle_s)
+        # 1. 写入目标值和当前虚拟传感器值，供 PLC-PID 使用
+        ec_actual = float(base.pipe.ec_filt)
+        ph_actual = float(base.pipe.ph_filt)
+        self._safe_write_setpoints(ec_set, ph_set, ec_actual, ph_actual, sac_enable=True)
 
-            # ---- 4. 回读 PLC 实际状态 ----
-            plc_state = self.plc.read_state()
-            if plc_state is not None:
-                self._last_plc_state = plc_state
-                # 如果 PLC 通讯异常，log 警告
-                if not plc_state["Remote_Comms_OK"]:
-                    logger.warning(
-                        f"[HIL] ⚠ PLC 通讯异常! "
-                        f"Watchdog={plc_state['Watchdog_Timer']}, "
-                        f"Alarm={plc_state['System_Alarm_Light']}"
-                    )
-            else:
-                logger.error("[HIL] PLC 读取失败，已触发重连")
+        # 2. 等待 PLC/PLCSIM 扫描周期和 PID 执行
+        time.sleep(self.plc.cycle_s)
 
-        # ---- 5. 推进仿真模型 ----
-        #     注意：仿真仍然使用原始的 L/min 动作值
-        obs, reward, terminated, truncated, sim_info = self._sim_env.step(action_clipped)
+        # 3. 回读 PLC 执行层输出
+        plc_state = self.plc.read_state()
+        if plc_state is not None:
+            self._last_plc_state = plc_state
+            if not plc_state.get("Remote_Comms_OK", True):
+                logger.warning(
+                    f"[HIL] ⚠ PLC 通讯异常! Watchdog={plc_state.get('Watchdog_Timer')}, "
+                    f"Alarm={plc_state.get('System_Alarm_Light')}"
+                )
+        else:
+            logger.error("[HIL] PLC 读取失败，使用上一次 PLC 输出")
+            plc_state = self._last_plc_state
 
-        # ---- 6. 组装 info ----
+        q_f = float(plc_state.get("q_f_cmd", 0.0))
+        q_a = float(plc_state.get("q_a_cmd", 0.0))
+
+        # 4. 用 PLC 输出 q_f/q_a 驱动底层数字孪生模型。
+        obs, reward, terminated, truncated, sim_info = self._step_with_plc_flows(
+            ec_set=ec_set,
+            ph_set=ph_set,
+            q_f=q_f,
+            q_a=q_a,
+        )
         info = self._build_info(sim_info)
-
         return obs, reward, terminated, truncated, info
+
+    def _step_with_plc_flows(self, ec_set: float, ph_set: float, q_f: float, q_a: float):
+        """绕过内部 SetpointToFlowController，直接使用 PLC 输出 q_f/q_a 推进模型。"""
+        base = self._sim_env.unwrapped_env
+
+        if base._is_nighttime(base._time_min):
+            q_f = 0.0
+            q_a = 0.0
+
+        total_flow_with_water = q_f + q_a + base.q_w
+        irrigation_mm_h = total_flow_with_water * 60.0 / (base.area_ha * 10000.0)
+        actuator_flow_Lmin = q_f + q_a
+
+        ec_tank, ph_tank = base.tank.step(q_f, q_a, q_w=base.q_w)
+        ec_drip, ph_drip = base.pipe.step(ec_tank, ph_tank)
+
+        et_mm_h = base._get_actual_et(base._time_min)
+        dt_hours = base.dt_min / 60.0
+        theta, ec_soil = base.soil.step(irrigation_mm_h, ec_drip, et_mm_h, dt_hours)
+
+        base._theta_history.append(theta)
+        base._ec_soil_history.append(ec_soil)
+        base._ec_in_history.append(ec_drip)
+        base._ph_in_history.append(ph_drip)
+
+        control_active = not base._is_nighttime(base._time_min)
+        reward, ec_reward_component, ph_reward_component, setpoint_reward_component, burn = base._compute_reward(
+            ec_drip,
+            ec_soil,
+            ph_drip,
+            actuator_flow_Lmin,
+            ec_set,
+            ph_set,
+            control_active=control_active,
+        )
+        if burn:
+            base._done = True
+
+        base._time_min += base.dt_min
+        base._total_steps += 1
+        if base._total_steps >= base._max_steps:
+            base._done = True
+
+        obs = base._get_obs()
+        obs = self._sim_env._normalize_obs(obs)
+        reward = reward * self._sim_env.reward_scale
+
+        sim_info = {
+            "time_min": base._time_min,
+            "time_day": base._time_min / (24 * 60),
+            "theta": theta,
+            "ec_soil": ec_soil,
+            "ec_drip": ec_drip,
+            "ph_drip": ph_drip,
+            "ec_set": ec_set,
+            "ph_set": ph_set,
+            "etc_mm_h": et_mm_h,
+            "target_ec": base.crop.get_target_ec(base.current_stage),
+            "irrigation_mm_h": irrigation_mm_h,
+            "q_f": q_f,
+            "q_a": q_a,
+            "total_flow_Lmin": actuator_flow_Lmin,
+            "is_night": base._is_nighttime(base._time_min),
+            "ec_reward": ec_reward_component,
+            "ph_reward": ph_reward_component,
+            "setpoint_reward": setpoint_reward_component,
+            "burn": burn,
+        }
+        return obs, reward, base._done, False, sim_info
 
     def render(self, mode="human"):
         pass
 
     def close(self):
-        """关闭环境，断开 PLC 连接。"""
         if self.plc_enabled:
-            # 安全切断
-            self._safe_plc_write(0.0, 0.0)
+            self._safe_write_setpoints(0.8, 7.0, 0.0, 7.0, sac_enable=False)
             self.plc.disconnect()
         self._sim_env.close()
-
-    # ================================================================
-    #  属性透传
-    # ================================================================
 
     @property
     def current_stage(self):
@@ -249,30 +244,27 @@ class PLCGymEnv(gym.Env):
 
     @property
     def unwrapped_env(self):
-        """返回底层 DigitalTwinEnv（用于评估时读取额外信息）。"""
         return self._sim_env.unwrapped_env
 
-    # ================================================================
-    #  内部方法
-    # ================================================================
-
-    def _safe_plc_write(self, valve_f: float, valve_a: float) -> bool:
-        """安全写入 PLC，自动处理断线重连。"""
+    def _safe_write_setpoints(self,
+                              ec_set: float,
+                              ph_set: float,
+                              ec_actual: float,
+                              ph_actual: float,
+                              sac_enable: bool = True) -> bool:
         if not self.plc_enabled:
             return True
         try:
-            return self.plc.write_action(valve_f, valve_a)
+            return self.plc.write_setpoints(ec_set, ph_set, ec_actual, ph_actual, sac_enable=sac_enable)
         except Exception as e:
-            logger.error(f"[HIL] PLC 写入异常: {e}")
+            logger.error(f"[HIL] PLC 目标值写入异常: {e}")
             return False
 
     def _build_info(self, sim_info: dict) -> dict:
-        """组装 info 字典，合并仿真信息与 PLC 反馈。"""
         info = dict(sim_info)
         info["plc"] = dict(self._last_plc_state)
         info["plc_enabled"] = self.plc_enabled
         return info
 
     def get_plc_state(self) -> dict:
-        """获取最新的 PLC 状态快照（不触发新读取）。"""
         return dict(self._last_plc_state)
