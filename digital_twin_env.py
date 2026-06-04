@@ -53,7 +53,7 @@ class DigitalTwinEnv:
     动作空间
     --------
     action = [q_f, q_a]
-        q_f : 母液流量 0~10 L/min（EC_conc=30 dS/m 时可覆盖目标 EC）
+        q_f : 母液流量 0~10 L/min（EC_conc=30 dS/m 时可覆盖配液设定 EC）
         q_a : 酸液流量 0~4 L/min
 
     观测空间 (维度 = 23)
@@ -63,7 +63,7 @@ class DigitalTwinEnv:
            ec_in_{t-4}, ..., ec_in_t,                 # 5 维: 历史入口 EC
            ph_in_{t-4}, ..., ph_in_t,                 # 5 维: 历史入口 pH
            ETc_mm_day / 10,                           # 1 维: 归一化 ETc
-           target_ec / 5,                             # 1 维: 归一化目标 EC
+           target_ec / 5,                             # 1 维: 归一化马铃薯适宜 EC 参考
            stage_code]                                # 1 维: 阶段编码 0~4
 
     奖励
@@ -216,14 +216,14 @@ class DigitalTwinEnv:
     def _compute_reward(self, ec_drip, ec_soil, ph_drip, total_flow_Lmin, control_active=True):
         """计算奖励函数（多目标）。
 
-        r = -w1*|EC_drip - target_ec|^2
+        r = -w1*|EC_soil - target_ec|^2
             - w2*|pH_drip - pH_target|^2
             - w3*total_flow * 0.01
             + w4*WUE_bonus
             + 烧苗硬惩罚（EC_soil>3.0 或 pH_drip<4.5 → -100）
 
-        EC 跟踪使用滴灌出口 EC，因为 q_f 直接控制的是配液出口；
-        根区土壤 EC 变化较慢，仅用于盐害安全判断和长期评价。
+        EC 主奖励使用根区土壤 EC，因为论文评价关心马铃薯根区环境是否接近适宜 EC；
+        滴灌出口 EC 是执行层配液结果，在图表和 summary 中作为辅助指标评价。
         夜间停肥停酸时 control_active=False，不计算不可实现的 EC/pH 跟踪惩罚。
 
         返回 (reward, ec_reward, ph_reward, burn) 四元组。
@@ -234,11 +234,11 @@ class DigitalTwinEnv:
 
         target_ec = self.crop.get_target_ec(self.current_stage)
 
-        # EC 跟踪惩罚（二次型）
-        ec_error = abs(ec_drip - target_ec)
+        # 根区 EC 跟踪惩罚（二次型）。SAC 最终要优化的是作物根区环境，而不是只把出口肥液配准。
+        ec_error = abs(ec_soil - target_ec)
         ec_reward = -w1 * ec_error * ec_error if control_active else 0.0
 
-        # pH 跟踪惩罚（二次型）
+        # 配液出口 pH 跟踪惩罚（二次型）；当前模型尚未单独模拟根区土壤 pH。
         ph_error = abs(ph_drip - pH_TARGET)
         ph_reward = -w2 * ph_error * ph_error if control_active else 0.0
 
@@ -372,7 +372,7 @@ class DigitalTwinEnv:
         return self._get_obs()
 
     def set_growth_stage(self, stage: GrowthStage):
-        """切换生育阶段，同步更新作物模型、根系深度和目标 EC。"""
+        """切换生育阶段，同步更新作物模型、根系深度和马铃薯适宜 EC 参考。"""
         self.current_stage = stage
         self.crop.current_stage = stage
         self.soil.root_depth = self.crop.get_root_depth(stage)

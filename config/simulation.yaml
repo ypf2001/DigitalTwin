@@ -42,8 +42,8 @@ action:
   q_a_min: 0.0
   q_a_max: 4.0
   fixed_strategy:
-  - 6.1                  # 固定策略肥料母液流量 q_f (L/min)，接近块茎膨大期目标 EC=1.5 dS/m
-  - 1.0                  # 固定策略预稀释酸液流量 q_a (L/min)，接近目标 pH=6.0
+  - 6.1                  # 固定策略肥料母液流量 q_f (L/min)，接近块茎膨大期配液设定 EC=1.5 dS/m
+  - 1.0                  # 固定策略预稀释酸液流量 q_a (L/min)，接近配液设定 pH=6.0
 obs:
   history_len: 5
   etc_norm: 10.0

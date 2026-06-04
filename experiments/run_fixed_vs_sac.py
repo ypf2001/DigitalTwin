@@ -31,6 +31,7 @@ from config_loader import load_config
 from crop_model import GrowthStage
 from digital_twin_env import DigitalTwinEnv
 from irrigation_schedule import normalize_obs
+from plot_utils import set_time_axis_origin
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,7 @@ def run_policy(
         series["q_f"].append(float(info["q_f"]))
         series["q_a"].append(float(info["q_a"]))
         series["burn"].append(1.0 if info.get("burn") else 0.0)
-        # 目标 EC/pH 仅在允许注肥注酸的白天评价；夜间虽然持续供水，但不追踪配液目标。
+        # 配液设定 EC/pH 仅在允许注肥注酸的白天评价；夜间虽然持续供水，但不追踪配液设定。
         target_active = in_event and not bool(info.get("is_night", False))
         series["event_marker"].append(1.0 if target_active else 0.0)
 
@@ -185,13 +186,14 @@ def run_policy(
         "theta_mean": float(theta.mean()) if len(theta) else 0.0,
         "theta_final": float(theta[-1]) if len(theta) else 0.0,
         # 土壤 EC 是根区长期状态，单次控制事件后不要求立即达到灌溉液目标。
-        "soil_ec_mae": float(np.abs(ec_soil - ec_target).mean()) if len(ec_soil) else 0.0,
+        "root_zone_ec_mae": float(np.abs(ec_soil - ec_target).mean()) if len(ec_soil) else 0.0,
+        "root_zone_ec_final_error": float(abs(ec_soil[-1] - ec_target[-1])) if len(ec_soil) else 0.0,
         "soil_ec_final": float(ec_soil[-1]) if len(ec_soil) else 0.0,
         # 出口 EC/pH 只在注肥、注酸控制事件内评价；事件结束后回到清水不计入误差。
         "event_ec_drip_mae": float(np.abs(ec_drip[event_mask] - ec_target[event_mask]).mean()) if event_mask.any() else 0.0,
         "event_ec_drip_final": float(ec_drip[event_mask][-1]) if event_mask.any() else 0.0,
-        "event_ph_mae": float(np.abs(ph_drip[event_mask] - ph_target).mean()) if event_mask.any() else 0.0,
-        "event_ph_final": float(ph_drip[event_mask][-1]) if event_mask.any() else 0.0,
+        "outlet_ph_mae_during_events": float(np.abs(ph_drip[event_mask] - ph_target).mean()) if event_mask.any() else 0.0,
+        "outlet_ph_final_during_events": float(ph_drip[event_mask][-1]) if event_mask.any() else 0.0,
         "total_irrigation_mm": float(irrigation.sum() * dt_hours),
         "q_f_mean": float(q_f.mean()) if len(q_f) else 0.0,
         "q_a_mean": float(q_a.mean()) if len(q_a) else 0.0,
@@ -220,7 +222,7 @@ def plot_comparison(
     plt.rcParams["axes.unicode_minus"] = False
 
     fig, axes = plt.subplots(6, 1, figsize=(8, 12.5), sharex=True)
-    fig.suptitle("固定策略与 SAC 控制策略对比", fontsize=13)
+    fig.suptitle("水肥控制策略对比：固定策略 vs SAC", fontsize=13)
     marker_every = 12
     styles = {
         "固定策略": (fixed, "#4e79a7", "o"),
@@ -238,37 +240,52 @@ def plot_comparison(
                     t_marker[start] - (t_marker[0] if len(t_marker) else 0.0),
                     t_marker[end],
                     color="#d8f0d2",
-                    alpha=0.45,
+                    alpha=0.26,
                     label="目标追踪时段" if index == 0 else None,
                 )
 
+    line_styles = {
+        "固定策略": {"linestyle": "--", "alpha": 0.95, "zorder": 4, "linewidth": 1.6},
+        "SAC策略": {"linestyle": "-", "alpha": 0.82, "zorder": 3, "linewidth": 1.3},
+    }
+
     for label, (series, color, marker) in styles.items():
+        style = line_styles.get(label, {"linestyle": "-", "alpha": 0.9, "zorder": 3, "linewidth": 1.4})
         t = np.array(series["time_hours"], dtype=float)
         axes[0].plot(t, series["theta"], color=color, marker=marker, markevery=marker_every,
-                     markersize=3.0, linewidth=1.4, label=label)
+                     markersize=3.0, label=label, **style)
         axes[1].plot(t, series["ec_soil"], color=color, marker=marker, markevery=marker_every,
-                     markersize=3.0, linewidth=1.4, label=label)
+                     markersize=3.0, label=label, **style)
         event_mask = np.array(series["event_marker"], dtype=float) > 0.5
         ec_drip = np.array(series["ec_drip"], dtype=float)
         ph_drip = np.array(series["ph_drip"], dtype=float)
         ec_drip_plot = ec_drip if continuous_control else np.where(event_mask, ec_drip, np.nan)
         ph_drip_plot = ph_drip if continuous_control else np.where(event_mask, ph_drip, np.nan)
         axes[2].plot(t, ec_drip_plot, color=color, marker=marker, markevery=marker_every,
-                     markersize=3.0, linewidth=1.4, label=label)
+                     markersize=3.0, label=label, **style)
         axes[3].plot(t, ph_drip_plot, color=color, marker=marker, markevery=marker_every,
-                     markersize=3.0, linewidth=1.4, label=label)
+                     markersize=3.0, label=label, **style)
         axes[4].plot(t, series["irrigation_mm_h"], color=color, marker=marker, markevery=marker_every,
-                     markersize=3.0, linewidth=1.4, label=label)
+                     markersize=3.0, label=label, **style)
         axes[5].plot(t, series["q_f"], color=color, marker=marker, markevery=marker_every,
-                     markersize=3.0, linewidth=1.4, label=f"{label} 肥液")
+                     markersize=3.0, label=f"{label} 肥液", **style)
 
     t_ref = np.array(fixed["time_hours"], dtype=float)
     fixed_event_mask = np.array(fixed["event_marker"], dtype=float) > 0.5
+    axes[1].step(
+        t_ref,
+        fixed["target_ec"],
+        where="post",
+        color="#2f7d32",
+        linestyle="--",
+        linewidth=1.4,
+        label="马铃薯适宜EC参考",
+    )
     target_ec_event = np.where(fixed_event_mask, np.array(fixed["target_ec"], dtype=float), np.nan)
-    axes[2].plot(t_ref, target_ec_event, color="#59a14f", linestyle="--", linewidth=1.2, label="目标出口EC")
+    axes[2].plot(t_ref, target_ec_event, color="#59a14f", linestyle="--", linewidth=1.2, label="配液设定EC")
     ph_target = float(load_config().reward().get("pH_target", 6.0))
     target_ph_event = np.where(fixed_event_mask, ph_target, np.nan)
-    axes[3].plot(t_ref, target_ph_event, color="#59a14f", linestyle="--", linewidth=1.2, label="目标出口pH")
+    axes[3].plot(t_ref, target_ph_event, color="#59a14f", linestyle="--", linewidth=1.2, label="配液设定pH")
     axes[5].plot(t_ref, fixed["q_a"], color="#4e79a7", linestyle=":", linewidth=1.0, label="固定策略 酸液")
     axes[5].plot(np.array(sac["time_hours"], dtype=float), sac["q_a"], color="#f28e2b", linestyle=":", linewidth=1.0, label="SAC策略 酸液")
 
@@ -284,17 +301,8 @@ def plot_comparison(
     axes[4].set_ylim(bottom=0.0)
     axes[5].set_ylim(bottom=0.0)
 
-    # 时间轴从原点开始，避免 Matplotlib 默认边距让 0 h 刻度偏离纵轴。
-    all_times = np.concatenate(
-        [
-            np.asarray(fixed.get("time_hours", []), dtype=float),
-            np.asarray(sac.get("time_hours", []), dtype=float),
-        ]
-    )
-    time_max = float(all_times.max()) if len(all_times) else 0.0
+    set_time_axis_origin(axes, fixed.get("time_hours", []), sac.get("time_hours", []))
     for ax in axes:
-        ax.set_xlim(left=0.0, right=time_max if time_max > 0.0 else None)
-        ax.margins(x=0.0)
         ax.grid(False)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -328,8 +336,8 @@ def main() -> int:
     args = parser.parse_args()
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    out_dir = ROOT / "results" / "fixed_vs_sac" / run_id
-    image_dir = ROOT / "experiments" / "images" / "fixed_vs_sac" / run_id
+    out_dir = ROOT / "results" / "control_strategy_fixed_vs_sac" / run_id
+    image_dir = ROOT / "experiments" / "images" / "control_strategy_fixed_vs_sac" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
     image_dir.mkdir(parents=True, exist_ok=True)
 
@@ -347,7 +355,7 @@ def main() -> int:
 
     _write_csv(out_dir / "fixed_timeseries.csv", fixed_series)
     _write_csv(out_dir / "sac_timeseries.csv", sac_series)
-    image_path = image_dir / "fixed_vs_sac.png"
+    image_path = image_dir / "control_strategy_fixed_vs_sac.png"
     plot_comparison(fixed_series, sac_series, image_path, continuous_control=args.continuous_control)
 
     summary = {
@@ -364,7 +372,11 @@ def main() -> int:
         "fixed": fixed_stats,
         "sac": sac_stats,
         "comparison": {
-            "ec_mae_change_pct": (
+            "root_zone_ec_mae_change_pct": (
+                (sac_stats["root_zone_ec_mae"] - fixed_stats["root_zone_ec_mae"])
+                / (fixed_stats["root_zone_ec_mae"] + 1e-9) * 100.0
+            ),
+            "outlet_ec_mae_change_pct": (
                 (sac_stats["event_ec_drip_mae"] - fixed_stats["event_ec_drip_mae"])
                 / (fixed_stats["event_ec_drip_mae"] + 1e-9) * 100.0
             ),
@@ -372,9 +384,9 @@ def main() -> int:
                 (sac_stats["total_irrigation_mm"] - fixed_stats["total_irrigation_mm"])
                 / (fixed_stats["total_irrigation_mm"] + 1e-9) * 100.0
             ),
-            "ph_mae_change_pct": (
-                (sac_stats["event_ph_mae"] - fixed_stats["event_ph_mae"])
-                / (fixed_stats["event_ph_mae"] + 1e-9) * 100.0
+            "outlet_ph_mae_change_pct": (
+                (sac_stats["outlet_ph_mae_during_events"] - fixed_stats["outlet_ph_mae_during_events"])
+                / (fixed_stats["outlet_ph_mae_during_events"] + 1e-9) * 100.0
             ),
         },
         "artifacts": {
@@ -391,8 +403,13 @@ def main() -> int:
 
     logger.info("Fixed vs SAC complete: %s", out_dir)
     logger.info("Image saved to: %s", image_path)
+    logger.info("根区 EC MAE: fixed=%.4f, sac=%.4f", fixed_stats["root_zone_ec_mae"], sac_stats["root_zone_ec_mae"])
     logger.info("事件内出口 EC MAE: fixed=%.4f, sac=%.4f", fixed_stats["event_ec_drip_mae"], sac_stats["event_ec_drip_mae"])
-    logger.info("事件内出口 pH MAE: fixed=%.4f, sac=%.4f", fixed_stats["event_ph_mae"], sac_stats["event_ph_mae"])
+    logger.info(
+        "事件内出口 pH MAE: fixed=%.4f, sac=%.4f",
+        fixed_stats["outlet_ph_mae_during_events"],
+        sac_stats["outlet_ph_mae_during_events"],
+    )
     logger.info("Irrigation: fixed=%.2f mm, sac=%.2f mm", fixed_stats["total_irrigation_mm"], sac_stats["total_irrigation_mm"])
     return 0
 

@@ -1,18 +1,19 @@
 # ============================================================
 # 奖励函数参数
 #
-# r = -w1 * |EC_drip - target_ec|^2        滴灌出口 EC 跟踪惩罚（二次型）
-#     - w2 * |pH_drip - pH_target|^2        pH 跟踪惩罚（二次型）
+# r = -w1 * |EC_soil - target_ec|^2        根区 EC 接近马铃薯适宜 EC 参考的惩罚（二次型）
+#     - w2 * |pH_drip - pH_target|^2        配液出口 pH 跟踪惩罚（二次型）
 #     - w3 * total_flow * flow_penalty_scale  流量/水耗惩罚
 #     + w4 * max(0, 1 - total_flow / wue_norm)  WUE 奖励
 #     + hard_penalty                          烧苗硬惩罚
 #
-# 夜间停肥停酸，只保留清水灌溉，因此夜间不计算出口 EC/pH 跟踪惩罚。
+# 夜间停肥停酸，只保留清水灌溉，因此夜间不计算配液出口 pH 跟踪惩罚；
+# 根区 EC 是慢变量，训练中仍作为作物环境主评价指标。
 # ============================================================
 
 reward:
-  w1: 4.0                  # 滴灌出口 EC 跟踪误差权重，算法调参值
-  w2: 4.0                  # pH 跟踪误差权重，算法调参值
+  w1: 4.0                  # 根区 EC 跟踪误差权重，算法调参值
+  w2: 4.0                  # 配液出口 pH 跟踪误差权重，算法调参值
   w3: 0.1                  # 流量惩罚权重，算法调参值
   w4: 0.5                  # WUE 奖励权重，算法调参值
   flow_penalty_scale: 0.01 # 流量惩罚缩放系数，算法调参值
@@ -20,7 +21,7 @@ reward:
                            # 对应 q_w(136) + q_f_max(10) × 稀释比，量级参考:
                            # 乌兰 (2022) 内蒙古农业大学硕士论文，系统额定流量范围
 
-  pH_target: 6.0           # 目标灌溉液 pH 值
+  pH_target: 6.0           # 配液设定 pH 值，不代表当前土壤/根区 pH
                            # 来源: Westermann D.T. (2005) "Nutritional requirements of
                            #        potatoes." American Journal of Potato Research 82:301-307.
                            #        马铃薯养分吸收最适 pH 范围 5.5~6.5，取中值 6.0

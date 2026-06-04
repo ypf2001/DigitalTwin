@@ -2,7 +2,7 @@
 
 遍历肥料母液流量 q_f 和酸液流量 q_a，计算混合罐出口 EC、pH，
 并生成热力图与综合区域分类图。该实验用于检查当前执行机构范围内，
-是否存在能够同时接近目标 EC 和目标 pH 的安全控制动作。
+是否存在能够同时接近配液设定 EC 和配液设定 pH 的安全控制动作。
 
 输出目录：
 - 数据：results/stock_solution_controllability/<run_id>/
@@ -28,6 +28,7 @@ if str(ROOT) not in sys.path:
 
 from config_loader import load_config
 from mixing_tank import MixingTank
+from plot_utils import set_x_axis_origin
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ def _evaluate_grid(
 def _build_q_a_values(q_a_min: float, q_a_max: float, points: int) -> np.ndarray:
     """生成酸液扫描点，并在接近 0 L/min 的关键区域加密。
 
-    当前酸液 pH 很低，目标 pH 对 q_a 的变化极其敏感。若只在 0~4 L/min
+    当前酸液 pH 很低，配液设定 pH 对 q_a 的变化极其敏感。若只在 0~4 L/min
     之间做等间距扫描，会直接跳过实际存在但很窄的目标控制区域。
     """
     if q_a_max <= q_a_min:
@@ -195,7 +196,7 @@ def _plot_heatmaps(
         & ~ph_burn
     )
 
-    # 分类编码：0 安全未命中，1 目标可控域，2 EC 风险，3 pH 酸害，4 双重风险。
+    # 分类编码：0 安全未命中，1 配液设定可控域，2 EC 风险，3 pH 酸害，4 双重风险。
     region = np.zeros_like(ec_grid, dtype=int)
     region[target_match] = 1
     region[ec_risk] = 2
@@ -260,7 +261,7 @@ def _plot_heatmaps(
     fig.colorbar(ph_image, ax=axes[1], label="pH")
 
     colors = ["#d9ead3", "#2ca02c", "#f6b26b", "#e06666", "#990000"]
-    labels = ["安全但未命中目标", "目标可控域", "EC 超阈值", "pH 过低", "双重风险"]
+    labels = ["安全但未命中设定", "配液设定可控域", "EC 超阈值", "pH 过低", "双重风险"]
     region_cmap = ListedColormap(colors)
     region_norm = BoundaryNorm(np.arange(-0.5, 5.5, 1.0), region_cmap.N)
     axes[2].pcolormesh(
@@ -299,7 +300,6 @@ def _plot_heatmaps(
     for ax in axes:
         ax.set_xlabel("肥料母液流量 q_f（L/min）")
         ax.set_ylabel("酸液流量 q_a（L/min）")
-        ax.set_xlim(q_f_values.min(), q_f_values.max())
         ax.scatter(
             [fixed_q_f],
             [fixed_q_a],
@@ -313,13 +313,14 @@ def _plot_heatmaps(
         )
     for ax in axes[:3]:
         ax.set_ylim(q_a_values.min(), q_a_values.max())
+    set_x_axis_origin(axes, right=float(q_f_values.max()), left=float(q_f_values.min()))
     axes[0].legend(loc="upper left", fontsize=8, frameon=True)
     axes[1].legend(loc="upper left", fontsize=8, frameon=True)
 
     fig.suptitle(
         "母液混合可控域分析\n"
-        f"目标 EC={target_ec:.2f}±{ec_tolerance:.2f} dS/m，"
-        f"目标 pH={target_ph:.2f}±{ph_tolerance:.2f}",
+        f"配液设定 EC={target_ec:.2f}±{ec_tolerance:.2f} dS/m，"
+        f"配液设定 pH={target_ph:.2f}±{ph_tolerance:.2f}",
         fontsize=13,
     )
     fig.savefig(image_path, dpi=180, bbox_inches="tight")
@@ -461,7 +462,7 @@ def run_experiment(args: argparse.Namespace) -> tuple[Path, Path]:
 
     logger.info("可控域实验完成: %s", result_dir)
     logger.info("图片保存至: %s", image_path)
-    logger.info("目标可控域网格点数: %d", int(target_match.sum()))
+    logger.info("配液设定可控域网格点数: %d", int(target_match.sum()))
     return result_dir, image_path
 
 
@@ -471,11 +472,11 @@ def parse_args() -> argparse.Namespace:
         "--stage",
         default="bulking",
         choices=list(STAGE_LABELS.keys()),
-        help="用于确定目标 EC 的马铃薯生育阶段，默认 bulking。",
+        help="用于确定配液设定 EC 的马铃薯生育阶段，默认 bulking。",
     )
     parser.add_argument("--points", type=int, default=161, help="每个流量轴的扫描点数。")
-    parser.add_argument("--ec-tolerance", type=float, default=0.05, help="目标 EC 容差 dS/m。")
-    parser.add_argument("--ph-tolerance", type=float, default=0.10, help="目标 pH 容差。")
+    parser.add_argument("--ec-tolerance", type=float, default=0.05, help="配液设定 EC 容差 dS/m。")
+    parser.add_argument("--ph-tolerance", type=float, default=0.10, help="配液设定 pH 容差。")
     return parser.parse_args()
 
 

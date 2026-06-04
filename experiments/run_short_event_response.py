@@ -32,6 +32,7 @@ if str(ROOT) not in sys.path:
 from config_loader import load_config
 from crop_model import GrowthStage
 from digital_twin_env import DigitalTwinEnv
+from plot_utils import set_time_axis_origin
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +256,7 @@ def _plot_event_response(series: dict[str, list[float]], path: Path, event_hours
     axes[0].set_ylabel("土壤含水率")
     axes[0].legend(loc="best")
 
-    # 第二幅图：根区 EC 与当前生育阶段目标 EC。
+    # 第二幅图：根区 EC 与当前生育阶段马铃薯适宜 EC 参考。
     axes[1].plot(t, ec_soil, color="#f28e2b", marker="s", markevery=marker_every,
                  markersize=3.0, linewidth=1.5, label="根区EC")
     axes[1].plot(t, ec_target, color="#4e79a7", linestyle="--", linewidth=1.1, label="目标EC")
@@ -282,6 +283,7 @@ def _plot_event_response(series: dict[str, list[float]], path: Path, event_hours
     axes[3].set_ylim(bottom=0.0)
     axes[3].legend(loc="best")
 
+    set_time_axis_origin(axes, t)
     fig.tight_layout()
     fig.savefig(path, dpi=200)
     plt.close(fig)

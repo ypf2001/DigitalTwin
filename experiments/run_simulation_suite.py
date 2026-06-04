@@ -35,6 +35,7 @@ from config_loader import load_config
 from crop_model import GrowthStage
 from digital_twin_env import DigitalTwinEnv
 from irrigation_schedule import get_irrigation_schedule, run_season_simulation
+from plot_utils import set_time_axis_origin
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +179,7 @@ def run_season_compare(out_dir: Path, image_dir: Path) -> dict[str, Any]:
 
     for strategy in ("T1", "T2"):
         # 每个策略单独创建环境，保证初始条件一致。
+        fixed_action = np.array(cfg.action().get("fixed_strategy", [6.1, 1.0]), dtype=np.float32)
         env = DigitalTwinEnv(
             growth_stage=schedule[0].growth_stage,
             area_ha=season_cfg.get("area_ha", 0.1),
@@ -196,17 +198,19 @@ def run_season_compare(out_dir: Path, image_dir: Path) -> dict[str, Any]:
             initial_theta=env.soil.theta_fc,
             initial_ec=irr_cfg.get("initial_ec", 0.1),
             season_days=season_cfg.get("ep_len_days", 90.0),
+            fixed_action=fixed_action,
             verbose=False,
         )
 
     for strategy, res in results.items():
         # 保存完整时序，后续可直接用 Excel、Origin、Python 重新画图。
         _write_csv(
-            out_dir / f"season_{strategy.lower()}_timeseries.csv",
+            out_dir / f"irrigation_regime_{strategy.lower()}_timeseries.csv",
             {
                 "time_day": res["time_day"],
                 "theta": res["theta"],
                 "ec_soil": res["ec_soil"],
+                "ec_drip": res["ec_drip"],
                 "target_ec": res["target_ec"],
                 "irrigation_mm_h": res["irrigation_mm_h"],
                 "etc_mm_h": res["etc_mm_h"],
@@ -219,7 +223,9 @@ def run_season_compare(out_dir: Path, image_dir: Path) -> dict[str, Any]:
     stats = {}
     for strategy, res in results.items():
         # 只把论文/报告中最常用的指标放进 summary.json。
-        ec_error = np.abs(res["ec_soil"] - res["target_ec"])
+        event_mask = np.asarray(res["event_marker"], dtype=float) > 0.5
+        root_zone_ec_error = np.abs(res["ec_soil"] - res["target_ec"])
+        outlet_ec_error = np.abs(res["ec_drip"][event_mask] - res["target_ec"][event_mask])
         stats[strategy] = {
             "steps": int(res["total_steps"]),
             "dt_min": float(season_dt_min),
@@ -227,7 +233,10 @@ def run_season_compare(out_dir: Path, image_dir: Path) -> dict[str, Any]:
             "theta_mean": _safe_mean(res["theta"]),
             "theta_final": _safe_last(res["theta"]),
             "ec_soil_mean": _safe_mean(res["ec_soil"]),
-            "ec_mae": _safe_mean(ec_error),
+            "ec_soil_final": _safe_last(res["ec_soil"]),
+            "root_zone_ec_mae": _safe_mean(root_zone_ec_error),
+            "root_zone_ec_final_error": float(root_zone_ec_error[-1]) if len(root_zone_ec_error) else 0.0,
+            "outlet_ec_mae_during_events": _safe_mean(outlet_ec_error),
             "planned_irrigation_mm": float(res["total_scheduled_irrigation_mm"]),
             "simulated_irrigation_mm": float(res["total_simulated_irrigation_mm"]),
             "total_etc_mm": float(res["total_etc_mm"]),
@@ -239,13 +248,20 @@ def run_season_compare(out_dir: Path, image_dir: Path) -> dict[str, Any]:
     comparison = {
         # 正值/负值只表示 T2 相对 T1 的变化方向，不直接代表优劣。
         "theta_mean_change_pct": (t2["theta_mean"] - t1["theta_mean"]) / (t1["theta_mean"] + 1e-9) * 100.0,
-        "ec_mae_change_pct": (t2["ec_mae"] - t1["ec_mae"]) / (t1["ec_mae"] + 1e-9) * 100.0,
+        "root_zone_ec_mae_change_pct": (
+            (t2["root_zone_ec_mae"] - t1["root_zone_ec_mae"])
+            / (t1["root_zone_ec_mae"] + 1e-9) * 100.0
+        ),
+        "outlet_ec_mae_change_pct": (
+            (t2["outlet_ec_mae_during_events"] - t1["outlet_ec_mae_during_events"])
+            / (t1["outlet_ec_mae_during_events"] + 1e-9) * 100.0
+        ),
         "planned_irrigation_equal": abs(t1["planned_irrigation_mm"] - t2["planned_irrigation_mm"]) < 1e-6,
     }
 
-    season_png = image_dir / "season_t1_t2.png"
-    _plot_season(results, season_png, planned_days, planned_cumulative)
-    return {"T1": t1, "T2": t2, "comparison": comparison, "image": str(season_png)}
+    irrigation_regime_png = image_dir / "irrigation_regime_t1_t2.png"
+    _plot_season(results, irrigation_regime_png, planned_days, planned_cumulative)
+    return {"T1": t1, "T2": t2, "comparison": comparison, "image": str(irrigation_regime_png)}
 
 
 def _plot_short_fixed(arrays: dict[str, np.ndarray], path: Path) -> None:
@@ -274,7 +290,8 @@ def _plot_short_fixed(arrays: dict[str, np.ndarray], path: Path) -> None:
     axes[0].set_ylabel("土壤含水率")
 
     axes[1].plot(t, arrays["ec_soil"], color="#333333", linewidth=1.4, label="根区EC")
-    axes[1].plot(t, arrays["target_ec"], color="#666666", linestyle="--", linewidth=1.0, label="目标EC")
+    axes[1].plot(t, arrays["ec_drip"], color="#4e79a7", linewidth=1.2, label="出口EC")
+    axes[1].plot(t, arrays["target_ec"], color="#666666", linestyle="--", linewidth=1.0, label="马铃薯适宜EC参考")
     axes[1].set_ylabel("EC（dS/m）")
     axes[1].legend()
 
@@ -284,6 +301,7 @@ def _plot_short_fixed(arrays: dict[str, np.ndarray], path: Path) -> None:
     axes[2].set_xlabel("时间（h）")
     axes[2].legend()
 
+    set_time_axis_origin(axes, t)
     fig.suptitle("短期固定策略仿真", fontsize=13)
     fig.tight_layout()
     fig.savefig(path, dpi=200)
@@ -314,7 +332,7 @@ def _plot_season(
         plt.rcParams["font.sans-serif"] = ["SimHei"]
     plt.rcParams["axes.unicode_minus"] = False
 
-    fig, axes = plt.subplots(3, 1, figsize=(8, 7), sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=(8, 8.2), sharex=False)
     styles = {
         "T1": {"color": "#4e79a7", "linestyle": "-", "marker": "o"},
         "T2": {"color": "#f28e2b", "linestyle": "-", "marker": "s"},
@@ -332,13 +350,10 @@ def _plot_season(
         axes[0].plot(t, res["theta"], color=style["color"], linestyle=style["linestyle"],
                      marker=style["marker"], markevery=marker_every, markersize=3.0,
                      linewidth=1.4, label=strategy)
-        axes[1].plot(t, res["ec_soil"], color=style["color"], linestyle=style["linestyle"],
-                     marker=style["marker"], markevery=marker_every, markersize=3.0,
-                     linewidth=1.4, label=strategy)
-        axes[2].step(planned_days, planned_cumulative[strategy], where="post",
+        axes[1].step(planned_days, planned_cumulative[strategy], where="post",
                      color=style["color"], linestyle=style["linestyle"], linewidth=1.5,
                      label=strategy)
-        axes[2].plot(planned_days, planned_cumulative[strategy], color=style["color"],
+        axes[1].plot(planned_days, planned_cumulative[strategy], color=style["color"],
                      marker=style["marker"], linestyle="None", markersize=3.4)
 
     theta_fc = float(soil_cfg.get("theta_fc", 0.334))
@@ -346,23 +361,33 @@ def _plot_season(
     axes[0].axhline(theta_fc, color="#59a14f", linestyle="--", linewidth=1.0, label="田间持水量")
     axes[0].axhline(theta_safe_upper, color="#76b7b2", linestyle=":", linewidth=1.0, label="偏湿参考线")
 
-    target_time = [0.0]
-    target_ec = [float(crop_stages.get(schedule[0].growth_stage.value, {}).get("target_ec", 0.8))]
-    for event in schedule:
-        target_time.extend([event.day, event.day])
-        target_ec.extend([target_ec[-1], float(crop_stages.get(event.growth_stage.value, {}).get("target_ec", target_ec[-1]))])
-    last_day = max(float(np.max(res["time_day"])) for res in results.values())
-    target_time.append(last_day)
-    target_ec.append(target_ec[-1])
-    axes[1].step(target_time, target_ec, where="post", color="#59a14f",
-                 linestyle=":", linewidth=1.4, label="目标EC")
-
     planned_total = float(results["T1"].get("total_scheduled_irrigation_mm", 180.0))
-    axes[2].axhline(planned_total, color="#59a14f", linestyle=":", linewidth=1.2, label="计划总灌溉量")
+    axes[1].axhline(planned_total, color="#59a14f", linestyle=":", linewidth=1.2, label="计划总灌溉量")
+
+    event_days = [float(event.day) for event in schedule]
+    t1_event_mm = [float(event.t1_mm) for event in schedule]
+    t2_event_mm = [float(event.t2_mm) for event in schedule]
+    bar_width = 1.8
+    axes[2].bar(
+        np.array(event_days) - bar_width / 2,
+        t1_event_mm,
+        width=bar_width,
+        color=styles["T1"]["color"],
+        alpha=0.82,
+        label="T1",
+    )
+    axes[2].bar(
+        np.array(event_days) + bar_width / 2,
+        t2_event_mm,
+        width=bar_width,
+        color=styles["T2"]["color"],
+        alpha=0.82,
+        label="T2",
+    )
 
     axes[0].set_ylabel("土壤含水率")
-    axes[1].set_ylabel("EC（dS/m）")
-    axes[2].set_ylabel("累计灌溉量（mm）")
+    axes[1].set_ylabel("累计灌溉量（mm）")
+    axes[2].set_ylabel("单次灌溉量（mm）")
     axes[2].set_xlabel("时间（d）")
     axes[0].set_ylim(bottom=0.32)
     axes[1].set_ylim(bottom=0.0)
@@ -376,7 +401,8 @@ def _plot_season(
         ax.tick_params(direction="out", length=4, width=1)
         ax.legend()
 
-    fig.suptitle("季节尺度灌溉策略对比", fontsize=13)
+    set_time_axis_origin(axes, *(res["time_day"] for res in results.values()), event_days)
+    fig.suptitle("季节尺度灌溉制度对比", fontsize=13)
     fig.tight_layout()
     fig.savefig(path, dpi=200)
     plt.close(fig)
@@ -402,15 +428,15 @@ def main() -> int:
         "run_id": run_id,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "short_fixed_mid": run_short_fixed(stage, out_dir, image_dir),
-        "season_t1_t2": run_season_compare(out_dir, image_dir),
+        "irrigation_regime_t1_t2": run_season_compare(out_dir, image_dir),
         "artifacts": {
             "summary": "summary.json",
             "short_csv": "short_fixed_mid_timeseries.csv",
             "image_dir": str(image_dir),
             "short_png": str(image_dir / "short_fixed_mid.png"),
-            "season_t1_csv": "season_t1_timeseries.csv",
-            "season_t2_csv": "season_t2_timeseries.csv",
-            "season_png": str(image_dir / "season_t1_t2.png"),
+            "irrigation_regime_t1_csv": "irrigation_regime_t1_timeseries.csv",
+            "irrigation_regime_t2_csv": "irrigation_regime_t2_timeseries.csv",
+            "irrigation_regime_png": str(image_dir / "irrigation_regime_t1_t2.png"),
         },
     }
 
@@ -421,8 +447,8 @@ def main() -> int:
     logger.info("Simulation suite complete: %s", out_dir)
     logger.info("Images saved to: %s", image_dir)
     logger.info(
-        "Season comparison:\n%s",
-        json.dumps(summary["season_t1_t2"]["comparison"], ensure_ascii=False, indent=2),
+        "Irrigation regime comparison:\n%s",
+        json.dumps(summary["irrigation_regime_t1_t2"]["comparison"], ensure_ascii=False, indent=2),
     )
     return 0
 
