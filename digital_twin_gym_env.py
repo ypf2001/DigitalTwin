@@ -1,12 +1,13 @@
 """
 Gymnasium 标准环境封装 — DigitalTwinGymEnv
 ==========================================
+
 将 DigitalTwinEnv 封装为标准 Gymnasium 环境。
-新增功能：
-  - 可配置仿真步长 dt_min（默认 60 min = 1 hour/step）
-  - 阶段名称映射：INI→EMERGENCE, DEV→VEGETATIVE, MID→BULKING, LATE→MATURATION
-  - 奖励缩放（乘缩放因子使数值更稳定）
-  - 观测归一化（各维度缩放到 ~[-1,1] 范围）
+
+B 方案：SAC 动作不再是 q_f/q_a，而是上层水肥目标值：
+    action = [EC_set, pH_set]
+
+底层 q_f/q_a 由 DigitalTwinEnv 内部的执行层模型计算，真实部署时由 PLC-PID 计算。
 """
 
 import gymnasium as gym
@@ -16,16 +17,16 @@ import numpy as np
 from digital_twin_env import DigitalTwinEnv, GrowthStage
 from config_loader import load_config
 
-# 生育阶段映射：简写 → GrowthStage（对齐论文四阶段 + 收获期）
-STAGE_MAP = {
-    "INI": GrowthStage.EMERGENCE,              # 苗期
-    "DEV": GrowthStage.TUBER_INIT,             # 块茎形成期
-    "MID": GrowthStage.BULKING,                # 块茎膨大期
-    "LATE": GrowthStage.STARCH_ACCUMULATION,   # 淀粉积累期（论文新增）
-}
-STAGE_NAMES = list(STAGE_MAP.keys())  # ["INI", "DEV", "MID", "LATE"]
 
-# 观测各维度的归一化上下界（从配置文件读取）
+STAGE_MAP = {
+    "INI": GrowthStage.EMERGENCE,
+    "DEV": GrowthStage.TUBER_INIT,
+    "MID": GrowthStage.BULKING,
+    "LATE": GrowthStage.STARCH_ACCUMULATION,
+}
+STAGE_NAMES = list(STAGE_MAP.keys())
+
+
 def _make_obs_bounds():
     cfg = load_config().obs()
     return (
@@ -33,31 +34,12 @@ def _make_obs_bounds():
         np.array(cfg["obs_high"], dtype=np.float32),
     )
 
+
 OBS_LOW, OBS_HIGH = _make_obs_bounds()
 
 
 class DigitalTwinGymEnv(gym.Env):
-    """施肥灌溉数字孪生 — Gymnasium 标准封装。
-
-    参数
-    ----------
-    growth_stage : str or GrowthStage
-        生育阶段，可选 "INI"/"DEV"/"MID"/"LATE" 或 GrowthStage 枚举
-    area_ha : float
-        灌溉面积 (公顷)
-    dt_min : float
-        仿真步长 (分钟)，默认 60 min（即 1 小时/步）
-    ep_len_days : float
-        episode 长度 (天)，默认 5 天
-    et0_mm_day : float
-        参考蒸散发量 (mm/day)
-    obs_noise_std : float
-        观测噪声标准差
-    reward_scale : float
-        奖励缩放因子，默认 1.0（不缩放）
-    seed : int, optional
-        随机种子
-    """
+    """施肥灌溉数字孪生 — Gymnasium 标准封装。"""
 
     metadata = {"render_modes": []}
 
@@ -98,24 +80,28 @@ class DigitalTwinGymEnv(gym.Env):
 
         act = load_config().action()
         self.action_space = spaces.Box(
-            low=np.array([act["q_f_min"], act["q_a_min"]], dtype=np.float32),
-            high=np.array([act["q_f_max"], act["q_a_max"]], dtype=np.float32),
+            low=np.array([
+                act.get("ec_set_min", 0.8),
+                act.get("ph_set_min", 5.8),
+            ], dtype=np.float32),
+            high=np.array([
+                act.get("ec_set_max", 2.5),
+                act.get("ph_set_max", 6.8),
+            ], dtype=np.float32),
             dtype=np.float32,
         )
 
     def _normalize_obs(self, obs: np.ndarray) -> np.ndarray:
         """将观测归一化到 [-1, 1]。"""
-        # 避免除零
         eps = 1e-6
         normalized = 2.0 * (obs - self._obs_low) / (self._obs_high - self._obs_low + eps) - 1.0
-        return np.clip(normalized, -1.0, 1.0, dtype=np.float32)
+        return np.clip(normalized, -1.0, 1.0).astype(np.float32)
 
     def reset(self, seed=None, options=None):
         if seed is not None:
             self._env._rng = np.random.RandomState(seed)
         obs = self._env.reset()
-        obs = self._normalize_obs(obs)
-        return obs, {}
+        return self._normalize_obs(obs), {}
 
     def step(self, action):
         obs, reward, done, info = self._env.step(action)
@@ -143,5 +129,5 @@ class DigitalTwinGymEnv(gym.Env):
 
     @property
     def unwrapped_env(self):
-        """返回底层 DigitalTwinEnv（用于评估时读取额外信息）。"""
+        """返回底层 DigitalTwinEnv。"""
         return self._env
