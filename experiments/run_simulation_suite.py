@@ -74,7 +74,7 @@ def run_short_fixed(stage: GrowthStage, out_dir: Path, image_dir: Path) -> dict[
 
     作用：
     - 用 config/simulation.yaml 中的默认环境参数创建 DigitalTwinEnv；
-    - 使用 action.fixed_strategy 作为固定施肥/注酸动作；
+    - 使用 action.fixed_strategy 作为固定 EC/pH 设定动作；
     - 导出 5 天左右的时序数据和图表。
 
     注意：
@@ -84,7 +84,7 @@ def run_short_fixed(stage: GrowthStage, out_dir: Path, image_dir: Path) -> dict[
     cfg = load_config()
     env_cfg = cfg.env()
     short_dt_min = cfg.get("experiment.short_dt_min", env_cfg.get("dt_min", 60.0))
-    action = np.array(cfg.action().get("fixed_strategy", [5.0, 1.0]), dtype=np.float32)
+    action = np.array(cfg.action().get("fixed_strategy", [1.5, 6.0]), dtype=np.float32)
 
     env = DigitalTwinEnv(
         growth_stage=stage,
@@ -104,6 +104,8 @@ def run_short_fixed(stage: GrowthStage, out_dir: Path, image_dir: Path) -> dict[
         "ec_soil": [],
         "target_ec": [],
         "ec_drip": [],
+        "ec_set": [],
+        "ph_set": [],
         "irrigation_mm_h": [],
         "etc_mm_h": [],
         "q_f": [],
@@ -118,10 +120,12 @@ def run_short_fixed(stage: GrowthStage, out_dir: Path, image_dir: Path) -> dict[
         series["ec_soil"].append(float(info["ec_soil"]))
         series["target_ec"].append(float(info["target_ec"]))
         series["ec_drip"].append(float(info["ec_drip"]))
+        series["ec_set"].append(float(info.get("ec_set", action[0])))
+        series["ph_set"].append(float(info.get("ph_set", action[1])))
         series["irrigation_mm_h"].append(float(info["irrigation_mm_h"]))
         series["etc_mm_h"].append(float(info["etc_mm_h"]))
-        series["q_f"].append(float(action[0]))
-        series["q_a"].append(float(action[1]))
+        series["q_f"].append(float(info.get("q_f", 0.0)))
+        series["q_a"].append(float(info.get("q_a", 0.0)))
 
     arrays = {k: np.asarray(v, dtype=float) for k, v in series.items()}
     dt_hours = short_dt_min / 60.0
@@ -139,8 +143,10 @@ def run_short_fixed(stage: GrowthStage, out_dir: Path, image_dir: Path) -> dict[
         "ec_mae": _safe_mean(ec_error),
         "total_irrigation_mm": float(np.sum(arrays["irrigation_mm_h"]) * dt_hours),
         "total_etc_mm": float(np.sum(arrays["etc_mm_h"]) * dt_hours),
-        "q_f": float(action[0]),
-        "q_a": float(action[1]),
+        "ec_set": float(action[0]),
+        "ph_set": float(action[1]),
+        "q_f_mean": _safe_mean(arrays["q_f"]),
+        "q_a_mean": _safe_mean(arrays["q_a"]),
     }
 
     _write_csv(out_dir / "short_fixed_mid_timeseries.csv", series)
@@ -179,7 +185,7 @@ def run_season_compare(out_dir: Path, image_dir: Path) -> dict[str, Any]:
 
     for strategy in ("T1", "T2"):
         # 每个策略单独创建环境，保证初始条件一致。
-        fixed_action = np.array(cfg.action().get("fixed_strategy", [6.1, 1.0]), dtype=np.float32)
+        fixed_action = np.array(cfg.action().get("fixed_strategy", [1.5, 6.0]), dtype=np.float32)
         env = DigitalTwinEnv(
             growth_stage=schedule[0].growth_stage,
             area_ha=season_cfg.get("area_ha", 0.1),
@@ -212,6 +218,8 @@ def run_season_compare(out_dir: Path, image_dir: Path) -> dict[str, Any]:
                 "ec_soil": res["ec_soil"],
                 "ec_drip": res["ec_drip"],
                 "target_ec": res["target_ec"],
+                "ec_set": res["ec_set"],
+                "ph_set": res["ph_set"],
                 "irrigation_mm_h": res["irrigation_mm_h"],
                 "etc_mm_h": res["etc_mm_h"],
                 "q_f": res["q_f"],
@@ -225,7 +233,7 @@ def run_season_compare(out_dir: Path, image_dir: Path) -> dict[str, Any]:
         # 只把论文/报告中最常用的指标放进 summary.json。
         event_mask = np.asarray(res["event_marker"], dtype=float) > 0.5
         root_zone_ec_error = np.abs(res["ec_soil"] - res["target_ec"])
-        outlet_ec_error = np.abs(res["ec_drip"][event_mask] - res["target_ec"][event_mask])
+        outlet_ec_error = np.abs(res["ec_drip"][event_mask] - res["ec_set"][event_mask])
         stats[strategy] = {
             "steps": int(res["total_steps"]),
             "dt_min": float(season_dt_min),

@@ -40,11 +40,11 @@
           <div class="card">
             <div class="card-title">固定灌溉策略</div>
             <table class="stats-table config-table">
-              <tr><th>q_f (肥料流量 L/min)</th><td>
+              <tr><th>EC_set (目标 EC dS/m)</th><td>
                 <input v-if="editing" v-model="edits['action.fixed_strategy.0']" class="form-input" />
                 <span v-else>{{ data.action_fixed?.[0] }}</span>
               </td></tr>
-              <tr><th>q_a (酸液流量 L/min)</th><td>
+              <tr><th>pH_set (目标 pH)</th><td>
                 <input v-if="editing" v-model="edits['action.fixed_strategy.1']" class="form-input" />
                 <span v-else>{{ data.action_fixed?.[1] }}</span>
               </td></tr>

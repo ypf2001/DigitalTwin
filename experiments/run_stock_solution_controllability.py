@@ -29,6 +29,7 @@ if str(ROOT) not in sys.path:
 from config_loader import load_config
 from mixing_tank import MixingTank
 from plot_utils import set_x_axis_origin
+from setpoint_controller import SetpointToFlowController
 
 logger = logging.getLogger(__name__)
 
@@ -344,7 +345,10 @@ def run_experiment(args: argparse.Namespace) -> tuple[Path, Path]:
     ec_risk_threshold = float(reward_cfg["ec_burn_threshold"])
     ph_burn_threshold = float(reward_cfg["ph_burn_threshold"])
     q_w = float(env_cfg["q_w"])
-    fixed_q_f, fixed_q_a = (float(v) for v in action_cfg["fixed_strategy"])
+    fixed_ec_set, fixed_ph_set = (float(v) for v in action_cfg["fixed_strategy"])
+    fixed_flow = SetpointToFlowController().to_flow(fixed_ec_set, fixed_ph_set, q_w=q_w)
+    fixed_q_f = fixed_flow.q_f
+    fixed_q_a = fixed_flow.q_a
     fixed_tank = MixingTank()
     fixed_ec, fixed_ph = fixed_tank.step(fixed_q_f, fixed_q_a, q_w=q_w)
 
@@ -441,6 +445,8 @@ def run_experiment(args: argparse.Namespace) -> tuple[Path, Path]:
         "ec_risk_threshold_dS_m": ec_risk_threshold,
         "ph_burn_threshold": ph_burn_threshold,
         "fixed_strategy": {
+            "ec_set_dS_m": fixed_ec_set,
+            "ph_set": fixed_ph_set,
             "q_f_L_min": fixed_q_f,
             "q_a_L_min": fixed_q_a,
             "ec_out_dS_m": fixed_ec,

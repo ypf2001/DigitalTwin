@@ -113,6 +113,10 @@ if __name__ == "__main__":
     # 阶段名简写
     stage_short = args.stage.upper()
     model_tag = stage_short.lower()
+    stage_eval_log_dir = os.path.join(rl_logs_dir, model_tag)
+    stage_best_model_dir = os.path.join(args.save_dir, f"best_{model_tag}")
+    os.makedirs(stage_eval_log_dir, exist_ok=True)
+    os.makedirs(stage_best_model_dir, exist_ok=True)
 
     logger.info("=" * 60)
     logger.info(f"SAC 训练 - 生育阶段: {args.stage} (简写: {stage_short})")
@@ -251,8 +255,8 @@ if __name__ == "__main__":
     eval_env_mon = Monitor(eval_env)
     eval_cb = EvalCallback(
         eval_env_mon,
-        best_model_save_path=args.save_dir,
-        log_path=rl_logs_dir,
+        best_model_save_path=stage_best_model_dir,
+        log_path=stage_eval_log_dir,
         eval_freq=eval_freq,
         deterministic=True,
         n_eval_episodes=n_eval_episodes,

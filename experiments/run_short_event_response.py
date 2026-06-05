@@ -111,8 +111,9 @@ def run_event_response(
         except Exception as exc:
             logger.warning("Weather lookup failed, using config defaults: %s", exc)
 
-    # 固定策略动作来自 YAML，含义是 [肥液流量 q_f, 酸液流量 q_a]。
-    action = np.array(cfg.action().get("fixed_strategy", [5.0, 1.0]), dtype=np.float32)
+    # 固定策略动作来自 YAML。B 方案中含义是 [EC_set, pH_set]，
+    # 环境内部再通过执行层模型转换为 q_f/q_a。
+    action = np.array(cfg.action().get("fixed_strategy", [1.5, 6.0]), dtype=np.float32)
     env = DigitalTwinEnv(
         growth_stage=stage,
         area_ha=env_cfg.get("area_ha", 0.1),
@@ -136,6 +137,8 @@ def run_event_response(
         "target_ec": [],
         "ec_drip": [],
         "ph_drip": [],
+        "ec_set": [],
+        "ph_set": [],
         "irrigation_mm_h": [],
         "etc_mm_h": [],
         "q_f": [],
@@ -149,13 +152,11 @@ def run_event_response(
         if in_event:
             # 灌溉事件内执行固定水肥动作。
             _obs, _reward, done, info = env.step(action)
-            q_f = float(action[0])
-            q_a = float(action[1])
         else:
             # 灌溉事件结束后不再给动作，只推进干燥/蒸散过程。
             _obs, _reward, done, info = env.dry_step(rain_mm_h=rain_mm_h)
-            q_f = 0.0
-            q_a = 0.0
+        q_f = float(info.get("q_f", 0.0))
+        q_a = float(info.get("q_a", 0.0))
 
         if done and in_event:
             stopped_by_safety = bool(info.get("burn", False))
@@ -170,6 +171,8 @@ def run_event_response(
         series["target_ec"].append(float(info["target_ec"]))
         series["ec_drip"].append(float(info["ec_drip"]))
         series["ph_drip"].append(float(info.get("ph_drip", 7.0)))
+        series["ec_set"].append(float(info.get("ec_set", action[0] if in_event else 0.0)))
+        series["ph_set"].append(float(info.get("ph_set", action[1] if in_event else 7.0)))
         series["irrigation_mm_h"].append(float(info["irrigation_mm_h"]))
         series["etc_mm_h"].append(float(info["etc_mm_h"]))
         series["q_f"].append(q_f)

@@ -144,18 +144,18 @@ def run_season_simulation(
     dt_min : float
         仿真步长 (分钟)
     fixed_action : np.ndarray, optional
-        固定策略动作 [q_f, q_a]（model=None 时使用）
+        固定策略动作 [EC_set, pH_set]（model=None 时使用）
     verbose : bool
         是否打印进度
 
     返回
     ----------
     results : dict
-        包含 time_day, theta, ec_soil, target_ec, q_f, q_a,
+        包含 time_day, theta, ec_soil, target_ec, ec_set, ph_set, q_f, q_a,
         total_irrigation_mm, etc_cumulative_mm 等
     """
     if fixed_action is None:
-        fixed_action = np.array([5.0, 1.0], dtype=np.float32)
+        fixed_action = np.array([1.5, 6.0], dtype=np.float32)
 
     schedule = get_irrigation_schedule()
     dt_hours = dt_min / 60.0
@@ -166,6 +166,8 @@ def run_season_simulation(
         "theta": [],
         "ec_soil": [],
         "target_ec": [],
+        "ec_set": [],
+        "ph_set": [],
         "q_f": [],
         "q_a": [],
         "irrigation_mm_h": [],
@@ -256,6 +258,8 @@ def run_season_simulation(
         "theta": np.array(history["theta"]),
         "ec_soil": np.array(history["ec_soil"]),
         "target_ec": np.array(history["target_ec"]),
+        "ec_set": np.array(history["ec_set"]),
+        "ph_set": np.array(history["ph_set"]),
         "q_f": np.array(history["q_f"]),
         "q_a": np.array(history["q_a"]),
         "irrigation_mm_h": np.array(history["irrigation_mm_h"]),
@@ -277,6 +281,8 @@ def _record_step(history, info, action, event_idx, is_event):
     history["theta"].append(info["theta"])
     history["ec_soil"].append(info["ec_soil"])
     history["target_ec"].append(info["target_ec"])
+    history["ec_set"].append(info.get("ec_set", 0.0))
+    history["ph_set"].append(info.get("ph_set", 7.0))
     history["q_f"].append(info["q_f"])
     history["q_a"].append(info["q_a"])
     history["irrigation_mm_h"].append(info["irrigation_mm_h"])

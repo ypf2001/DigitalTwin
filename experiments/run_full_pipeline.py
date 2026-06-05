@@ -20,6 +20,7 @@ import logging
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,46 @@ def _run_step(name: str, command: list[str]) -> None:
     result = subprocess.run(command, cwd=ROOT)
     if result.returncode != 0:
         raise RuntimeError(f"{name} 失败，退出码: {result.returncode}")
+
+
+def _train_stage(stage_name: str, timesteps: int | None) -> tuple[str, str]:
+    """训练单个阶段 SAC 模型，返回阶段名和最终模型路径。
+
+    这里用独立 Python 进程训练。多个阶段并行时，每个阶段互不共享模型参数，
+    因此适合并行；后续全生育期仿真再按阶段加载对应模型。
+    """
+    train_command = [
+        sys.executable,
+        str(ROOT / "train_sac.py"),
+        "--stage",
+        stage_name,
+        "--fresh",
+    ]
+    if timesteps is not None:
+        train_command.extend(["--timesteps", str(timesteps)])
+    _run_step(f"从头训练 SAC ({stage_name})", train_command)
+    model_path = ROOT / "rl_models" / f"sac_{stage_name.lower()}_final"
+    return stage_name, str(model_path) + ".zip"
+
+
+def _train_stages(stages_to_train: list[str], timesteps: int | None, parallel: bool, max_workers: int) -> dict[str, str]:
+    """训练一个或多个阶段；parallel=True 时并行启动多个训练进程。"""
+    if not parallel or len(stages_to_train) <= 1:
+        return dict(_train_stage(stage_name, timesteps) for stage_name in stages_to_train)
+
+    workers = max(1, min(max_workers, len(stages_to_train)))
+    logger.info("并行训练 SAC 阶段: %s (workers=%d)", ", ".join(stages_to_train), workers)
+    trained_models: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_train_stage, stage_name, timesteps): stage_name
+            for stage_name in stages_to_train
+        }
+        for future in as_completed(futures):
+            stage_name, model_path = future.result()
+            trained_models[stage_name] = model_path
+            logger.info("阶段 %s 训练完成: %s", stage_name, model_path)
+    return {stage: trained_models[stage] for stage in stages_to_train}
 
 
 def _copy_image(src: str | Path | None, dst_dir: Path, filename: str) -> str | None:
@@ -90,9 +131,8 @@ def _collect_pipeline_images(pipeline_summary: dict[str, Any], image_dir: Path) 
     control_summary = steps.get("control_strategy_fixed_vs_sac", {}).get("summary", {})
     control_artifacts = control_summary.get("artifacts", {})
     control_images = [
-        ("control_strategy_full", control_artifacts.get("png"), "03_control_strategy_full.png"),
-        ("root_zone_ec_tracking", control_artifacts.get("root_zone_ec_png"), "04_root_zone_ec_tracking.png"),
-        ("delivery_execution", control_artifacts.get("delivery_execution_png"), "05_delivery_execution.png"),
+        ("root_zone_ec_tracking", control_artifacts.get("root_zone_ec_png"), "03_root_zone_ec_tracking.png"),
+        ("delivery_execution", control_artifacts.get("delivery_execution_png"), "04_delivery_execution.png"),
     ]
     for key, src, filename in control_images:
         copied_path = _copy_image(src, image_dir, filename)
@@ -102,8 +142,7 @@ def _collect_pipeline_images(pipeline_summary: dict[str, Any], image_dir: Path) 
     suite_summary = steps.get("simulation_suite", {}).get("summary", {})
     suite_artifacts = suite_summary.get("artifacts", {})
     suite_images = [
-        ("short_fixed_mid", suite_artifacts.get("short_png"), "06_short_fixed_mid.png"),
-        ("irrigation_regime_t1_t2", suite_artifacts.get("irrigation_regime_png"), "07_irrigation_regime_t1_t2.png"),
+        ("irrigation_regime_t1_t2", suite_artifacts.get("irrigation_regime_png"), "05_irrigation_regime_t1_t2.png"),
     ]
     for key, src, filename in suite_images:
         copied_path = _copy_image(src, image_dir, filename)
@@ -113,9 +152,9 @@ def _collect_pipeline_images(pipeline_summary: dict[str, Any], image_dir: Path) 
     full_season_summary = steps.get("full_season_sac", {}).get("summary", {})
     full_season_artifacts = full_season_summary.get("artifacts", {})
     full_season_images = [
-        ("full_season_root_zone_ec", full_season_artifacts.get("root_zone_ec_png"), "08_full_season_root_zone_ec.png"),
-        ("full_season_delivery_execution", full_season_artifacts.get("delivery_execution_png"), "09_full_season_delivery_execution.png"),
-        ("full_season_water_response", full_season_artifacts.get("water_response_png"), "10_full_season_water_response.png"),
+        ("full_season_root_zone_ec", full_season_artifacts.get("root_zone_ec_png"), "06_full_season_root_zone_ec.png"),
+        ("full_season_delivery_execution", full_season_artifacts.get("delivery_execution_png"), "07_full_season_delivery_execution.png"),
+        ("full_season_water_response", full_season_artifacts.get("water_response_png"), "08_full_season_water_response.png"),
     ]
     for key, src, filename in full_season_images:
         copied_path = _copy_image(src, image_dir, filename)
@@ -213,20 +252,12 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             return pipeline_dir
 
         stages_to_train = [args.stage] if args.single_stage else ["INI", "DEV", "MID", "LATE"]
-        trained_models: dict[str, str] = {}
-        for stage_name in stages_to_train:
-            train_command = [
-                sys.executable,
-                str(ROOT / "train_sac.py"),
-                "--stage",
-                stage_name,
-                "--fresh",
-            ]
-            if args.timesteps is not None:
-                train_command.extend(["--timesteps", str(args.timesteps)])
-            _run_step(f"从头训练 SAC ({stage_name})", train_command)
-            model_path = ROOT / "rl_models" / f"sac_{stage_name.lower()}_final"
-            trained_models[stage_name] = str(model_path) + ".zip"
+        trained_models = _train_stages(
+            stages_to_train,
+            args.timesteps,
+            parallel=args.parallel_train,
+            max_workers=args.train_workers,
+        )
 
         primary_stage = args.stage if args.single_stage else "MID"
         model_path = ROOT / "rl_models" / f"sac_{primary_stage.lower()}_final"
@@ -234,6 +265,8 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             "stages": stages_to_train,
             "models": trained_models,
             "primary_stage_for_control_plot": primary_stage,
+            "parallel_train": args.parallel_train,
+            "train_workers": args.train_workers,
         }
 
         _run_step(
@@ -320,6 +353,17 @@ def parse_args() -> argparse.Namespace:
         "--preflight-only",
         action="store_true",
         help="只运行母液可控域和短期事件安全检查，不启动 SAC 训练。",
+    )
+    parser.add_argument(
+        "--parallel-train",
+        action="store_true",
+        help="并行训练多个生育阶段 SAC 模型；默认仍按顺序训练。",
+    )
+    parser.add_argument(
+        "--train-workers",
+        type=int,
+        default=4,
+        help="--parallel-train 时最多同时启动的训练进程数。",
     )
     return parser.parse_args()
 
