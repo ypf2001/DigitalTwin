@@ -24,6 +24,7 @@ import time
 import gymnasium as gym
 import numpy as np
 
+from config_loader import load_config
 from digital_twin_gym_env import DigitalTwinGymEnv, STAGE_MAP
 from plc_client import PLCClient
 
@@ -50,6 +51,13 @@ class PLCGymEnv(gym.Env):
 
         self.plc = plc_client
         self.plc_enabled = plc_enabled and (self.plc is not None)
+        plc_cfg = load_config().plc()
+        feedback_filter_cfg = plc_cfg.get("feedback_filter", {})
+        self.feedback_filter_enabled = bool(feedback_filter_cfg.get("enabled", True))
+        self.feedback_filter_alpha = float(feedback_filter_cfg.get("alpha", 0.8))
+        self.feedback_filter_alpha = float(np.clip(self.feedback_filter_alpha, 0.0, 0.99))
+        self._ec_actual_filtered = None
+        self._ph_actual_filtered = None
 
         self._sim_env = DigitalTwinGymEnv(
             growth_stage=growth_stage,
@@ -81,6 +89,7 @@ class PLCGymEnv(gym.Env):
         """重置仿真环境，并向 PLC 写入安全默认目标。"""
         obs, _ = self._sim_env.reset(seed=seed, options=options)
         base = self._sim_env.unwrapped_env
+        self._reset_feedback_filter(ec_actual=0.0, ph_actual=7.0)
 
         if self.plc_enabled:
             self._safe_write_setpoints(
@@ -122,6 +131,7 @@ class PLCGymEnv(gym.Env):
         # 1. 写入目标值和当前虚拟传感器值，供 PLC-PID 使用
         ec_actual = float(base.pipe.ec_filt)
         ph_actual = float(base.pipe.ph_filt)
+        ec_actual, ph_actual = self._filter_feedback(ec_actual, ph_actual)
         self._safe_write_setpoints(ec_set, ph_set, ec_actual, ph_actual, sac_enable=True)
 
         # 2. 等待 PLC/PLCSIM 扫描周期和 PID 执行
@@ -259,6 +269,27 @@ class PLCGymEnv(gym.Env):
         except Exception as e:
             logger.error(f"[HIL] PLC 目标值写入异常: {e}")
             return False
+
+    def _reset_feedback_filter(self, ec_actual: float, ph_actual: float):
+        """Initialize the EC/pH feedback filter at the start of an HIL episode."""
+        self._ec_actual_filtered = float(ec_actual)
+        self._ph_actual_filtered = float(ph_actual)
+
+    def _filter_feedback(self, ec_actual: float, ph_actual: float) -> tuple[float, float]:
+        """Low-pass filter feedback before writing EC_Actual/pH_Actual to PLC."""
+        if not self.feedback_filter_enabled:
+            self._ec_actual_filtered = float(ec_actual)
+            self._ph_actual_filtered = float(ph_actual)
+            return float(ec_actual), float(ph_actual)
+
+        if self._ec_actual_filtered is None or self._ph_actual_filtered is None:
+            self._reset_feedback_filter(ec_actual, ph_actual)
+            return float(ec_actual), float(ph_actual)
+
+        alpha = self.feedback_filter_alpha
+        self._ec_actual_filtered = alpha * self._ec_actual_filtered + (1.0 - alpha) * float(ec_actual)
+        self._ph_actual_filtered = alpha * self._ph_actual_filtered + (1.0 - alpha) * float(ph_actual)
+        return self._ec_actual_filtered, self._ph_actual_filtered
 
     def _build_info(self, sim_info: dict) -> dict:
         info = dict(sim_info)

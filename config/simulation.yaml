@@ -112,6 +112,9 @@ plc:
   db_number: 1
   cycle_s: 1.0
   max_retries: 5
+  feedback_filter:
+    enabled: true
+    alpha: 0.8             # EC_Actual/pH_Actual feedback smoothing. Larger = smoother but slower.
   addresses:
     # B 方案：上位机写 EC/pH 目标值和虚拟传感器反馈，PLC/PLCSIM 内部 PID 执行
     EC_Set_SP:
