@@ -1,0 +1,2401 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V21" />
+  <DocumentInfo>
+    <Created>2026-06-08T02:45:14.9987773Z</Created>
+    <ExportSetting>WithReadOnly</ExportSetting>
+    <InstalledProducts>
+      <Product>
+        <DisplayName>Totally Integrated Automation Portal</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <Product>
+        <DisplayName>SINAMICS Startdrive Advanced</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>SINAMICS Startdrive G110M, G120, G120C, G120D, G120P, G115D</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <OptionPackage>
+        <DisplayName>SINAMICS Startdrive G130, G150, S120, S150, G200, G220, S200, S210, S220, Innomotics MVD</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>STEP 7 Professional</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>STEP 7 Safety</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <OptionPackage>
+        <DisplayName>Tech WebApplication</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>WinCC Basic/Comfort/Advanced</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <Product>
+        <DisplayName>WinCC Professional</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <Product>
+        <DisplayName>WinCC Unified</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+    </InstalledProducts>
+  </DocumentInfo>
+  <SW.Blocks.FB ID="0">
+    <AttributeList>
+      <CodeModifiedDate ReadOnly="true">2026-06-07T02:45:42.0628027Z</CodeModifiedDate>
+      <CompileDate ReadOnly="true">2026-06-07T02:45:42.0628027Z</CompileDate>
+      <CreationDate ReadOnly="true">2026-06-07T02:45:40.5967252Z</CreationDate>
+      <DownloadDate ReadOnly="true">2026-06-07T02:47:24.9117008Z</DownloadDate>
+      <Interface>
+        <Sections xmlns="http://www.siemens.com/automation/Openness/SW/Interface/v5">
+          <Section Name="Input">
+            <Member Name="EC_Set_SP" Datatype="Real">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">上位机/SAC 目标 EC</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="pH_Set_SP" Datatype="Real">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">上位机/SAC 目标 pH</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="EC_Actual" Datatype="Real">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">出口 EC 反馈</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="pH_Actual" Datatype="Real">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">出口 pH 反馈</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="SAC_Enable" Datatype="Bool">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">远程控制使能</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Remote_Heartbeat" Datatype="Int">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">上位机心跳</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="CycleTime" Datatype="Real">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">调用周期，单位 s</MultiLanguageText>
+              </Comment>
+              <StartValue>0.1</StartValue>
+            </Member>
+            <Member Name="Kp_EC" Datatype="Real">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">EC PID 比例增益</MultiLanguageText>
+              </Comment>
+              <StartValue>4.0</StartValue>
+            </Member>
+            <Member Name="Ki_EC" Datatype="Real">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">EC PID 积分增益</MultiLanguageText>
+              </Comment>
+              <StartValue>0.25</StartValue>
+            </Member>
+            <Member Name="Kd_EC" Datatype="Real">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">EC PID 微分增益，联调初期先置 0</MultiLanguageText>
+              </Comment>
+              <StartValue>0.0</StartValue>
+            </Member>
+            <Member Name="Kp_pH" Datatype="Real">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">pH PID 比例增益，pH 偏高时加酸</MultiLanguageText>
+              </Comment>
+              <StartValue>2.0</StartValue>
+            </Member>
+            <Member Name="Ki_pH" Datatype="Real">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">pH PID 积分增益</MultiLanguageText>
+              </Comment>
+              <StartValue>0.15</StartValue>
+            </Member>
+            <Member Name="Kd_pH" Datatype="Real">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">pH PID 微分增益，联调初期先置 0</MultiLanguageText>
+              </Comment>
+              <StartValue>0.0</StartValue>
+            </Member>
+            <Member Name="EC_Filter_Tau" Datatype="Real">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">EC 反馈滤波时间常数，单位 s，越大越稳但响应越慢</MultiLanguageText>
+              </Comment>
+              <StartValue>2.0</StartValue>
+            </Member>
+            <Member Name="pH_Filter_Tau" Datatype="Real">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">pH 反馈滤波时间常数，单位 s</MultiLanguageText>
+              </Comment>
+              <StartValue>3.0</StartValue>
+            </Member>
+            <Member Name="q_f_min" Datatype="Real">
+              <StartValue>0.0</StartValue>
+            </Member>
+            <Member Name="q_f_max" Datatype="Real">
+              <StartValue>10.0</StartValue>
+            </Member>
+            <Member Name="q_a_min" Datatype="Real">
+              <StartValue>0.0</StartValue>
+            </Member>
+            <Member Name="q_a_max" Datatype="Real">
+              <StartValue>4.0</StartValue>
+            </Member>
+            <Member Name="Watchdog_Limit" Datatype="Int">
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">心跳超限后进入安全输出，需大于两次 Python 写入间隔内的 OB1 扫描次数</MultiLanguageText>
+              </Comment>
+              <StartValue>10000</StartValue>
+            </Member>
+          </Section>
+          <Section Name="Output">
+            <Member Name="Remote_Comms_OK" Datatype="Bool" />
+            <Member Name="Watchdog_Timer" Datatype="Int" />
+            <Member Name="q_f_cmd" Datatype="Real" />
+            <Member Name="q_a_cmd" Datatype="Real" />
+            <Member Name="Valve_F_Actual" Datatype="Real" />
+            <Member Name="Valve_A_Actual" Datatype="Real" />
+            <Member Name="AQ_Valve_F_Raw" Datatype="Int" />
+            <Member Name="AQ_Valve_A_Raw" Datatype="Int" />
+            <Member Name="System_Alarm_Light" Datatype="Bool" />
+          </Section>
+          <Section Name="InOut" />
+          <Section Name="Static">
+            <Member Name="Last_Heartbeat" Datatype="Int" />
+            <Member Name="Watchdog_Count" Datatype="Int" />
+            <Member Name="q_f_raw" Datatype="Real" />
+            <Member Name="q_a_raw" Datatype="Real" />
+            <Member Name="EC_Integral" Datatype="Real" />
+            <Member Name="pH_Integral" Datatype="Real" />
+            <Member Name="EC_Error_Last" Datatype="Real" />
+            <Member Name="pH_Error_Last" Datatype="Real" />
+            <Member Name="EC_Filtered" Datatype="Real" />
+            <Member Name="pH_Filtered" Datatype="Real" />
+            <Member Name="Filter_Init" Datatype="Bool" />
+            <Member Name="inst_RL_F" Datatype="&quot;RateLimiter&quot;">
+              <AttributeList>
+                <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="inst_RL_A" Datatype="&quot;RateLimiter&quot;">
+              <AttributeList>
+                <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="tWatchdog" Datatype="TON_TIME" Version="1.0" />
+          </Section>
+          <Section Name="Temp">
+            <Member Name="EC_Error" Datatype="Real" />
+            <Member Name="pH_Error" Datatype="Real" />
+            <Member Name="q_f_target" Datatype="Real" />
+            <Member Name="q_a_target" Datatype="Real" />
+            <Member Name="Heartbeat_Changed" Datatype="Bool" />
+            <Member Name="EC_Derivative" Datatype="Real" />
+            <Member Name="pH_Derivative" Datatype="Real" />
+            <Member Name="q_f_pid" Datatype="Real" />
+            <Member Name="q_a_pid" Datatype="Real" />
+            <Member Name="EC_Alpha" Datatype="Real" />
+            <Member Name="pH_Alpha" Datatype="Real" />
+          </Section>
+          <Section Name="Constant" />
+        </Sections>
+      </Interface>
+      <InterfaceModifiedDate ReadOnly="true">2026-06-07T02:45:40.6736502Z</InterfaceModifiedDate>
+      <IsConsistent ReadOnly="true">true</IsConsistent>
+      <LibraryConformanceStatus ReadOnly="true">该对象为库兼容。</LibraryConformanceStatus>
+      <LoadMemoryLength ReadOnly="true">26630</LoadMemoryLength>
+      <MemoryLayout>Optimized</MemoryLayout>
+      <MemoryReserve>100</MemoryReserve>
+      <ModifiedDate ReadOnly="true">2026-06-07T02:45:42.0628027Z</ModifiedDate>
+      <Name>FB_FertigationControl</Name>
+      <Namespace />
+      <Number>2</Number>
+      <PLCSimAdvancedSupport ReadOnly="true">true</PLCSimAdvancedSupport>
+      <ParameterModified ReadOnly="true">2026-06-07T02:45:40.6736502Z</ParameterModified>
+      <ProgrammingLanguage>SCL</ProgrammingLanguage>
+      <SetENOAutomatically>false</SetENOAutomatically>
+      <StructureModified ReadOnly="true">2026-06-07T02:45:40.6736502Z</StructureModified>
+      <WorkMemoryLength ReadOnly="true">1166</WorkMemoryLength>
+    </AttributeList>
+    <ObjectList>
+      <MultilingualText ID="1" CompositionName="Comment">
+        <ObjectList>
+          <MultilingualTextItem ID="2" CompositionName="Items">
+            <AttributeList>
+              <Culture>zh-CN</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+      <SW.Blocks.CompileUnit ID="3" CompositionName="CompileUnits">
+        <AttributeList>
+          <NetworkSource>
+            <StructuredText xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/StructuredText/v4">
+              <NewLine UId="21" />
+              <Blank Num="3" UId="22" />
+              <LineComment UId="23">
+                <Text UId="24"> ================================================================</Text>
+              </LineComment>
+              <NewLine UId="25" />
+              <Blank Num="3" UId="26" />
+              <LineComment UId="27">
+                <Text UId="28"> B 方案 PLC 执行层</Text>
+              </LineComment>
+              <NewLine UId="29" />
+              <Blank Num="3" UId="30" />
+              <LineComment UId="31">
+                <Text UId="32"> Python/SAC 只给 EC_set、pH_set；PLC 根据反馈计算 q_f、q_a。</Text>
+              </LineComment>
+              <NewLine UId="33" />
+              <Blank Num="3" UId="34" />
+              <LineComment UId="35">
+                <Text UId="36"> 当前版本先用简单比例控制，跑通后可替换为 PID / ESO-AFOPID。</Text>
+              </LineComment>
+              <NewLine UId="37" />
+              <Blank Num="3" UId="38" />
+              <LineComment UId="39">
+                <Text UId="40"> ================================================================</Text>
+              </LineComment>
+              <NewLine Num="2" UId="41" />
+              <Blank Num="3" UId="42" />
+              <LineComment UId="43">
+                <Text UId="44"> --- 心跳监控 ---</Text>
+              </LineComment>
+              <NewLine UId="45" />
+              <Blank Num="3" UId="46" />
+              <LineComment UId="47">
+                <Text UId="48"> 参考旧 PLC 写法：不用 OB1 扫描次数判断通信，而用 TON 定时器判断。</Text>
+              </LineComment>
+              <NewLine UId="49" />
+              <Blank Num="3" UId="50" />
+              <LineComment UId="51">
+                <Text UId="52"> Python 正常运行时 Remote_Heartbeat 会周期性变化，每次变化都复位 TON；</Text>
+              </LineComment>
+              <NewLine UId="53" />
+              <Blank Num="3" UId="54" />
+              <LineComment UId="55">
+                <Text UId="56"> 超过 3 秒没有新心跳，才认为上位机通信中断。</Text>
+              </LineComment>
+              <NewLine UId="57" />
+              <Blank Num="3" UId="58" />
+              <Access Scope="LocalVariable" UId="59">
+                <Symbol UId="60">
+                  <Component Name="Heartbeat_Changed" UId="61" />
+                </Symbol>
+              </Access>
+              <Blank UId="62" />
+              <Token Text=":=" UId="63" />
+              <Blank UId="64" />
+              <Token Text="(" UId="65" />
+              <Access Scope="LocalVariable" UId="66">
+                <Symbol UId="67">
+                  <Component Name="Remote_Heartbeat" UId="68" />
+                </Symbol>
+              </Access>
+              <Blank UId="69" />
+              <Token Text="&lt;&gt;" UId="70" />
+              <Blank UId="71" />
+              <Access Scope="LocalVariable" UId="72">
+                <Symbol UId="73">
+                  <Component Name="Last_Heartbeat" UId="74" />
+                </Symbol>
+              </Access>
+              <Token Text=")" UId="75" />
+              <Token Text=";" UId="76" />
+              <NewLine Num="2" UId="77" />
+              <Blank Num="3" UId="78" />
+              <Token Text="IF" UId="79" />
+              <Blank UId="80" />
+              <Access Scope="LocalVariable" UId="81">
+                <Symbol UId="82">
+                  <Component Name="Heartbeat_Changed" UId="83" />
+                </Symbol>
+              </Access>
+              <Blank UId="84" />
+              <Token Text="THEN" UId="85" />
+              <NewLine UId="86" />
+              <Blank Num="6" UId="87" />
+              <Access Scope="LocalVariable" UId="88">
+                <Symbol UId="89">
+                  <Component Name="Last_Heartbeat" UId="90" />
+                </Symbol>
+              </Access>
+              <Blank UId="91" />
+              <Token Text=":=" UId="92" />
+              <Blank UId="93" />
+              <Access Scope="LocalVariable" UId="94">
+                <Symbol UId="95">
+                  <Component Name="Remote_Heartbeat" UId="96" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="97" />
+              <NewLine UId="98" />
+              <Blank Num="6" UId="99" />
+              <Access Scope="LocalVariable" UId="100">
+                <Symbol UId="101">
+                  <Component Name="Watchdog_Count" UId="102" />
+                </Symbol>
+              </Access>
+              <Blank UId="103" />
+              <Token Text=":=" UId="104" />
+              <Blank UId="105" />
+              <Access Scope="LiteralConstant" UId="106">
+                <Constant UId="107">
+                  <ConstantType Informative="true" UId="108">DInt</ConstantType>
+                  <ConstantValue UId="109">0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Dec_signed</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="110" />
+              <NewLine UId="111" />
+              <Blank Num="3" UId="112" />
+              <Token Text="ELSE" UId="113" />
+              <NewLine UId="114" />
+              <Blank Num="6" UId="115" />
+              <Access Scope="LocalVariable" UId="116">
+                <Symbol UId="117">
+                  <Component Name="Watchdog_Count" UId="118" />
+                </Symbol>
+              </Access>
+              <Blank UId="119" />
+              <Token Text=":=" UId="120" />
+              <Blank UId="121" />
+              <Access Scope="LocalVariable" UId="122">
+                <Symbol UId="123">
+                  <Component Name="Watchdog_Count" UId="124" />
+                </Symbol>
+              </Access>
+              <Blank UId="125" />
+              <Token Text="+" UId="126" />
+              <Blank UId="127" />
+              <Access Scope="LiteralConstant" UId="128">
+                <Constant UId="129">
+                  <ConstantType Informative="true" UId="130">Int</ConstantType>
+                  <ConstantValue UId="131">1</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Dec_signed</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="132" />
+              <NewLine UId="133" />
+              <Blank Num="3" UId="134" />
+              <Token Text="END_IF" UId="135" />
+              <Token Text=";" UId="136" />
+              <NewLine Num="2" UId="137" />
+              <Blank Num="3" UId="138" />
+              <Access Scope="LocalVariable" UId="139">
+                <Symbol UId="140">
+                  <Component Name="tWatchdog" UId="141" />
+                </Symbol>
+              </Access>
+              <Access Scope="Call" UId="142">
+                <Instruction UId="143">
+                  <Token Text="(" UId="144" />
+                  <Parameter Name="IN" UId="145">
+                    <Blank UId="146" />
+                    <Token Text=":=" UId="147" />
+                    <Blank UId="148" />
+                    <Token Text="NOT" UId="149" />
+                    <Blank UId="150" />
+                    <Access Scope="LocalVariable" UId="151">
+                      <Symbol UId="152">
+                        <Component Name="Heartbeat_Changed" UId="153" />
+                      </Symbol>
+                    </Access>
+                  </Parameter>
+                  <Token Text="," UId="154" />
+                  <NewLine UId="155" />
+                  <Blank Num="14" UId="156" />
+                  <Parameter Name="PT" UId="157">
+                    <Blank UId="158" />
+                    <Token Text=":=" UId="159" />
+                    <Blank UId="160" />
+                    <Access Scope="TypedConstant" UId="161">
+                      <Constant UId="162">
+                        <ConstantValue UId="163">T#3s</ConstantValue>
+                        <StringAttribute Name="Format" Informative="true">Time</StringAttribute>
+                        <StringAttribute Name="FormatFlags" Informative="true">TypeQualifier</StringAttribute>
+                      </Constant>
+                    </Access>
+                  </Parameter>
+                  <Token Text=")" UId="164" />
+                </Instruction>
+              </Access>
+              <Token Text=";" UId="165" />
+              <NewLine Num="2" UId="166" />
+              <Blank Num="3" UId="167" />
+              <Access Scope="LocalVariable" UId="168">
+                <Symbol UId="169">
+                  <Component Name="Watchdog_Timer" UId="170" />
+                </Symbol>
+              </Access>
+              <Blank UId="171" />
+              <Token Text=":=" UId="172" />
+              <Blank UId="173" />
+              <Access Scope="LocalVariable" UId="174">
+                <Symbol UId="175">
+                  <Component Name="Watchdog_Count" UId="176" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="177" />
+              <NewLine UId="178" />
+              <Blank Num="3" UId="179" />
+              <Access Scope="LocalVariable" UId="180">
+                <Symbol UId="181">
+                  <Component Name="Remote_Comms_OK" UId="182" />
+                </Symbol>
+              </Access>
+              <Blank UId="183" />
+              <Token Text=":=" UId="184" />
+              <Blank UId="185" />
+              <Token Text="NOT" UId="186" />
+              <Blank UId="187" />
+              <Access Scope="LocalVariable" UId="188">
+                <Symbol UId="189">
+                  <Component Name="tWatchdog" UId="190" />
+                  <Token Text="." UId="191" />
+                  <Component Name="Q" UId="192" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="193" />
+              <NewLine Num="2" UId="194" />
+              <Blank Num="3" UId="195" />
+              <LineComment UId="196">
+                <Text UId="197"> --- 安全状态：未使能或通讯超时，所有执行量归零 ---</Text>
+              </LineComment>
+              <NewLine UId="198" />
+              <Blank Num="3" UId="199" />
+              <Token Text="IF" UId="200" />
+              <Blank UId="201" />
+              <Token Text="(" UId="202" />
+              <Token Text="NOT" UId="203" />
+              <Blank UId="204" />
+              <Access Scope="LocalVariable" UId="205">
+                <Symbol UId="206">
+                  <Component Name="SAC_Enable" UId="207" />
+                </Symbol>
+              </Access>
+              <Token Text=")" UId="208" />
+              <Blank UId="209" />
+              <Token Text="OR" UId="210" />
+              <Blank UId="211" />
+              <Token Text="(" UId="212" />
+              <Token Text="NOT" UId="213" />
+              <Blank UId="214" />
+              <Access Scope="LocalVariable" UId="215">
+                <Symbol UId="216">
+                  <Component Name="Remote_Comms_OK" UId="217" />
+                </Symbol>
+              </Access>
+              <Token Text=")" UId="218" />
+              <Blank UId="219" />
+              <Token Text="THEN" UId="220" />
+              <NewLine UId="221" />
+              <Blank Num="6" UId="222" />
+              <Access Scope="LocalVariable" UId="223">
+                <Symbol UId="224">
+                  <Component Name="q_f_raw" UId="225" />
+                </Symbol>
+              </Access>
+              <Blank UId="226" />
+              <Token Text=":=" UId="227" />
+              <Blank UId="228" />
+              <Access Scope="LiteralConstant" UId="229">
+                <Constant UId="230">
+                  <ConstantType Informative="true" UId="231">LReal</ConstantType>
+                  <ConstantValue UId="232">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="233" />
+              <NewLine UId="234" />
+              <Blank Num="6" UId="235" />
+              <Access Scope="LocalVariable" UId="236">
+                <Symbol UId="237">
+                  <Component Name="q_a_raw" UId="238" />
+                </Symbol>
+              </Access>
+              <Blank UId="239" />
+              <Token Text=":=" UId="240" />
+              <Blank UId="241" />
+              <Access Scope="LiteralConstant" UId="242">
+                <Constant UId="243">
+                  <ConstantType Informative="true" UId="244">LReal</ConstantType>
+                  <ConstantValue UId="245">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="246" />
+              <NewLine UId="247" />
+              <Blank Num="6" UId="248" />
+              <Access Scope="LocalVariable" UId="249">
+                <Symbol UId="250">
+                  <Component Name="q_f_cmd" UId="251" />
+                </Symbol>
+              </Access>
+              <Blank UId="252" />
+              <Token Text=":=" UId="253" />
+              <Blank UId="254" />
+              <Access Scope="LiteralConstant" UId="255">
+                <Constant UId="256">
+                  <ConstantType Informative="true" UId="257">LReal</ConstantType>
+                  <ConstantValue UId="258">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="259" />
+              <NewLine UId="260" />
+              <Blank Num="6" UId="261" />
+              <Access Scope="LocalVariable" UId="262">
+                <Symbol UId="263">
+                  <Component Name="q_a_cmd" UId="264" />
+                </Symbol>
+              </Access>
+              <Blank UId="265" />
+              <Token Text=":=" UId="266" />
+              <Blank UId="267" />
+              <Access Scope="LiteralConstant" UId="268">
+                <Constant UId="269">
+                  <ConstantType Informative="true" UId="270">LReal</ConstantType>
+                  <ConstantValue UId="271">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="272" />
+              <NewLine UId="273" />
+              <Blank Num="6" UId="274" />
+              <Access Scope="LocalVariable" UId="275">
+                <Symbol UId="276">
+                  <Component Name="Valve_F_Actual" UId="277" />
+                </Symbol>
+              </Access>
+              <Blank UId="278" />
+              <Token Text=":=" UId="279" />
+              <Blank UId="280" />
+              <Access Scope="LiteralConstant" UId="281">
+                <Constant UId="282">
+                  <ConstantType Informative="true" UId="283">LReal</ConstantType>
+                  <ConstantValue UId="284">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="285" />
+              <NewLine UId="286" />
+              <Blank Num="6" UId="287" />
+              <Access Scope="LocalVariable" UId="288">
+                <Symbol UId="289">
+                  <Component Name="Valve_A_Actual" UId="290" />
+                </Symbol>
+              </Access>
+              <Blank UId="291" />
+              <Token Text=":=" UId="292" />
+              <Blank UId="293" />
+              <Access Scope="LiteralConstant" UId="294">
+                <Constant UId="295">
+                  <ConstantType Informative="true" UId="296">LReal</ConstantType>
+                  <ConstantValue UId="297">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="298" />
+              <NewLine UId="299" />
+              <Blank Num="6" UId="300" />
+              <Access Scope="LocalVariable" UId="301">
+                <Symbol UId="302">
+                  <Component Name="AQ_Valve_F_Raw" UId="303" />
+                </Symbol>
+              </Access>
+              <Blank UId="304" />
+              <Token Text=":=" UId="305" />
+              <Blank UId="306" />
+              <Access Scope="LiteralConstant" UId="307">
+                <Constant UId="308">
+                  <ConstantType Informative="true" UId="309">DInt</ConstantType>
+                  <ConstantValue UId="310">0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Dec_signed</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="311" />
+              <NewLine UId="312" />
+              <Blank Num="6" UId="313" />
+              <Access Scope="LocalVariable" UId="314">
+                <Symbol UId="315">
+                  <Component Name="AQ_Valve_A_Raw" UId="316" />
+                </Symbol>
+              </Access>
+              <Blank UId="317" />
+              <Token Text=":=" UId="318" />
+              <Blank UId="319" />
+              <Access Scope="LiteralConstant" UId="320">
+                <Constant UId="321">
+                  <ConstantType Informative="true" UId="322">DInt</ConstantType>
+                  <ConstantValue UId="323">0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Dec_signed</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="324" />
+              <NewLine UId="325" />
+              <Blank Num="6" UId="326" />
+              <Access Scope="LocalVariable" UId="327">
+                <Symbol UId="328">
+                  <Component Name="System_Alarm_Light" UId="329" />
+                </Symbol>
+              </Access>
+              <Blank UId="330" />
+              <Token Text=":=" UId="331" />
+              <Blank UId="332" />
+              <Token Text="NOT" UId="333" />
+              <Blank UId="334" />
+              <Access Scope="LocalVariable" UId="335">
+                <Symbol UId="336">
+                  <Component Name="Remote_Comms_OK" UId="337" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="338" />
+              <NewLine UId="339" />
+              <Blank Num="6" UId="340" />
+              <Token Text="RETURN" UId="341" />
+              <Token Text=";" UId="342" />
+              <NewLine UId="343" />
+              <Blank Num="3" UId="344" />
+              <Token Text="END_IF" UId="345" />
+              <Token Text=";" UId="346" />
+              <NewLine Num="2" UId="347" />
+              <Blank Num="3" UId="348" />
+              <LineComment UId="349">
+                <Text UId="350"> --- 反馈滤波 ---</Text>
+              </LineComment>
+              <NewLine UId="351" />
+              <Blank Num="3" UId="352" />
+              <LineComment UId="353">
+                <Text UId="354"> Python/传感器写入的 EC_Actual、pH_Actual 可能有瞬时抖动；</Text>
+              </LineComment>
+              <NewLine UId="355" />
+              <Blank Num="3" UId="356" />
+              <LineComment UId="357">
+                <Text UId="358"> PID 使用滤波后的值，避免泵阀跟着噪声频繁调整。</Text>
+              </LineComment>
+              <NewLine UId="359" />
+              <Blank Num="3" UId="360" />
+              <Token Text="IF" UId="361" />
+              <Blank UId="362" />
+              <Token Text="NOT" UId="363" />
+              <Blank UId="364" />
+              <Access Scope="LocalVariable" UId="365">
+                <Symbol UId="366">
+                  <Component Name="Filter_Init" UId="367" />
+                </Symbol>
+              </Access>
+              <Blank UId="368" />
+              <Token Text="THEN" UId="369" />
+              <NewLine UId="370" />
+              <Blank Num="6" UId="371" />
+              <Access Scope="LocalVariable" UId="372">
+                <Symbol UId="373">
+                  <Component Name="EC_Filtered" UId="374" />
+                </Symbol>
+              </Access>
+              <Blank UId="375" />
+              <Token Text=":=" UId="376" />
+              <Blank UId="377" />
+              <Access Scope="LocalVariable" UId="378">
+                <Symbol UId="379">
+                  <Component Name="EC_Actual" UId="380" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="381" />
+              <NewLine UId="382" />
+              <Blank Num="6" UId="383" />
+              <Access Scope="LocalVariable" UId="384">
+                <Symbol UId="385">
+                  <Component Name="pH_Filtered" UId="386" />
+                </Symbol>
+              </Access>
+              <Blank UId="387" />
+              <Token Text=":=" UId="388" />
+              <Blank UId="389" />
+              <Access Scope="LocalVariable" UId="390">
+                <Symbol UId="391">
+                  <Component Name="pH_Actual" UId="392" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="393" />
+              <NewLine UId="394" />
+              <Blank Num="6" UId="395" />
+              <Access Scope="LocalVariable" UId="396">
+                <Symbol UId="397">
+                  <Component Name="Filter_Init" UId="398" />
+                </Symbol>
+              </Access>
+              <Blank UId="399" />
+              <Token Text=":=" UId="400" />
+              <Blank UId="401" />
+              <Access Scope="LiteralConstant" UId="402">
+                <Constant UId="403">
+                  <ConstantType Informative="true" UId="404">Bool</ConstantType>
+                  <ConstantValue UId="405">TRUE</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Bool</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="406" />
+              <NewLine UId="407" />
+              <Blank Num="3" UId="408" />
+              <Token Text="END_IF" UId="409" />
+              <Token Text=";" UId="410" />
+              <NewLine Num="2" UId="411" />
+              <Blank Num="3" UId="412" />
+              <Token Text="IF" UId="413" />
+              <Blank UId="414" />
+              <Token Text="(" UId="415" />
+              <Access Scope="LocalVariable" UId="416">
+                <Symbol UId="417">
+                  <Component Name="CycleTime" UId="418" />
+                </Symbol>
+              </Access>
+              <Blank UId="419" />
+              <Token Text="&gt;" UId="420" />
+              <Blank UId="421" />
+              <Access Scope="LiteralConstant" UId="422">
+                <Constant UId="423">
+                  <ConstantType Informative="true" UId="424">Real</ConstantType>
+                  <ConstantValue UId="425">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=")" UId="426" />
+              <Blank UId="427" />
+              <Token Text="AND" UId="428" />
+              <Blank UId="429" />
+              <Token Text="(" UId="430" />
+              <Access Scope="LocalVariable" UId="431">
+                <Symbol UId="432">
+                  <Component Name="EC_Filter_Tau" UId="433" />
+                </Symbol>
+              </Access>
+              <Blank UId="434" />
+              <Token Text="&gt;" UId="435" />
+              <Blank UId="436" />
+              <Access Scope="LiteralConstant" UId="437">
+                <Constant UId="438">
+                  <ConstantType Informative="true" UId="439">Real</ConstantType>
+                  <ConstantValue UId="440">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=")" UId="441" />
+              <Blank UId="442" />
+              <Token Text="THEN" UId="443" />
+              <NewLine UId="444" />
+              <Blank Num="6" UId="445" />
+              <Access Scope="LocalVariable" UId="446">
+                <Symbol UId="447">
+                  <Component Name="EC_Alpha" UId="448" />
+                </Symbol>
+              </Access>
+              <Blank UId="449" />
+              <Token Text=":=" UId="450" />
+              <Blank UId="451" />
+              <Access Scope="LocalVariable" UId="452">
+                <Symbol UId="453">
+                  <Component Name="CycleTime" UId="454" />
+                </Symbol>
+              </Access>
+              <Blank UId="455" />
+              <Token Text="/" UId="456" />
+              <Blank UId="457" />
+              <Token Text="(" UId="458" />
+              <Access Scope="LocalVariable" UId="459">
+                <Symbol UId="460">
+                  <Component Name="EC_Filter_Tau" UId="461" />
+                </Symbol>
+              </Access>
+              <Blank UId="462" />
+              <Token Text="+" UId="463" />
+              <Blank UId="464" />
+              <Access Scope="LocalVariable" UId="465">
+                <Symbol UId="466">
+                  <Component Name="CycleTime" UId="467" />
+                </Symbol>
+              </Access>
+              <Token Text=")" UId="468" />
+              <Token Text=";" UId="469" />
+              <NewLine UId="470" />
+              <Blank Num="3" UId="471" />
+              <Token Text="ELSE" UId="472" />
+              <NewLine UId="473" />
+              <Blank Num="6" UId="474" />
+              <Access Scope="LocalVariable" UId="475">
+                <Symbol UId="476">
+                  <Component Name="EC_Alpha" UId="477" />
+                </Symbol>
+              </Access>
+              <Blank UId="478" />
+              <Token Text=":=" UId="479" />
+              <Blank UId="480" />
+              <Access Scope="LiteralConstant" UId="481">
+                <Constant UId="482">
+                  <ConstantType Informative="true" UId="483">LReal</ConstantType>
+                  <ConstantValue UId="484">1.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="485" />
+              <NewLine UId="486" />
+              <Blank Num="3" UId="487" />
+              <Token Text="END_IF" UId="488" />
+              <Token Text=";" UId="489" />
+              <NewLine Num="2" UId="490" />
+              <Blank Num="3" UId="491" />
+              <Token Text="IF" UId="492" />
+              <Blank UId="493" />
+              <Token Text="(" UId="494" />
+              <Access Scope="LocalVariable" UId="495">
+                <Symbol UId="496">
+                  <Component Name="CycleTime" UId="497" />
+                </Symbol>
+              </Access>
+              <Blank UId="498" />
+              <Token Text="&gt;" UId="499" />
+              <Blank UId="500" />
+              <Access Scope="LiteralConstant" UId="501">
+                <Constant UId="502">
+                  <ConstantType Informative="true" UId="503">Real</ConstantType>
+                  <ConstantValue UId="504">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=")" UId="505" />
+              <Blank UId="506" />
+              <Token Text="AND" UId="507" />
+              <Blank UId="508" />
+              <Token Text="(" UId="509" />
+              <Access Scope="LocalVariable" UId="510">
+                <Symbol UId="511">
+                  <Component Name="pH_Filter_Tau" UId="512" />
+                </Symbol>
+              </Access>
+              <Blank UId="513" />
+              <Token Text="&gt;" UId="514" />
+              <Blank UId="515" />
+              <Access Scope="LiteralConstant" UId="516">
+                <Constant UId="517">
+                  <ConstantType Informative="true" UId="518">Real</ConstantType>
+                  <ConstantValue UId="519">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=")" UId="520" />
+              <Blank UId="521" />
+              <Token Text="THEN" UId="522" />
+              <NewLine UId="523" />
+              <Blank Num="6" UId="524" />
+              <Access Scope="LocalVariable" UId="525">
+                <Symbol UId="526">
+                  <Component Name="pH_Alpha" UId="527" />
+                </Symbol>
+              </Access>
+              <Blank UId="528" />
+              <Token Text=":=" UId="529" />
+              <Blank UId="530" />
+              <Access Scope="LocalVariable" UId="531">
+                <Symbol UId="532">
+                  <Component Name="CycleTime" UId="533" />
+                </Symbol>
+              </Access>
+              <Blank UId="534" />
+              <Token Text="/" UId="535" />
+              <Blank UId="536" />
+              <Token Text="(" UId="537" />
+              <Access Scope="LocalVariable" UId="538">
+                <Symbol UId="539">
+                  <Component Name="pH_Filter_Tau" UId="540" />
+                </Symbol>
+              </Access>
+              <Blank UId="541" />
+              <Token Text="+" UId="542" />
+              <Blank UId="543" />
+              <Access Scope="LocalVariable" UId="544">
+                <Symbol UId="545">
+                  <Component Name="CycleTime" UId="546" />
+                </Symbol>
+              </Access>
+              <Token Text=")" UId="547" />
+              <Token Text=";" UId="548" />
+              <NewLine UId="549" />
+              <Blank Num="3" UId="550" />
+              <Token Text="ELSE" UId="551" />
+              <NewLine UId="552" />
+              <Blank Num="6" UId="553" />
+              <Access Scope="LocalVariable" UId="554">
+                <Symbol UId="555">
+                  <Component Name="pH_Alpha" UId="556" />
+                </Symbol>
+              </Access>
+              <Blank UId="557" />
+              <Token Text=":=" UId="558" />
+              <Blank UId="559" />
+              <Access Scope="LiteralConstant" UId="560">
+                <Constant UId="561">
+                  <ConstantType Informative="true" UId="562">LReal</ConstantType>
+                  <ConstantValue UId="563">1.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="564" />
+              <NewLine UId="565" />
+              <Blank Num="3" UId="566" />
+              <Token Text="END_IF" UId="567" />
+              <Token Text=";" UId="568" />
+              <NewLine Num="2" UId="569" />
+              <Blank Num="3" UId="570" />
+              <LineComment UId="571">
+                <Text UId="572"> 基本量程保护：明显不合理的传感器值不进入滤波器。</Text>
+              </LineComment>
+              <NewLine UId="573" />
+              <Blank Num="3" UId="574" />
+              <Token Text="IF" UId="575" />
+              <Blank UId="576" />
+              <Token Text="(" UId="577" />
+              <Access Scope="LocalVariable" UId="578">
+                <Symbol UId="579">
+                  <Component Name="EC_Actual" UId="580" />
+                </Symbol>
+              </Access>
+              <Blank UId="581" />
+              <Token Text="&gt;=" UId="582" />
+              <Blank UId="583" />
+              <Access Scope="LiteralConstant" UId="584">
+                <Constant UId="585">
+                  <ConstantType Informative="true" UId="586">Real</ConstantType>
+                  <ConstantValue UId="587">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=")" UId="588" />
+              <Blank UId="589" />
+              <Token Text="AND" UId="590" />
+              <Blank UId="591" />
+              <Token Text="(" UId="592" />
+              <Access Scope="LocalVariable" UId="593">
+                <Symbol UId="594">
+                  <Component Name="EC_Actual" UId="595" />
+                </Symbol>
+              </Access>
+              <Blank UId="596" />
+              <Token Text="&lt;=" UId="597" />
+              <Blank UId="598" />
+              <Access Scope="LiteralConstant" UId="599">
+                <Constant UId="600">
+                  <ConstantType Informative="true" UId="601">Real</ConstantType>
+                  <ConstantValue UId="602">10.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=")" UId="603" />
+              <Blank UId="604" />
+              <Token Text="THEN" UId="605" />
+              <NewLine UId="606" />
+              <Blank Num="6" UId="607" />
+              <Access Scope="LocalVariable" UId="608">
+                <Symbol UId="609">
+                  <Component Name="EC_Filtered" UId="610" />
+                </Symbol>
+              </Access>
+              <Blank UId="611" />
+              <Token Text=":=" UId="612" />
+              <Blank UId="613" />
+              <Access Scope="LocalVariable" UId="614">
+                <Symbol UId="615">
+                  <Component Name="EC_Filtered" UId="616" />
+                </Symbol>
+              </Access>
+              <Blank UId="617" />
+              <Token Text="+" UId="618" />
+              <Blank UId="619" />
+              <Access Scope="LocalVariable" UId="620">
+                <Symbol UId="621">
+                  <Component Name="EC_Alpha" UId="622" />
+                </Symbol>
+              </Access>
+              <Blank UId="623" />
+              <Token Text="*" UId="624" />
+              <Blank UId="625" />
+              <Token Text="(" UId="626" />
+              <Access Scope="LocalVariable" UId="627">
+                <Symbol UId="628">
+                  <Component Name="EC_Actual" UId="629" />
+                </Symbol>
+              </Access>
+              <Blank UId="630" />
+              <Token Text="-" UId="631" />
+              <Blank UId="632" />
+              <Access Scope="LocalVariable" UId="633">
+                <Symbol UId="634">
+                  <Component Name="EC_Filtered" UId="635" />
+                </Symbol>
+              </Access>
+              <Token Text=")" UId="636" />
+              <Token Text=";" UId="637" />
+              <NewLine UId="638" />
+              <Blank Num="3" UId="639" />
+              <Token Text="END_IF" UId="640" />
+              <Token Text=";" UId="641" />
+              <NewLine Num="2" UId="642" />
+              <Blank Num="3" UId="643" />
+              <Token Text="IF" UId="644" />
+              <Blank UId="645" />
+              <Token Text="(" UId="646" />
+              <Access Scope="LocalVariable" UId="647">
+                <Symbol UId="648">
+                  <Component Name="pH_Actual" UId="649" />
+                </Symbol>
+              </Access>
+              <Blank UId="650" />
+              <Token Text="&gt;=" UId="651" />
+              <Blank UId="652" />
+              <Access Scope="LiteralConstant" UId="653">
+                <Constant UId="654">
+                  <ConstantType Informative="true" UId="655">Real</ConstantType>
+                  <ConstantValue UId="656">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=")" UId="657" />
+              <Blank UId="658" />
+              <Token Text="AND" UId="659" />
+              <Blank UId="660" />
+              <Token Text="(" UId="661" />
+              <Access Scope="LocalVariable" UId="662">
+                <Symbol UId="663">
+                  <Component Name="pH_Actual" UId="664" />
+                </Symbol>
+              </Access>
+              <Blank UId="665" />
+              <Token Text="&lt;=" UId="666" />
+              <Blank UId="667" />
+              <Access Scope="LiteralConstant" UId="668">
+                <Constant UId="669">
+                  <ConstantType Informative="true" UId="670">Real</ConstantType>
+                  <ConstantValue UId="671">14.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=")" UId="672" />
+              <Blank UId="673" />
+              <Token Text="THEN" UId="674" />
+              <NewLine UId="675" />
+              <Blank Num="6" UId="676" />
+              <Access Scope="LocalVariable" UId="677">
+                <Symbol UId="678">
+                  <Component Name="pH_Filtered" UId="679" />
+                </Symbol>
+              </Access>
+              <Blank UId="680" />
+              <Token Text=":=" UId="681" />
+              <Blank UId="682" />
+              <Access Scope="LocalVariable" UId="683">
+                <Symbol UId="684">
+                  <Component Name="pH_Filtered" UId="685" />
+                </Symbol>
+              </Access>
+              <Blank UId="686" />
+              <Token Text="+" UId="687" />
+              <Blank UId="688" />
+              <Access Scope="LocalVariable" UId="689">
+                <Symbol UId="690">
+                  <Component Name="pH_Alpha" UId="691" />
+                </Symbol>
+              </Access>
+              <Blank UId="692" />
+              <Token Text="*" UId="693" />
+              <Blank UId="694" />
+              <Token Text="(" UId="695" />
+              <Access Scope="LocalVariable" UId="696">
+                <Symbol UId="697">
+                  <Component Name="pH_Actual" UId="698" />
+                </Symbol>
+              </Access>
+              <Blank UId="699" />
+              <Token Text="-" UId="700" />
+              <Blank UId="701" />
+              <Access Scope="LocalVariable" UId="702">
+                <Symbol UId="703">
+                  <Component Name="pH_Filtered" UId="704" />
+                </Symbol>
+              </Access>
+              <Token Text=")" UId="705" />
+              <Token Text=";" UId="706" />
+              <NewLine UId="707" />
+              <Blank Num="3" UId="708" />
+              <Token Text="END_IF" UId="709" />
+              <Token Text=";" UId="710" />
+              <NewLine Num="2" UId="711" />
+              <Blank Num="3" UId="712" />
+              <LineComment UId="713">
+                <Text UId="714"> --- PID 闭环控制 ---</Text>
+              </LineComment>
+              <NewLine UId="715" />
+              <Blank Num="3" UId="716" />
+              <LineComment UId="717">
+                <Text UId="718"> EC 偏低：增加肥料母液流量；EC 偏高：减少肥料母液流量。</Text>
+              </LineComment>
+              <NewLine UId="719" />
+              <Blank Num="3" UId="720" />
+              <Access Scope="LocalVariable" UId="721">
+                <Symbol UId="722">
+                  <Component Name="EC_Error" UId="723" />
+                </Symbol>
+              </Access>
+              <Blank UId="724" />
+              <Token Text=":=" UId="725" />
+              <Blank UId="726" />
+              <Access Scope="LocalVariable" UId="727">
+                <Symbol UId="728">
+                  <Component Name="EC_Set_SP" UId="729" />
+                </Symbol>
+              </Access>
+              <Blank UId="730" />
+              <Token Text="-" UId="731" />
+              <Blank UId="732" />
+              <Access Scope="LocalVariable" UId="733">
+                <Symbol UId="734">
+                  <Component Name="EC_Filtered" UId="735" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="736" />
+              <NewLine Num="2" UId="737" />
+              <Blank Num="3" UId="738" />
+              <LineComment UId="739">
+                <Text UId="740"> pH 偏高：增加酸液流量；pH 偏低：减少酸液流量。</Text>
+              </LineComment>
+              <NewLine UId="741" />
+              <Blank Num="3" UId="742" />
+              <Access Scope="LocalVariable" UId="743">
+                <Symbol UId="744">
+                  <Component Name="pH_Error" UId="745" />
+                </Symbol>
+              </Access>
+              <Blank UId="746" />
+              <Token Text=":=" UId="747" />
+              <Blank UId="748" />
+              <Access Scope="LocalVariable" UId="749">
+                <Symbol UId="750">
+                  <Component Name="pH_Filtered" UId="751" />
+                </Symbol>
+              </Access>
+              <Blank UId="752" />
+              <Token Text="-" UId="753" />
+              <Blank UId="754" />
+              <Access Scope="LocalVariable" UId="755">
+                <Symbol UId="756">
+                  <Component Name="pH_Set_SP" UId="757" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="758" />
+              <NewLine Num="2" UId="759" />
+              <Blank Num="3" UId="760" />
+              <Token Text="IF" UId="761" />
+              <Blank UId="762" />
+              <Access Scope="LocalVariable" UId="763">
+                <Symbol UId="764">
+                  <Component Name="CycleTime" UId="765" />
+                </Symbol>
+              </Access>
+              <Blank UId="766" />
+              <Token Text="&gt;" UId="767" />
+              <Blank UId="768" />
+              <Access Scope="LiteralConstant" UId="769">
+                <Constant UId="770">
+                  <ConstantType Informative="true" UId="771">Real</ConstantType>
+                  <ConstantValue UId="772">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Blank UId="773" />
+              <Token Text="THEN" UId="774" />
+              <NewLine UId="775" />
+              <Blank Num="6" UId="776" />
+              <Access Scope="LocalVariable" UId="777">
+                <Symbol UId="778">
+                  <Component Name="EC_Integral" UId="779" />
+                </Symbol>
+              </Access>
+              <Blank UId="780" />
+              <Token Text=":=" UId="781" />
+              <Blank UId="782" />
+              <Access Scope="LocalVariable" UId="783">
+                <Symbol UId="784">
+                  <Component Name="EC_Integral" UId="785" />
+                </Symbol>
+              </Access>
+              <Blank UId="786" />
+              <Token Text="+" UId="787" />
+              <Blank UId="788" />
+              <Access Scope="LocalVariable" UId="789">
+                <Symbol UId="790">
+                  <Component Name="EC_Error" UId="791" />
+                </Symbol>
+              </Access>
+              <Blank UId="792" />
+              <Token Text="*" UId="793" />
+              <Blank UId="794" />
+              <Access Scope="LocalVariable" UId="795">
+                <Symbol UId="796">
+                  <Component Name="CycleTime" UId="797" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="798" />
+              <NewLine UId="799" />
+              <Blank Num="6" UId="800" />
+              <Access Scope="LocalVariable" UId="801">
+                <Symbol UId="802">
+                  <Component Name="pH_Integral" UId="803" />
+                </Symbol>
+              </Access>
+              <Blank UId="804" />
+              <Token Text=":=" UId="805" />
+              <Blank UId="806" />
+              <Access Scope="LocalVariable" UId="807">
+                <Symbol UId="808">
+                  <Component Name="pH_Integral" UId="809" />
+                </Symbol>
+              </Access>
+              <Blank UId="810" />
+              <Token Text="+" UId="811" />
+              <Blank UId="812" />
+              <Access Scope="LocalVariable" UId="813">
+                <Symbol UId="814">
+                  <Component Name="pH_Error" UId="815" />
+                </Symbol>
+              </Access>
+              <Blank UId="816" />
+              <Token Text="*" UId="817" />
+              <Blank UId="818" />
+              <Access Scope="LocalVariable" UId="819">
+                <Symbol UId="820">
+                  <Component Name="CycleTime" UId="821" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="822" />
+              <NewLine Num="2" UId="823" />
+              <Blank Num="6" UId="824" />
+              <Access Scope="LocalVariable" UId="825">
+                <Symbol UId="826">
+                  <Component Name="EC_Derivative" UId="827" />
+                </Symbol>
+              </Access>
+              <Blank UId="828" />
+              <Token Text=":=" UId="829" />
+              <Blank UId="830" />
+              <Token Text="(" UId="831" />
+              <Access Scope="LocalVariable" UId="832">
+                <Symbol UId="833">
+                  <Component Name="EC_Error" UId="834" />
+                </Symbol>
+              </Access>
+              <Blank UId="835" />
+              <Token Text="-" UId="836" />
+              <Blank UId="837" />
+              <Access Scope="LocalVariable" UId="838">
+                <Symbol UId="839">
+                  <Component Name="EC_Error_Last" UId="840" />
+                </Symbol>
+              </Access>
+              <Token Text=")" UId="841" />
+              <Blank UId="842" />
+              <Token Text="/" UId="843" />
+              <Blank UId="844" />
+              <Access Scope="LocalVariable" UId="845">
+                <Symbol UId="846">
+                  <Component Name="CycleTime" UId="847" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="848" />
+              <NewLine UId="849" />
+              <Blank Num="6" UId="850" />
+              <Access Scope="LocalVariable" UId="851">
+                <Symbol UId="852">
+                  <Component Name="pH_Derivative" UId="853" />
+                </Symbol>
+              </Access>
+              <Blank UId="854" />
+              <Token Text=":=" UId="855" />
+              <Blank UId="856" />
+              <Token Text="(" UId="857" />
+              <Access Scope="LocalVariable" UId="858">
+                <Symbol UId="859">
+                  <Component Name="pH_Error" UId="860" />
+                </Symbol>
+              </Access>
+              <Blank UId="861" />
+              <Token Text="-" UId="862" />
+              <Blank UId="863" />
+              <Access Scope="LocalVariable" UId="864">
+                <Symbol UId="865">
+                  <Component Name="pH_Error_Last" UId="866" />
+                </Symbol>
+              </Access>
+              <Token Text=")" UId="867" />
+              <Blank UId="868" />
+              <Token Text="/" UId="869" />
+              <Blank UId="870" />
+              <Access Scope="LocalVariable" UId="871">
+                <Symbol UId="872">
+                  <Component Name="CycleTime" UId="873" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="874" />
+              <NewLine UId="875" />
+              <Blank Num="3" UId="876" />
+              <Token Text="ELSE" UId="877" />
+              <NewLine UId="878" />
+              <Blank Num="6" UId="879" />
+              <Access Scope="LocalVariable" UId="880">
+                <Symbol UId="881">
+                  <Component Name="EC_Derivative" UId="882" />
+                </Symbol>
+              </Access>
+              <Blank UId="883" />
+              <Token Text=":=" UId="884" />
+              <Blank UId="885" />
+              <Access Scope="LiteralConstant" UId="886">
+                <Constant UId="887">
+                  <ConstantType Informative="true" UId="888">LReal</ConstantType>
+                  <ConstantValue UId="889">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="890" />
+              <NewLine UId="891" />
+              <Blank Num="6" UId="892" />
+              <Access Scope="LocalVariable" UId="893">
+                <Symbol UId="894">
+                  <Component Name="pH_Derivative" UId="895" />
+                </Symbol>
+              </Access>
+              <Blank UId="896" />
+              <Token Text=":=" UId="897" />
+              <Blank UId="898" />
+              <Access Scope="LiteralConstant" UId="899">
+                <Constant UId="900">
+                  <ConstantType Informative="true" UId="901">LReal</ConstantType>
+                  <ConstantValue UId="902">0.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="903" />
+              <NewLine UId="904" />
+              <Blank Num="3" UId="905" />
+              <Token Text="END_IF" UId="906" />
+              <Token Text=";" UId="907" />
+              <NewLine Num="2" UId="908" />
+              <Blank Num="3" UId="909" />
+              <LineComment UId="910">
+                <Text UId="911"> 积分限幅，防止长时间饱和后积分过大。</Text>
+              </LineComment>
+              <NewLine UId="912" />
+              <Blank Num="3" UId="913" />
+              <Token Text="IF" UId="914" />
+              <Blank UId="915" />
+              <Access Scope="LocalVariable" UId="916">
+                <Symbol UId="917">
+                  <Component Name="EC_Integral" UId="918" />
+                </Symbol>
+              </Access>
+              <Blank UId="919" />
+              <Token Text="&gt;" UId="920" />
+              <Blank UId="921" />
+              <Access Scope="LiteralConstant" UId="922">
+                <Constant UId="923">
+                  <ConstantType Informative="true" UId="924">Real</ConstantType>
+                  <ConstantValue UId="925">5.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Blank UId="926" />
+              <Token Text="THEN" UId="927" />
+              <NewLine UId="928" />
+              <Blank Num="6" UId="929" />
+              <Access Scope="LocalVariable" UId="930">
+                <Symbol UId="931">
+                  <Component Name="EC_Integral" UId="932" />
+                </Symbol>
+              </Access>
+              <Blank UId="933" />
+              <Token Text=":=" UId="934" />
+              <Blank UId="935" />
+              <Access Scope="LiteralConstant" UId="936">
+                <Constant UId="937">
+                  <ConstantType Informative="true" UId="938">LReal</ConstantType>
+                  <ConstantValue UId="939">5.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="940" />
+              <NewLine UId="941" />
+              <Blank Num="3" UId="942" />
+              <Token Text="ELSIF" UId="943" />
+              <Blank UId="944" />
+              <Access Scope="LocalVariable" UId="945">
+                <Symbol UId="946">
+                  <Component Name="EC_Integral" UId="947" />
+                </Symbol>
+              </Access>
+              <Blank UId="948" />
+              <Token Text="&lt;" UId="949" />
+              <Blank UId="950" />
+              <Access Scope="LiteralConstant" UId="951">
+                <Constant UId="952">
+                  <ConstantType Informative="true" UId="953">Real</ConstantType>
+                  <ConstantValue UId="954">-5.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Blank UId="955" />
+              <Token Text="THEN" UId="956" />
+              <NewLine UId="957" />
+              <Blank Num="6" UId="958" />
+              <Access Scope="LocalVariable" UId="959">
+                <Symbol UId="960">
+                  <Component Name="EC_Integral" UId="961" />
+                </Symbol>
+              </Access>
+              <Blank UId="962" />
+              <Token Text=":=" UId="963" />
+              <Blank UId="964" />
+              <Access Scope="LiteralConstant" UId="965">
+                <Constant UId="966">
+                  <ConstantType Informative="true" UId="967">LReal</ConstantType>
+                  <ConstantValue UId="968">-5.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="969" />
+              <NewLine UId="970" />
+              <Blank Num="3" UId="971" />
+              <Token Text="END_IF" UId="972" />
+              <Token Text=";" UId="973" />
+              <NewLine Num="2" UId="974" />
+              <Blank Num="3" UId="975" />
+              <Token Text="IF" UId="976" />
+              <Blank UId="977" />
+              <Access Scope="LocalVariable" UId="978">
+                <Symbol UId="979">
+                  <Component Name="pH_Integral" UId="980" />
+                </Symbol>
+              </Access>
+              <Blank UId="981" />
+              <Token Text="&gt;" UId="982" />
+              <Blank UId="983" />
+              <Access Scope="LiteralConstant" UId="984">
+                <Constant UId="985">
+                  <ConstantType Informative="true" UId="986">Real</ConstantType>
+                  <ConstantValue UId="987">5.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Blank UId="988" />
+              <Token Text="THEN" UId="989" />
+              <NewLine UId="990" />
+              <Blank Num="6" UId="991" />
+              <Access Scope="LocalVariable" UId="992">
+                <Symbol UId="993">
+                  <Component Name="pH_Integral" UId="994" />
+                </Symbol>
+              </Access>
+              <Blank UId="995" />
+              <Token Text=":=" UId="996" />
+              <Blank UId="997" />
+              <Access Scope="LiteralConstant" UId="998">
+                <Constant UId="999">
+                  <ConstantType Informative="true" UId="1000">LReal</ConstantType>
+                  <ConstantValue UId="1001">5.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="1002" />
+              <NewLine UId="1003" />
+              <Blank Num="3" UId="1004" />
+              <Token Text="ELSIF" UId="1005" />
+              <Blank UId="1006" />
+              <Access Scope="LocalVariable" UId="1007">
+                <Symbol UId="1008">
+                  <Component Name="pH_Integral" UId="1009" />
+                </Symbol>
+              </Access>
+              <Blank UId="1010" />
+              <Token Text="&lt;" UId="1011" />
+              <Blank UId="1012" />
+              <Access Scope="LiteralConstant" UId="1013">
+                <Constant UId="1014">
+                  <ConstantType Informative="true" UId="1015">Real</ConstantType>
+                  <ConstantValue UId="1016">-5.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Blank UId="1017" />
+              <Token Text="THEN" UId="1018" />
+              <NewLine UId="1019" />
+              <Blank Num="6" UId="1020" />
+              <Access Scope="LocalVariable" UId="1021">
+                <Symbol UId="1022">
+                  <Component Name="pH_Integral" UId="1023" />
+                </Symbol>
+              </Access>
+              <Blank UId="1024" />
+              <Token Text=":=" UId="1025" />
+              <Blank UId="1026" />
+              <Access Scope="LiteralConstant" UId="1027">
+                <Constant UId="1028">
+                  <ConstantType Informative="true" UId="1029">LReal</ConstantType>
+                  <ConstantValue UId="1030">-5.0</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="1031" />
+              <NewLine UId="1032" />
+              <Blank Num="3" UId="1033" />
+              <Token Text="END_IF" UId="1034" />
+              <Token Text=";" UId="1035" />
+              <NewLine Num="2" UId="1036" />
+              <Blank Num="3" UId="1037" />
+              <LineComment UId="1038">
+                <Text UId="1039"> PID 增量叠加到上一周期执行量。</Text>
+              </LineComment>
+              <NewLine UId="1040" />
+              <Blank Num="3" UId="1041" />
+              <Access Scope="LocalVariable" UId="1042">
+                <Symbol UId="1043">
+                  <Component Name="q_f_pid" UId="1044" />
+                </Symbol>
+              </Access>
+              <Blank UId="1045" />
+              <Token Text=":=" UId="1046" />
+              <Blank UId="1047" />
+              <Access Scope="LocalVariable" UId="1048">
+                <Symbol UId="1049">
+                  <Component Name="Kp_EC" UId="1050" />
+                </Symbol>
+              </Access>
+              <Blank UId="1051" />
+              <Token Text="*" UId="1052" />
+              <Blank UId="1053" />
+              <Access Scope="LocalVariable" UId="1054">
+                <Symbol UId="1055">
+                  <Component Name="EC_Error" UId="1056" />
+                </Symbol>
+              </Access>
+              <Blank UId="1057" />
+              <Token Text="+" UId="1058" />
+              <Blank UId="1059" />
+              <Access Scope="LocalVariable" UId="1060">
+                <Symbol UId="1061">
+                  <Component Name="Ki_EC" UId="1062" />
+                </Symbol>
+              </Access>
+              <Blank UId="1063" />
+              <Token Text="*" UId="1064" />
+              <Blank UId="1065" />
+              <Access Scope="LocalVariable" UId="1066">
+                <Symbol UId="1067">
+                  <Component Name="EC_Integral" UId="1068" />
+                </Symbol>
+              </Access>
+              <Blank UId="1069" />
+              <Token Text="+" UId="1070" />
+              <Blank UId="1071" />
+              <Access Scope="LocalVariable" UId="1072">
+                <Symbol UId="1073">
+                  <Component Name="Kd_EC" UId="1074" />
+                </Symbol>
+              </Access>
+              <Blank UId="1075" />
+              <Token Text="*" UId="1076" />
+              <Blank UId="1077" />
+              <Access Scope="LocalVariable" UId="1078">
+                <Symbol UId="1079">
+                  <Component Name="EC_Derivative" UId="1080" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1081" />
+              <NewLine UId="1082" />
+              <Blank Num="3" UId="1083" />
+              <Access Scope="LocalVariable" UId="1084">
+                <Symbol UId="1085">
+                  <Component Name="q_a_pid" UId="1086" />
+                </Symbol>
+              </Access>
+              <Blank UId="1087" />
+              <Token Text=":=" UId="1088" />
+              <Blank UId="1089" />
+              <Access Scope="LocalVariable" UId="1090">
+                <Symbol UId="1091">
+                  <Component Name="Kp_pH" UId="1092" />
+                </Symbol>
+              </Access>
+              <Blank UId="1093" />
+              <Token Text="*" UId="1094" />
+              <Blank UId="1095" />
+              <Access Scope="LocalVariable" UId="1096">
+                <Symbol UId="1097">
+                  <Component Name="pH_Error" UId="1098" />
+                </Symbol>
+              </Access>
+              <Blank UId="1099" />
+              <Token Text="+" UId="1100" />
+              <Blank UId="1101" />
+              <Access Scope="LocalVariable" UId="1102">
+                <Symbol UId="1103">
+                  <Component Name="Ki_pH" UId="1104" />
+                </Symbol>
+              </Access>
+              <Blank UId="1105" />
+              <Token Text="*" UId="1106" />
+              <Blank UId="1107" />
+              <Access Scope="LocalVariable" UId="1108">
+                <Symbol UId="1109">
+                  <Component Name="pH_Integral" UId="1110" />
+                </Symbol>
+              </Access>
+              <Blank UId="1111" />
+              <Token Text="+" UId="1112" />
+              <Blank UId="1113" />
+              <Access Scope="LocalVariable" UId="1114">
+                <Symbol UId="1115">
+                  <Component Name="Kd_pH" UId="1116" />
+                </Symbol>
+              </Access>
+              <Blank UId="1117" />
+              <Token Text="*" UId="1118" />
+              <Blank UId="1119" />
+              <Access Scope="LocalVariable" UId="1120">
+                <Symbol UId="1121">
+                  <Component Name="pH_Derivative" UId="1122" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1123" />
+              <NewLine Num="2" UId="1124" />
+              <Blank Num="3" UId="1125" />
+              <Access Scope="LocalVariable" UId="1126">
+                <Symbol UId="1127">
+                  <Component Name="q_f_target" UId="1128" />
+                </Symbol>
+              </Access>
+              <Blank UId="1129" />
+              <Token Text=":=" UId="1130" />
+              <Blank UId="1131" />
+              <Access Scope="LocalVariable" UId="1132">
+                <Symbol UId="1133">
+                  <Component Name="q_f_raw" UId="1134" />
+                </Symbol>
+              </Access>
+              <Blank UId="1135" />
+              <Token Text="+" UId="1136" />
+              <Blank UId="1137" />
+              <Access Scope="LocalVariable" UId="1138">
+                <Symbol UId="1139">
+                  <Component Name="q_f_pid" UId="1140" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1141" />
+              <NewLine UId="1142" />
+              <Blank Num="3" UId="1143" />
+              <Access Scope="LocalVariable" UId="1144">
+                <Symbol UId="1145">
+                  <Component Name="q_a_target" UId="1146" />
+                </Symbol>
+              </Access>
+              <Blank UId="1147" />
+              <Token Text=":=" UId="1148" />
+              <Blank UId="1149" />
+              <Access Scope="LocalVariable" UId="1150">
+                <Symbol UId="1151">
+                  <Component Name="q_a_raw" UId="1152" />
+                </Symbol>
+              </Access>
+              <Blank UId="1153" />
+              <Token Text="+" UId="1154" />
+              <Blank UId="1155" />
+              <Access Scope="LocalVariable" UId="1156">
+                <Symbol UId="1157">
+                  <Component Name="q_a_pid" UId="1158" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1159" />
+              <NewLine Num="2" UId="1160" />
+              <Blank Num="3" UId="1161" />
+              <Access Scope="LocalVariable" UId="1162">
+                <Symbol UId="1163">
+                  <Component Name="EC_Error_Last" UId="1164" />
+                </Symbol>
+              </Access>
+              <Blank UId="1165" />
+              <Token Text=":=" UId="1166" />
+              <Blank UId="1167" />
+              <Access Scope="LocalVariable" UId="1168">
+                <Symbol UId="1169">
+                  <Component Name="EC_Error" UId="1170" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1171" />
+              <NewLine UId="1172" />
+              <Blank Num="3" UId="1173" />
+              <Access Scope="LocalVariable" UId="1174">
+                <Symbol UId="1175">
+                  <Component Name="pH_Error_Last" UId="1176" />
+                </Symbol>
+              </Access>
+              <Blank UId="1177" />
+              <Token Text=":=" UId="1178" />
+              <Blank UId="1179" />
+              <Access Scope="LocalVariable" UId="1180">
+                <Symbol UId="1181">
+                  <Component Name="pH_Error" UId="1182" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1183" />
+              <NewLine Num="2" UId="1184" />
+              <Blank Num="3" UId="1185" />
+              <LineComment UId="1186">
+                <Text UId="1187"> --- 物理限幅 ---</Text>
+              </LineComment>
+              <NewLine UId="1188" />
+              <Blank Num="3" UId="1189" />
+              <Token Text="IF" UId="1190" />
+              <Blank UId="1191" />
+              <Access Scope="LocalVariable" UId="1192">
+                <Symbol UId="1193">
+                  <Component Name="q_f_target" UId="1194" />
+                </Symbol>
+              </Access>
+              <Blank UId="1195" />
+              <Token Text="&lt;" UId="1196" />
+              <Blank UId="1197" />
+              <Access Scope="LocalVariable" UId="1198">
+                <Symbol UId="1199">
+                  <Component Name="q_f_min" UId="1200" />
+                </Symbol>
+              </Access>
+              <Blank UId="1201" />
+              <Token Text="THEN" UId="1202" />
+              <NewLine UId="1203" />
+              <Blank Num="6" UId="1204" />
+              <Access Scope="LocalVariable" UId="1205">
+                <Symbol UId="1206">
+                  <Component Name="q_f_target" UId="1207" />
+                </Symbol>
+              </Access>
+              <Blank UId="1208" />
+              <Token Text=":=" UId="1209" />
+              <Blank UId="1210" />
+              <Access Scope="LocalVariable" UId="1211">
+                <Symbol UId="1212">
+                  <Component Name="q_f_min" UId="1213" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1214" />
+              <NewLine UId="1215" />
+              <Blank Num="3" UId="1216" />
+              <Token Text="ELSIF" UId="1217" />
+              <Blank UId="1218" />
+              <Access Scope="LocalVariable" UId="1219">
+                <Symbol UId="1220">
+                  <Component Name="q_f_target" UId="1221" />
+                </Symbol>
+              </Access>
+              <Blank UId="1222" />
+              <Token Text="&gt;" UId="1223" />
+              <Blank UId="1224" />
+              <Access Scope="LocalVariable" UId="1225">
+                <Symbol UId="1226">
+                  <Component Name="q_f_max" UId="1227" />
+                </Symbol>
+              </Access>
+              <Blank UId="1228" />
+              <Token Text="THEN" UId="1229" />
+              <NewLine UId="1230" />
+              <Blank Num="6" UId="1231" />
+              <Access Scope="LocalVariable" UId="1232">
+                <Symbol UId="1233">
+                  <Component Name="q_f_target" UId="1234" />
+                </Symbol>
+              </Access>
+              <Blank UId="1235" />
+              <Token Text=":=" UId="1236" />
+              <Blank UId="1237" />
+              <Access Scope="LocalVariable" UId="1238">
+                <Symbol UId="1239">
+                  <Component Name="q_f_max" UId="1240" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1241" />
+              <NewLine UId="1242" />
+              <Blank Num="3" UId="1243" />
+              <Token Text="END_IF" UId="1244" />
+              <Token Text=";" UId="1245" />
+              <NewLine Num="2" UId="1246" />
+              <Blank Num="3" UId="1247" />
+              <Token Text="IF" UId="1248" />
+              <Blank UId="1249" />
+              <Access Scope="LocalVariable" UId="1250">
+                <Symbol UId="1251">
+                  <Component Name="q_a_target" UId="1252" />
+                </Symbol>
+              </Access>
+              <Blank UId="1253" />
+              <Token Text="&lt;" UId="1254" />
+              <Blank UId="1255" />
+              <Access Scope="LocalVariable" UId="1256">
+                <Symbol UId="1257">
+                  <Component Name="q_a_min" UId="1258" />
+                </Symbol>
+              </Access>
+              <Blank UId="1259" />
+              <Token Text="THEN" UId="1260" />
+              <NewLine UId="1261" />
+              <Blank Num="6" UId="1262" />
+              <Access Scope="LocalVariable" UId="1263">
+                <Symbol UId="1264">
+                  <Component Name="q_a_target" UId="1265" />
+                </Symbol>
+              </Access>
+              <Blank UId="1266" />
+              <Token Text=":=" UId="1267" />
+              <Blank UId="1268" />
+              <Access Scope="LocalVariable" UId="1269">
+                <Symbol UId="1270">
+                  <Component Name="q_a_min" UId="1271" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1272" />
+              <NewLine UId="1273" />
+              <Blank Num="3" UId="1274" />
+              <Token Text="ELSIF" UId="1275" />
+              <Blank UId="1276" />
+              <Access Scope="LocalVariable" UId="1277">
+                <Symbol UId="1278">
+                  <Component Name="q_a_target" UId="1279" />
+                </Symbol>
+              </Access>
+              <Blank UId="1280" />
+              <Token Text="&gt;" UId="1281" />
+              <Blank UId="1282" />
+              <Access Scope="LocalVariable" UId="1283">
+                <Symbol UId="1284">
+                  <Component Name="q_a_max" UId="1285" />
+                </Symbol>
+              </Access>
+              <Blank UId="1286" />
+              <Token Text="THEN" UId="1287" />
+              <NewLine UId="1288" />
+              <Blank Num="6" UId="1289" />
+              <Access Scope="LocalVariable" UId="1290">
+                <Symbol UId="1291">
+                  <Component Name="q_a_target" UId="1292" />
+                </Symbol>
+              </Access>
+              <Blank UId="1293" />
+              <Token Text=":=" UId="1294" />
+              <Blank UId="1295" />
+              <Access Scope="LocalVariable" UId="1296">
+                <Symbol UId="1297">
+                  <Component Name="q_a_max" UId="1298" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1299" />
+              <NewLine UId="1300" />
+              <Blank Num="3" UId="1301" />
+              <Token Text="END_IF" UId="1302" />
+              <Token Text=";" UId="1303" />
+              <NewLine Num="2" UId="1304" />
+              <Blank Num="3" UId="1305" />
+              <LineComment UId="1306">
+                <Text UId="1307"> --- 斜坡限速，保护泵阀 ---</Text>
+              </LineComment>
+              <NewLine UId="1308" />
+              <Blank Num="3" UId="1309" />
+              <Access Scope="Call" UId="1310">
+                <CallInfo UId="1311" BlockType="FB" Name="RateLimiter">
+                  <IntegerAttribute Name="BlockNumber" Informative="true">1</IntegerAttribute>
+                  <DateAttribute Name="ParameterModifiedTS" Informative="true">2026-06-07T02:45:40</DateAttribute>
+                  <Instance Scope="LocalVariable" UId="1312">
+                    <Component Name="inst_RL_F" UId="1313" />
+                  </Instance>
+                  <Token Text="(" UId="1314" />
+                  <NewLine UId="1315" />
+                  <Blank Num="6" UId="1316" />
+                  <Parameter Name="target" UId="1317">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                    <Blank UId="1318" />
+                    <Token Text=":=" UId="1319" />
+                    <Blank UId="1320" />
+                    <Access Scope="LocalVariable" UId="1321">
+                      <Symbol UId="1322">
+                        <Component Name="q_f_target" UId="1323" />
+                      </Symbol>
+                    </Access>
+                  </Parameter>
+                  <Token Text="," UId="1324" />
+                  <NewLine UId="1325" />
+                  <Blank Num="6" UId="1326" />
+                  <Parameter Name="maxRateUp" UId="1327">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                    <Blank UId="1328" />
+                    <Token Text=":=" UId="1329" />
+                    <Blank UId="1330" />
+                    <Access Scope="LiteralConstant" UId="1331">
+                      <Constant UId="1332">
+                        <ConstantType Informative="true" UId="1333">LReal</ConstantType>
+                        <ConstantValue UId="1334">2.0</ConstantValue>
+                        <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                      </Constant>
+                    </Access>
+                  </Parameter>
+                  <Token Text="," UId="1335" />
+                  <NewLine UId="1336" />
+                  <Blank Num="6" UId="1337" />
+                  <Parameter Name="maxRateDown" UId="1338">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                    <Blank UId="1339" />
+                    <Token Text=":=" UId="1340" />
+                    <Blank UId="1341" />
+                    <Access Scope="LiteralConstant" UId="1342">
+                      <Constant UId="1343">
+                        <ConstantType Informative="true" UId="1344">LReal</ConstantType>
+                        <ConstantValue UId="1345">3.0</ConstantValue>
+                        <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                      </Constant>
+                    </Access>
+                  </Parameter>
+                  <Token Text="," UId="1346" />
+                  <NewLine UId="1347" />
+                  <Blank Num="6" UId="1348" />
+                  <Parameter Name="cycleTime" UId="1349">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                    <Blank UId="1350" />
+                    <Token Text=":=" UId="1351" />
+                    <Blank UId="1352" />
+                    <Access Scope="LocalVariable" UId="1353">
+                      <Symbol UId="1354">
+                        <Component Name="CycleTime" UId="1355" />
+                      </Symbol>
+                    </Access>
+                  </Parameter>
+                  <Token Text="," UId="1356" />
+                  <NewLine UId="1357" />
+                  <Blank Num="6" UId="1358" />
+                  <Parameter Name="enable" UId="1359">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                    <Blank UId="1360" />
+                    <Token Text=":=" UId="1361" />
+                    <Blank UId="1362" />
+                    <Access Scope="LiteralConstant" UId="1363">
+                      <Constant UId="1364">
+                        <ConstantType Informative="true" UId="1365">Bool</ConstantType>
+                        <ConstantValue UId="1366">TRUE</ConstantValue>
+                        <StringAttribute Name="Format" Informative="true">Bool</StringAttribute>
+                      </Constant>
+                    </Access>
+                  </Parameter>
+                  <Token Text="," UId="1367" />
+                  <NewLine UId="1368" />
+                  <Blank Num="6" UId="1369" />
+                  <Parameter Name="reset" UId="1370">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                    <Blank UId="1371" />
+                    <Token Text=":=" UId="1372" />
+                    <Blank UId="1373" />
+                    <Access Scope="LiteralConstant" UId="1374">
+                      <Constant UId="1375">
+                        <ConstantType Informative="true" UId="1376">Bool</ConstantType>
+                        <ConstantValue UId="1377">FALSE</ConstantValue>
+                        <StringAttribute Name="Format" Informative="true">Bool</StringAttribute>
+                      </Constant>
+                    </Access>
+                  </Parameter>
+                  <NewLine UId="1378" />
+                  <Blank Num="3" UId="1379" />
+                  <Parameter Name="output" Informative="true" UId="1380">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                  </Parameter>
+                  <Parameter Name="isLimited" Informative="true" UId="1381">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                  </Parameter>
+                  <Token Text=")" UId="1382" />
+                </CallInfo>
+              </Access>
+              <Token Text=";" UId="1383" />
+              <NewLine Num="2" UId="1384" />
+              <Blank Num="3" UId="1385" />
+              <Access Scope="Call" UId="1386">
+                <CallInfo UId="1387" BlockType="FB" Name="RateLimiter">
+                  <IntegerAttribute Name="BlockNumber" Informative="true">1</IntegerAttribute>
+                  <DateAttribute Name="ParameterModifiedTS" Informative="true">2026-06-07T02:45:40</DateAttribute>
+                  <Instance Scope="LocalVariable" UId="1388">
+                    <Component Name="inst_RL_A" UId="1389" />
+                  </Instance>
+                  <Token Text="(" UId="1390" />
+                  <NewLine UId="1391" />
+                  <Blank Num="6" UId="1392" />
+                  <Parameter Name="target" UId="1393">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                    <Blank UId="1394" />
+                    <Token Text=":=" UId="1395" />
+                    <Blank UId="1396" />
+                    <Access Scope="LocalVariable" UId="1397">
+                      <Symbol UId="1398">
+                        <Component Name="q_a_target" UId="1399" />
+                      </Symbol>
+                    </Access>
+                  </Parameter>
+                  <Token Text="," UId="1400" />
+                  <NewLine UId="1401" />
+                  <Blank Num="6" UId="1402" />
+                  <Parameter Name="maxRateUp" UId="1403">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                    <Blank UId="1404" />
+                    <Token Text=":=" UId="1405" />
+                    <Blank UId="1406" />
+                    <Access Scope="LiteralConstant" UId="1407">
+                      <Constant UId="1408">
+                        <ConstantType Informative="true" UId="1409">LReal</ConstantType>
+                        <ConstantValue UId="1410">1.0</ConstantValue>
+                        <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                      </Constant>
+                    </Access>
+                  </Parameter>
+                  <Token Text="," UId="1411" />
+                  <NewLine UId="1412" />
+                  <Blank Num="6" UId="1413" />
+                  <Parameter Name="maxRateDown" UId="1414">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                    <Blank UId="1415" />
+                    <Token Text=":=" UId="1416" />
+                    <Blank UId="1417" />
+                    <Access Scope="LiteralConstant" UId="1418">
+                      <Constant UId="1419">
+                        <ConstantType Informative="true" UId="1420">LReal</ConstantType>
+                        <ConstantValue UId="1421">2.0</ConstantValue>
+                        <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                      </Constant>
+                    </Access>
+                  </Parameter>
+                  <Token Text="," UId="1422" />
+                  <NewLine UId="1423" />
+                  <Blank Num="6" UId="1424" />
+                  <Parameter Name="cycleTime" UId="1425">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                    <Blank UId="1426" />
+                    <Token Text=":=" UId="1427" />
+                    <Blank UId="1428" />
+                    <Access Scope="LocalVariable" UId="1429">
+                      <Symbol UId="1430">
+                        <Component Name="CycleTime" UId="1431" />
+                      </Symbol>
+                    </Access>
+                  </Parameter>
+                  <Token Text="," UId="1432" />
+                  <NewLine UId="1433" />
+                  <Blank Num="6" UId="1434" />
+                  <Parameter Name="enable" UId="1435">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                    <Blank UId="1436" />
+                    <Token Text=":=" UId="1437" />
+                    <Blank UId="1438" />
+                    <Access Scope="LiteralConstant" UId="1439">
+                      <Constant UId="1440">
+                        <ConstantType Informative="true" UId="1441">Bool</ConstantType>
+                        <ConstantValue UId="1442">TRUE</ConstantValue>
+                        <StringAttribute Name="Format" Informative="true">Bool</StringAttribute>
+                      </Constant>
+                    </Access>
+                  </Parameter>
+                  <Token Text="," UId="1443" />
+                  <NewLine UId="1444" />
+                  <Blank Num="6" UId="1445" />
+                  <Parameter Name="reset" UId="1446">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                    <Blank UId="1447" />
+                    <Token Text=":=" UId="1448" />
+                    <Blank UId="1449" />
+                    <Access Scope="LiteralConstant" UId="1450">
+                      <Constant UId="1451">
+                        <ConstantType Informative="true" UId="1452">Bool</ConstantType>
+                        <ConstantValue UId="1453">FALSE</ConstantValue>
+                        <StringAttribute Name="Format" Informative="true">Bool</StringAttribute>
+                      </Constant>
+                    </Access>
+                  </Parameter>
+                  <NewLine UId="1454" />
+                  <Blank Num="3" UId="1455" />
+                  <Parameter Name="output" Informative="true" UId="1456">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                  </Parameter>
+                  <Parameter Name="isLimited" Informative="true" UId="1457">
+                    <StringAttribute Name="InterfaceFlags" Informative="true">S7_Visible</StringAttribute>
+                  </Parameter>
+                  <Token Text=")" UId="1458" />
+                </CallInfo>
+              </Access>
+              <Token Text=";" UId="1459" />
+              <NewLine Num="2" UId="1460" />
+              <Blank Num="3" UId="1461" />
+              <Access Scope="LocalVariable" UId="1462">
+                <Symbol UId="1463">
+                  <Component Name="q_f_cmd" UId="1464" />
+                </Symbol>
+              </Access>
+              <Blank UId="1465" />
+              <Token Text=":=" UId="1466" />
+              <Blank UId="1467" />
+              <Access Scope="LocalVariable" UId="1468">
+                <Symbol UId="1469">
+                  <Component Name="inst_RL_F" UId="1470" />
+                  <Token Text="." UId="1471" />
+                  <Component Name="output" UId="1472" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1473" />
+              <NewLine UId="1474" />
+              <Blank Num="3" UId="1475" />
+              <Access Scope="LocalVariable" UId="1476">
+                <Symbol UId="1477">
+                  <Component Name="q_a_cmd" UId="1478" />
+                </Symbol>
+              </Access>
+              <Blank UId="1479" />
+              <Token Text=":=" UId="1480" />
+              <Blank UId="1481" />
+              <Access Scope="LocalVariable" UId="1482">
+                <Symbol UId="1483">
+                  <Component Name="inst_RL_A" UId="1484" />
+                  <Token Text="." UId="1485" />
+                  <Component Name="output" UId="1486" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1487" />
+              <NewLine UId="1488" />
+              <Blank Num="3" UId="1489" />
+              <Access Scope="LocalVariable" UId="1490">
+                <Symbol UId="1491">
+                  <Component Name="q_f_raw" UId="1492" />
+                </Symbol>
+              </Access>
+              <Blank UId="1493" />
+              <Token Text=":=" UId="1494" />
+              <Blank UId="1495" />
+              <Access Scope="LocalVariable" UId="1496">
+                <Symbol UId="1497">
+                  <Component Name="q_f_cmd" UId="1498" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1499" />
+              <NewLine UId="1500" />
+              <Blank Num="3" UId="1501" />
+              <Access Scope="LocalVariable" UId="1502">
+                <Symbol UId="1503">
+                  <Component Name="q_a_raw" UId="1504" />
+                </Symbol>
+              </Access>
+              <Blank UId="1505" />
+              <Token Text=":=" UId="1506" />
+              <Blank UId="1507" />
+              <Access Scope="LocalVariable" UId="1508">
+                <Symbol UId="1509">
+                  <Component Name="q_a_cmd" UId="1510" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1511" />
+              <NewLine Num="2" UId="1512" />
+              <Blank Num="3" UId="1513" />
+              <Access Scope="LocalVariable" UId="1514">
+                <Symbol UId="1515">
+                  <Component Name="Valve_F_Actual" UId="1516" />
+                </Symbol>
+              </Access>
+              <Blank UId="1517" />
+              <Token Text=":=" UId="1518" />
+              <Blank UId="1519" />
+              <Access Scope="LocalVariable" UId="1520">
+                <Symbol UId="1521">
+                  <Component Name="q_f_cmd" UId="1522" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1523" />
+              <NewLine UId="1524" />
+              <Blank Num="3" UId="1525" />
+              <Access Scope="LocalVariable" UId="1526">
+                <Symbol UId="1527">
+                  <Component Name="Valve_A_Actual" UId="1528" />
+                </Symbol>
+              </Access>
+              <Blank UId="1529" />
+              <Token Text=":=" UId="1530" />
+              <Blank UId="1531" />
+              <Access Scope="LocalVariable" UId="1532">
+                <Symbol UId="1533">
+                  <Component Name="q_a_cmd" UId="1534" />
+                </Symbol>
+              </Access>
+              <Token Text=";" UId="1535" />
+              <NewLine Num="2" UId="1536" />
+              <Blank Num="3" UId="1537" />
+              <LineComment UId="1538">
+                <Text UId="1539"> --- 0~27648 模拟量换算 ---</Text>
+              </LineComment>
+              <NewLine UId="1540" />
+              <Blank Num="3" UId="1541" />
+              <Access Scope="LocalVariable" UId="1542">
+                <Symbol UId="1543">
+                  <Component Name="AQ_Valve_F_Raw" UId="1544" />
+                </Symbol>
+              </Access>
+              <Blank UId="1545" />
+              <Token Text=":=" UId="1546" />
+              <Blank UId="1547" />
+              <Access Scope="Call" UId="1548">
+                <Instruction Name="REAL_TO_INT" UId="1549">
+                  <Token Text="(" UId="1550" />
+                  <NamelessParameter UId="1551">
+                    <Access Scope="LocalVariable" UId="1552">
+                      <Symbol UId="1553">
+                        <Component Name="q_f_cmd" UId="1554" />
+                      </Symbol>
+                    </Access>
+                    <Blank UId="1555" />
+                    <Token Text="/" UId="1556" />
+                    <Blank UId="1557" />
+                    <Access Scope="LocalVariable" UId="1558">
+                      <Symbol UId="1559">
+                        <Component Name="q_f_max" UId="1560" />
+                      </Symbol>
+                    </Access>
+                    <Blank UId="1561" />
+                    <Token Text="*" UId="1562" />
+                    <Blank UId="1563" />
+                    <Access Scope="LiteralConstant" UId="1564">
+                      <Constant UId="1565">
+                        <ConstantType Informative="true" UId="1566">Real</ConstantType>
+                        <ConstantValue UId="1567">27648.0</ConstantValue>
+                        <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                      </Constant>
+                    </Access>
+                  </NamelessParameter>
+                  <Parameter Name="Ret_Val" Informative="true" UId="1568" />
+                  <Token Text=")" UId="1569" />
+                </Instruction>
+              </Access>
+              <Token Text=";" UId="1570" />
+              <NewLine UId="1571" />
+              <Blank Num="3" UId="1572" />
+              <Access Scope="LocalVariable" UId="1573">
+                <Symbol UId="1574">
+                  <Component Name="AQ_Valve_A_Raw" UId="1575" />
+                </Symbol>
+              </Access>
+              <Blank UId="1576" />
+              <Token Text=":=" UId="1577" />
+              <Blank UId="1578" />
+              <Access Scope="Call" UId="1579">
+                <Instruction Name="REAL_TO_INT" UId="1580">
+                  <Token Text="(" UId="1581" />
+                  <NamelessParameter UId="1582">
+                    <Access Scope="LocalVariable" UId="1583">
+                      <Symbol UId="1584">
+                        <Component Name="q_a_cmd" UId="1585" />
+                      </Symbol>
+                    </Access>
+                    <Blank UId="1586" />
+                    <Token Text="/" UId="1587" />
+                    <Blank UId="1588" />
+                    <Access Scope="LocalVariable" UId="1589">
+                      <Symbol UId="1590">
+                        <Component Name="q_a_max" UId="1591" />
+                      </Symbol>
+                    </Access>
+                    <Blank UId="1592" />
+                    <Token Text="*" UId="1593" />
+                    <Blank UId="1594" />
+                    <Access Scope="LiteralConstant" UId="1595">
+                      <Constant UId="1596">
+                        <ConstantType Informative="true" UId="1597">Real</ConstantType>
+                        <ConstantValue UId="1598">27648.0</ConstantValue>
+                        <StringAttribute Name="Format" Informative="true">Real</StringAttribute>
+                      </Constant>
+                    </Access>
+                  </NamelessParameter>
+                  <Parameter Name="Ret_Val" Informative="true" UId="1599" />
+                  <Token Text=")" UId="1600" />
+                </Instruction>
+              </Access>
+              <Token Text=";" UId="1601" />
+              <NewLine Num="2" UId="1602" />
+              <Blank Num="3" UId="1603" />
+              <Access Scope="LocalVariable" UId="1604">
+                <Symbol UId="1605">
+                  <Component Name="System_Alarm_Light" UId="1606" />
+                </Symbol>
+              </Access>
+              <Blank UId="1607" />
+              <Token Text=":=" UId="1608" />
+              <Blank UId="1609" />
+              <Access Scope="LiteralConstant" UId="1610">
+                <Constant UId="1611">
+                  <ConstantType Informative="true" UId="1612">Bool</ConstantType>
+                  <ConstantValue UId="1613">FALSE</ConstantValue>
+                  <StringAttribute Name="Format" Informative="true">Bool</StringAttribute>
+                </Constant>
+              </Access>
+              <Token Text=";" UId="1614" />
+              <NewLine UId="1615" />
+            </StructuredText>
+          </NetworkSource>
+          <ProgrammingLanguage>SCL</ProgrammingLanguage>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="4" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="5" CompositionName="Items">
+                <AttributeList>
+                  <Culture>zh-CN</Culture>
+                  <Text />
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+          <MultilingualText ID="6" CompositionName="Title">
+            <ObjectList>
+              <MultilingualTextItem ID="7" CompositionName="Items">
+                <AttributeList>
+                  <Culture>zh-CN</Culture>
+                  <Text />
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.Blocks.CompileUnit>
+      <MultilingualText ID="8" CompositionName="Title">
+        <ObjectList>
+          <MultilingualTextItem ID="9" CompositionName="Items">
+            <AttributeList>
+              <Culture>zh-CN</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+    </ObjectList>
+  </SW.Blocks.FB>
+</Document>

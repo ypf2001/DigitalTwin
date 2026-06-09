@@ -1,0 +1,24 @@
+FUNCTION "ScaleAnalog" : Real
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      RawValue : Int;
+      RawMin : Int := 0;
+      RawMax : Int := 27648;
+      EngMin : Real := 0.0;
+      EngMax : Real := 100.0;
+   END_VAR
+   VAR_TEMP
+      SpanRaw : Real;
+      SpanEng : Real;
+   END_VAR
+BEGIN
+   #SpanRaw := INT_TO_REAL(#RawMax - #RawMin);
+   #SpanEng := #EngMax - #EngMin;
+
+   IF #SpanRaw = 0.0 THEN
+      "ScaleAnalog" := #EngMin;
+   ELSE
+      "ScaleAnalog" := ((INT_TO_REAL(#RawValue - #RawMin) / #SpanRaw) * #SpanEng) + #EngMin;
+   END_IF;
+END_FUNCTION

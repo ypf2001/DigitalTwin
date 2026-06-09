@@ -171,6 +171,21 @@ class PLCClient:
         set_bool(buf, 0, int(addr.get("bit", 0)), bool(value))
         self._client.db_write(self.db_number, offset, buf)
 
+    def write_growth_stage(self, stage: int) -> bool:
+        """Write the simplified PLC growth stage if it is mapped in config.
+
+        Stage values are 0=INI, 1=DEV, 2=MID, 3=LATE.
+        """
+        if "Growth_Stage" not in self.addr_map:
+            return False
+        try:
+            self._ensure_connected()
+            self._write_int("Growth_Stage", int(stage))
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] Growth_Stage write failed: {e}")
+            return False
+
     def _calc_read_range(self, var_names: list) -> tuple[int, int]:
         min_off = float("inf")
         max_end = 0
@@ -258,6 +273,10 @@ class PLCClient:
         """从 PLC 回读执行层状态。"""
         preferred = [
             "Remote_Comms_OK", "Watchdog_Timer",
+            "Growth_Stage",
+            "Stage_EC_SP", "Stage_pH_SP",
+            "Active_EC_SP", "Active_pH_SP",
+            "Setpoint_Protection_Active", "Stage_Auto_SP_Enable",
             "q_f_cmd", "q_a_cmd",
             "Valve_F_Actual", "Valve_A_Actual",
             "AQ_Valve_F_Raw", "AQ_Valve_A_Raw",

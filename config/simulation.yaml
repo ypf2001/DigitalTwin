@@ -114,7 +114,7 @@ plc:
   max_retries: 5
   feedback_filter:
     enabled: true
-    alpha: 0.8             # EC_Actual/pH_Actual feedback smoothing. Larger = smoother but slower.
+    alpha: 0.5             # EC_Actual/pH_Actual feedback smoothing. Larger = smoother but slower.
   addresses:
     # B 方案：上位机写 EC/pH 目标值和虚拟传感器反馈，PLC/PLCSIM 内部 PID 执行
     EC_Set_SP:
@@ -141,6 +141,36 @@ plc:
       offset: 18
       type: int
       bytes: 2
+    Growth_Stage:
+      offset: 106
+      type: int
+      bytes: 2
+    Stage_EC_SP:
+      offset: 108
+      type: real
+      bytes: 4
+    Stage_pH_SP:
+      offset: 112
+      type: real
+      bytes: 4
+    Active_EC_SP:
+      offset: 116
+      type: real
+      bytes: 4
+    Active_pH_SP:
+      offset: 120
+      type: real
+      bytes: 4
+    Setpoint_Protection_Active:
+      offset: 124
+      bit: 0
+      type: bool
+      bytes: 1
+    Stage_Auto_SP_Enable:
+      offset: 124
+      bit: 1
+      type: bool
+      bytes: 1
 
     # PLC/PLCSIM 写回 Python 的执行结果与状态
     Remote_Comms_OK:

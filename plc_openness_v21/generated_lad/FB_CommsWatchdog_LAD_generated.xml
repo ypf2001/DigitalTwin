@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V21" />
+  <DocumentInfo>
+    <Created>2026-06-08T03:11:54.7246491Z</Created>
+    <ExportSetting>WithReadOnly</ExportSetting>
+    <InstalledProducts>
+      <Product>
+        <DisplayName>Totally Integrated Automation Portal</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <Product>
+        <DisplayName>SINAMICS Startdrive Advanced</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>SINAMICS Startdrive G110M, G120, G120C, G120D, G120P, G115D</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <OptionPackage>
+        <DisplayName>SINAMICS Startdrive G130, G150, S120, S150, G200, G220, S200, S210, S220, Innomotics MVD</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>STEP 7 Professional</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>STEP 7 Safety</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <OptionPackage>
+        <DisplayName>Tech WebApplication</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>WinCC Basic/Comfort/Advanced</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <Product>
+        <DisplayName>WinCC Professional</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <Product>
+        <DisplayName>WinCC Unified</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+    </InstalledProducts>
+  </DocumentInfo>
+  <SW.Blocks.FB ID="0">
+    <AttributeList>
+      <CodeModifiedDate ReadOnly="true">2026-06-08T03:10:14.5196473Z</CodeModifiedDate>
+      <CompileDate ReadOnly="true">2026-06-08T03:11:41.0634515Z</CompileDate>
+      <CreationDate ReadOnly="true">2026-06-08T03:07:13.4993738Z</CreationDate>
+      <DownloadDate ReadOnly="true">0001-01-01T00:00:00Z</DownloadDate>
+      <Interface>
+        <Sections xmlns="http://www.siemens.com/automation/Openness/SW/Interface/v5">
+          <Section Name="Input"><Member Name="Remote_Heartbeat" Datatype="Int" /></Section><Section Name="Output"><Member Name="Remote_Comms_OK" Datatype="Bool" /><Member Name="Watchdog_Timer" Datatype="Int" /></Section><Section Name="InOut" /><Section Name="Static"><Member Name="Last_Heartbeat" Datatype="Int" /><Member Name="Heartbeat_Changed" Datatype="Bool" /><Member Name="tWatchdog" Datatype="TON_TIME" Version="1.0" /></Section><Section Name="Temp" /><Section Name="Constant" /></Sections>
+      </Interface>
+      <InterfaceModifiedDate ReadOnly="true">2026-06-08T03:10:14.5196473Z</InterfaceModifiedDate>
+      <IsConsistent ReadOnly="true">true</IsConsistent>
+      <LibraryConformanceStatus ReadOnly="true">该对象为库兼容。</LibraryConformanceStatus>
+      <LoadMemoryLength ReadOnly="true">4239</LoadMemoryLength>
+      <MemoryLayout>Optimized</MemoryLayout>
+      <MemoryReserve>100</MemoryReserve>
+      <ModifiedDate ReadOnly="true">2026-06-08T03:10:27.490681Z</ModifiedDate>
+      <Name>FB_CommsWatchdog_LAD</Name>
+      <Namespace />
+      <Number>3</Number>
+      <PLCSimAdvancedSupport ReadOnly="true">true</PLCSimAdvancedSupport>
+      <ParameterModified ReadOnly="true">2026-06-08T03:09:18.1248756Z</ParameterModified>
+      <ProgrammingLanguage>LAD</ProgrammingLanguage>
+      <SetENOAutomatically>false</SetENOAutomatically>
+      <StructureModified ReadOnly="true">2026-06-08T03:10:14.5196473Z</StructureModified>
+      <WorkMemoryLength ReadOnly="true">18</WorkMemoryLength>
+    </AttributeList>
+    <ObjectList>
+      <MultilingualText ID="1" CompositionName="Comment">
+        <ObjectList>
+          <MultilingualTextItem ID="2" CompositionName="Items">
+            <AttributeList>
+              <Culture>zh-CN</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+      <SW.Blocks.CompileUnit ID="100" CompositionName="CompileUnits"><AttributeList><NetworkSource><FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v4"><Parts><Access Scope="LocalVariable" UId="21"><Symbol><Component Name="Remote_Heartbeat" /></Symbol></Access><Access Scope="LocalVariable" UId="22"><Symbol><Component Name="Last_Heartbeat" /></Symbol></Access><Access Scope="LocalVariable" UId="23"><Symbol><Component Name="Heartbeat_Changed" /></Symbol></Access><Part Name="Ne" UId="24"><TemplateValue Name="SrcType" Type="Type">Int</TemplateValue></Part><Part Name="Coil" UId="25" /></Parts><Wires><Wire UId="20"><Powerrail /><NameCon UId="24" Name="pre" /></Wire><Wire UId="26"><IdentCon UId="21" /><NameCon UId="24" Name="in1" /></Wire><Wire UId="27"><IdentCon UId="22" /><NameCon UId="24" Name="in2" /></Wire><Wire UId="28"><NameCon UId="24" Name="out" /><NameCon UId="25" Name="in" /></Wire><Wire UId="29"><IdentCon UId="23" /><NameCon UId="25" Name="operand" /></Wire></Wires></FlgNet></NetworkSource><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList><MultilingualText ID="101C" CompositionName="Comment"><ObjectList><MultilingualTextItem ID="102C" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text /></AttributeList></MultilingualTextItem></ObjectList></MultilingualText><MultilingualText ID="101" CompositionName="Title"><ObjectList><MultilingualTextItem ID="102" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text>Heartbeat changed</Text></AttributeList></MultilingualTextItem></ObjectList></MultilingualText></ObjectList></SW.Blocks.CompileUnit><SW.Blocks.CompileUnit ID="110" CompositionName="CompileUnits"><AttributeList><NetworkSource><FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v4"><Parts><Access Scope="LocalVariable" UId="21"><Symbol><Component Name="Heartbeat_Changed" /></Symbol></Access><Access Scope="LocalVariable" UId="22"><Symbol><Component Name="Remote_Heartbeat" /></Symbol></Access><Access Scope="LocalVariable" UId="23"><Symbol><Component Name="Last_Heartbeat" /></Symbol></Access><Part Name="Contact" UId="24" /><Part Name="Move" UId="25"><TemplateValue Name="Card" Type="Cardinality">1</TemplateValue></Part></Parts><Wires><Wire UId="26"><Powerrail /><NameCon UId="24" Name="in" /></Wire><Wire UId="27"><IdentCon UId="21" /><NameCon UId="24" Name="operand" /></Wire><Wire UId="28"><NameCon UId="24" Name="out" /><NameCon UId="25" Name="en" /></Wire><Wire UId="29"><IdentCon UId="22" /><NameCon UId="25" Name="in" /></Wire><Wire UId="30"><IdentCon UId="23" /><NameCon UId="25" Name="out" /></Wire></Wires></FlgNet></NetworkSource><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList><MultilingualText ID="111C" CompositionName="Comment"><ObjectList><MultilingualTextItem ID="112C" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text /></AttributeList></MultilingualTextItem></ObjectList></MultilingualText><MultilingualText ID="111" CompositionName="Title"><ObjectList><MultilingualTextItem ID="112" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text>Store heartbeat</Text></AttributeList></MultilingualTextItem></ObjectList></MultilingualText></ObjectList></SW.Blocks.CompileUnit><SW.Blocks.CompileUnit ID="120" CompositionName="CompileUnits"><AttributeList><NetworkSource><FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v4"><Parts><Access Scope="LocalVariable" UId="21"><Symbol><Component Name="Heartbeat_Changed" /></Symbol></Access><Access Scope="TypedConstant" UId="22"><Constant><ConstantValue>T#3s</ConstantValue></Constant></Access><Part Name="Contact" UId="23"><Negated Name="operand" /></Part><Part Name="TON" UId="24" Version="1.0"><Instance Scope="LocalVariable" UId="25"><Component Name="tWatchdog" /></Instance><TemplateValue Name="time_type" Type="Type">Time</TemplateValue></Part></Parts><Wires><Wire UId="26"><Powerrail /><NameCon UId="23" Name="in" /></Wire><Wire UId="27"><IdentCon UId="21" /><NameCon UId="23" Name="operand" /></Wire><Wire UId="28"><NameCon UId="23" Name="out" /><NameCon UId="24" Name="IN" /></Wire><Wire UId="29"><IdentCon UId="22" /><NameCon UId="24" Name="PT" /></Wire><Wire UId="30"><NameCon UId="24" Name="ET" /><OpenCon UId="31" /></Wire></Wires></FlgNet></NetworkSource><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList><MultilingualText ID="121C" CompositionName="Comment"><ObjectList><MultilingualTextItem ID="122C" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text /></AttributeList></MultilingualTextItem></ObjectList></MultilingualText><MultilingualText ID="121" CompositionName="Title"><ObjectList><MultilingualTextItem ID="122" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text>Communication watchdog</Text></AttributeList></MultilingualTextItem></ObjectList></MultilingualText></ObjectList></SW.Blocks.CompileUnit><SW.Blocks.CompileUnit ID="130" CompositionName="CompileUnits"><AttributeList><NetworkSource><FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v4"><Parts><Access Scope="LocalVariable" UId="21"><Symbol><Component Name="tWatchdog" /><Component Name="Q" /></Symbol></Access><Access Scope="LocalVariable" UId="22"><Symbol><Component Name="Remote_Comms_OK" /></Symbol></Access><Part Name="Contact" UId="23"><Negated Name="operand" /></Part><Part Name="Coil" UId="24" /></Parts><Wires><Wire UId="25"><Powerrail /><NameCon UId="23" Name="in" /></Wire><Wire UId="26"><IdentCon UId="21" /><NameCon UId="23" Name="operand" /></Wire><Wire UId="27"><NameCon UId="23" Name="out" /><NameCon UId="24" Name="in" /></Wire><Wire UId="28"><IdentCon UId="22" /><NameCon UId="24" Name="operand" /></Wire></Wires></FlgNet></NetworkSource><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList><MultilingualText ID="131C" CompositionName="Comment"><ObjectList><MultilingualTextItem ID="132C" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text /></AttributeList></MultilingualTextItem></ObjectList></MultilingualText><MultilingualText ID="131" CompositionName="Title"><ObjectList><MultilingualTextItem ID="132" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text>Communication OK</Text></AttributeList></MultilingualTextItem></ObjectList></MultilingualText></ObjectList></SW.Blocks.CompileUnit><MultilingualText ID="8" CompositionName="Title">
+        <ObjectList>
+          <MultilingualTextItem ID="9" CompositionName="Items">
+            <AttributeList>
+              <Culture>zh-CN</Culture>
+              <Text>Heartbeat changed</Text>
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+    </ObjectList>
+  </SW.Blocks.FB>
+</Document>

@@ -58,6 +58,7 @@ class PLCGymEnv(gym.Env):
         self.feedback_filter_alpha = float(np.clip(self.feedback_filter_alpha, 0.0, 0.99))
         self._ec_actual_filtered = None
         self._ph_actual_filtered = None
+        self._soil_ph_est = 7.0
 
         self._sim_env = DigitalTwinGymEnv(
             growth_stage=growth_stage,
@@ -89,6 +90,7 @@ class PLCGymEnv(gym.Env):
         """重置仿真环境，并向 PLC 写入安全默认目标。"""
         obs, _ = self._sim_env.reset(seed=seed, options=options)
         base = self._sim_env.unwrapped_env
+        self._soil_ph_est = 7.0
         self._reset_feedback_filter(ec_actual=0.0, ph_actual=7.0)
 
         if self.plc_enabled:
@@ -129,8 +131,10 @@ class PLCGymEnv(gym.Env):
         base = self._sim_env.unwrapped_env
 
         # 1. 写入目标值和当前虚拟传感器值，供 PLC-PID 使用
-        ec_actual = float(base.pipe.ec_filt)
-        ph_actual = float(base.pipe.ph_filt)
+        # EC target tracking is evaluated on root-zone soil EC, so feed the PLC
+        # the same controlled variable instead of the pipe outlet EC.
+        ec_actual = float(base.soil.ec_soil)
+        ph_actual = float(self._soil_ph_est)
         ec_actual, ph_actual = self._filter_feedback(ec_actual, ph_actual)
         self._safe_write_setpoints(ec_set, ph_set, ec_actual, ph_actual, sac_enable=True)
 
@@ -167,20 +171,28 @@ class PLCGymEnv(gym.Env):
         """绕过内部 SetpointToFlowController，直接使用 PLC 输出 q_f/q_a 推进模型。"""
         base = self._sim_env.unwrapped_env
 
+        q_w = base.q_w
         if base._is_nighttime(base._time_min):
             q_f = 0.0
             q_a = 0.0
+            q_w = 0.0
 
-        total_flow_with_water = q_f + q_a + base.q_w
+        total_flow_with_water = q_f + q_a + q_w
         irrigation_mm_h = total_flow_with_water * 60.0 / (base.area_ha * 10000.0)
         actuator_flow_Lmin = q_f + q_a
 
-        ec_tank, ph_tank = base.tank.step(q_f, q_a, q_w=base.q_w)
+        ec_tank, ph_tank = base.tank.step(q_f, q_a, q_w=q_w)
         ec_drip, ph_drip = base.pipe.step(ec_tank, ph_tank)
 
         et_mm_h = base._get_actual_et(base._time_min)
         dt_hours = base.dt_min / 60.0
         theta, ec_soil = base.soil.step(irrigation_mm_h, ec_drip, et_mm_h, dt_hours)
+        self._soil_ph_est = self._estimate_soil_ph(
+            self._soil_ph_est,
+            ph_drip,
+            irrigation_mm_h,
+            dt_hours,
+        )
 
         base._theta_history.append(theta)
         base._ec_soil_history.append(ec_soil)
@@ -216,6 +228,7 @@ class PLCGymEnv(gym.Env):
             "ec_soil": ec_soil,
             "ec_drip": ec_drip,
             "ph_drip": ph_drip,
+            "soil_ph_est": self._soil_ph_est,
             "ec_set": ec_set,
             "ph_set": ph_set,
             "etc_mm_h": et_mm_h,
@@ -231,6 +244,16 @@ class PLCGymEnv(gym.Env):
             "burn": burn,
         }
         return obs, reward, base._done, False, sim_info
+
+    @staticmethod
+    def _estimate_soil_ph(prev_ph: float, ph_drip: float, irrigation_mm_h: float, dt_hours: float) -> float:
+        """Buffered root-zone pH estimate used as the PLC feedback variable."""
+        root_depth_mm = 300.0
+        exchange = np.clip((irrigation_mm_h * dt_hours) / root_depth_mm, 0.0, 0.25)
+        buffered_exchange = 1.20 * exchange
+        neutral_relax = 0.0005 * dt_hours
+        ph = prev_ph + buffered_exchange * (ph_drip - prev_ph) + neutral_relax * (7.0 - prev_ph)
+        return float(np.clip(ph, 4.5, 8.5))
 
     def render(self, mode="human"):
         pass
