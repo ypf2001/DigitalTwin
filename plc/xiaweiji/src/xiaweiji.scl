@@ -485,7 +485,7 @@ BEGIN
    ELSIF #EC_Error > 0.08 THEN
       #q_f_correction := 1.60 * #EC_Error + 0.20;
    ELSIF #EC_Error > 0.03 THEN
-      #q_f_correction := #Kp_EC * #EC_Error;
+      #q_f_correction := #Kp_EC * #EC_Error + #Ki_EC * #EC_Integral + #Kd_EC * #EC_Derivative;
    ELSIF #EC_Error < -0.08 THEN
       #q_f_correction := 3.50 * #EC_Error;
    ELSIF #EC_Error < -0.03 THEN
@@ -513,7 +513,7 @@ BEGIN
    ELSIF #pH_Error > 0.25 THEN
       #q_a_correction := 3.20 * #pH_Error + 0.85;
    ELSIF #pH_Error > 0.0 THEN
-      #q_a_correction := 2.20 * #pH_Error + #Ki_pH * #pH_Integral + #Kd_pH * #pH_Derivative;
+      #q_a_correction := #Kp_pH * #pH_Error + #Ki_pH * #pH_Integral + #Kd_pH * #pH_Derivative;
    ELSIF #pH_Error < -0.10 THEN
       #q_a_correction := 2.50 * #pH_Error;
    ELSE

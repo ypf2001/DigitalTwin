@@ -44,6 +44,26 @@ from digital_twin_gym_env import STAGE_MAP
 from experiments.run_full_season_plc import FIXED_ACTIONS, STAGES, _estimate_soil_ph, _stage_for_day
 
 
+GAIN_BOUNDS = {
+    "kp_ec": (0.2, 1.4),
+    "ki_ec": (0.0, 0.012),
+    "kd_ec": (0.0, 0.04),
+    "kp_ph": (0.6, 2.2),
+    "ki_ph": (0.0, 0.012),
+    "kd_ph": (0.0, 0.04),
+}
+
+
+DEFAULT_GAIN_STEPS = {
+    "kp_ec": 0.1,
+    "ki_ec": 0.001,
+    "kd_ec": 0.001,
+    "kp_ph": 0.1,
+    "ki_ph": 0.001,
+    "kd_ph": 0.001,
+}
+
+
 @dataclass(frozen=True)
 class PIDCandidate:
     kp_ec: float
@@ -163,14 +183,67 @@ class PLCLikePID:
         return self.rl_f.step(q_f_target, dt_s), self.rl_a.step(q_a_target, dt_s)
 
 
-def _sample_candidate(rng: np.random.Generator) -> PIDCandidate:
+def _sample_gain(
+    name: str,
+    rng: np.random.Generator,
+    center: PIDCandidate | None = None,
+    radius: float = 1.0,
+    step: float | None = None,
+) -> float:
+    low, high = GAIN_BOUNDS[name]
+    if center is None:
+        return _quantize_gain(float(rng.uniform(low, high)), low, high, step)
+
+    center_value = float(getattr(center, name))
+    half_width = (high - low) * max(radius, 0.0) * 0.5
+    local_low = max(low, center_value - half_width)
+    local_high = min(high, center_value + half_width)
+    if local_high <= local_low:
+        return _quantize_gain(center_value, low, high, step)
+    return _quantize_gain(float(rng.uniform(local_low, local_high)), low, high, step)
+
+
+def _quantize_gain(value: float, low: float, high: float, step: float | None) -> float:
+    if step is None or step <= 0:
+        return float(np.clip(value, low, high))
+    quantized = round(value / step) * step
+    return float(np.clip(round(quantized, 6), low, high))
+
+
+def _sample_candidate(
+    rng: np.random.Generator,
+    center: PIDCandidate | None = None,
+    radius: float = 1.0,
+    gain_steps: dict[str, float] | None = None,
+) -> PIDCandidate:
+    gain_steps = gain_steps or DEFAULT_GAIN_STEPS
     return PIDCandidate(
-        kp_ec=float(rng.uniform(0.2, 1.4)),
-        ki_ec=float(rng.uniform(0.0, 0.012)),
-        kd_ec=float(rng.uniform(0.0, 0.04)),
-        kp_ph=float(rng.uniform(0.6, 2.2)),
-        ki_ph=float(rng.uniform(0.0, 0.012)),
-        kd_ph=float(rng.uniform(0.0, 0.04)),
+        kp_ec=_sample_gain("kp_ec", rng, center, radius, gain_steps.get("kp_ec")),
+        ki_ec=_sample_gain("ki_ec", rng, center, radius, gain_steps.get("ki_ec")),
+        kd_ec=_sample_gain("kd_ec", rng, center, radius, gain_steps.get("kd_ec")),
+        kp_ph=_sample_gain("kp_ph", rng, center, radius, gain_steps.get("kp_ph")),
+        ki_ph=_sample_gain("ki_ph", rng, center, radius, gain_steps.get("ki_ph")),
+        kd_ph=_sample_gain("kd_ph", rng, center, radius, gain_steps.get("kd_ph")),
+    )
+
+
+def _candidate_from_row(row: dict[str, Any]) -> PIDCandidate:
+    return PIDCandidate(
+        kp_ec=float(row["kp_ec"]),
+        ki_ec=float(row["ki_ec"]),
+        kd_ec=float(row["kd_ec"]),
+        kp_ph=float(row["kp_ph"]),
+        ki_ph=float(row["ki_ph"]),
+        kd_ph=float(row["kd_ph"]),
+    )
+
+
+def _meets_targets(row: dict[str, Any], args: argparse.Namespace) -> bool:
+    return (
+        row["ec_mae"] <= args.target_ec_mae
+        and row["ph_mae"] <= args.target_ph_mae
+        and row["ec_over_max"] <= args.target_ec_over
+        and row["ph_over_max"] <= args.target_ph_over
     )
 
 
@@ -314,23 +387,84 @@ def main() -> int:
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--model-dir", default=str(ROOT / "rl_models"))
     parser.add_argument("--model", default=None, help="Optional single SAC model path, with or without .zip.")
+    parser.add_argument("--auto", action="store_true", help="Keep refining around the best candidate until target metrics are met.")
+    parser.add_argument("--max-rounds", type=int, default=8, help="Maximum auto-refine rounds.")
+    parser.add_argument("--round-trials", type=int, default=None, help="Trials per auto-refine round. Defaults to --trials.")
+    parser.add_argument("--refine-shrink", type=float, default=0.55, help="Search radius multiplier after each auto round.")
+    parser.add_argument("--min-radius", type=float, default=0.04, help="Minimum local search radius as a fraction of each gain range.")
+    parser.add_argument("--target-ec-mae", type=float, default=0.08)
+    parser.add_argument("--target-ph-mae", type=float, default=0.08)
+    parser.add_argument("--target-ec-over", type=float, default=0.02)
+    parser.add_argument("--target-ph-over", type=float, default=0.03)
+    parser.add_argument("--kp-step", type=float, default=DEFAULT_GAIN_STEPS["kp_ec"], help="Quantize Kp gains to this step. Default is 0.1.")
+    parser.add_argument("--ki-step", type=float, default=DEFAULT_GAIN_STEPS["ki_ec"], help="Quantize Ki gains to this step. Default is 0.001.")
+    parser.add_argument("--kd-step", type=float, default=DEFAULT_GAIN_STEPS["kd_ec"], help="Quantize Kd gains to this step. Default is 0.001.")
     args = parser.parse_args()
 
     rng = np.random.default_rng(args.seed)
     models = _load_sac_models(Path(args.model_dir), args.model) if args.mode == "sac" else None
+    gain_steps = {
+        "kp_ec": args.kp_step,
+        "ki_ec": args.ki_step,
+        "kd_ec": args.kd_step,
+        "kp_ph": args.kp_step,
+        "ki_ph": args.ki_step,
+        "kd_ph": args.kd_step,
+    }
     results = []
-    for i in range(args.trials):
-        candidate = _sample_candidate(rng)
-        row = evaluate_candidate(candidate, args.season_days, args.dt_min, args.seed + i, args.mode, models)
-        row["trial"] = i + 1
-        results.append(row)
-        print(
-            f"[{i + 1:03d}/{args.trials}] score={row['score']:.4f} "
-            f"EC_MAE={row['ec_mae']:.4f} pH_MAE={row['ph_mae']:.4f} "
-            f"EC_over={row['ec_over_max']:.4f} pH_over={row['ph_over_max']:.4f}"
-        )
+    best: dict[str, Any] | None = None
+    stop_reason = "completed_fixed_trials"
+
+    if args.auto:
+        round_trials = args.round_trials or args.trials
+        center: PIDCandidate | None = None
+        radius = 1.0
+        trial_no = 0
+        for round_no in range(1, args.max_rounds + 1):
+            print(f"\nAuto round {round_no}/{args.max_rounds}: trials={round_trials}, radius={radius:.4f}")
+            round_rows = []
+            for i in range(round_trials):
+                trial_no += 1
+                candidate = _sample_candidate(rng, center=center, radius=radius, gain_steps=gain_steps)
+                row = evaluate_candidate(candidate, args.season_days, args.dt_min, args.seed + trial_no, args.mode, models)
+                row["trial"] = trial_no
+                row["round"] = round_no
+                results.append(row)
+                round_rows.append(row)
+                print(
+                    f"[R{round_no:02d} {i + 1:03d}/{round_trials}] score={row['score']:.4f} "
+                    f"EC_MAE={row['ec_mae']:.4f} pH_MAE={row['ph_mae']:.4f} "
+                    f"EC_over={row['ec_over_max']:.4f} pH_over={row['ph_over_max']:.4f}"
+                )
+
+            round_rows.sort(key=lambda x: x["score"])
+            best = min(results, key=lambda x: x["score"])
+            center = _candidate_from_row(best)
+            print(
+                f"Round best score={round_rows[0]['score']:.4f}; "
+                f"global best score={best['score']:.4f}"
+            )
+            if _meets_targets(best, args):
+                stop_reason = "target_metrics_met"
+                break
+            radius = max(args.min_radius, radius * args.refine_shrink)
+        else:
+            stop_reason = "max_rounds_reached"
+    else:
+        for i in range(args.trials):
+            candidate = _sample_candidate(rng, gain_steps=gain_steps)
+            row = evaluate_candidate(candidate, args.season_days, args.dt_min, args.seed + i, args.mode, models)
+            row["trial"] = i + 1
+            row["round"] = 1
+            results.append(row)
+            print(
+                f"[{i + 1:03d}/{args.trials}] score={row['score']:.4f} "
+                f"EC_MAE={row['ec_mae']:.4f} pH_MAE={row['ph_mae']:.4f} "
+                f"EC_over={row['ec_over_max']:.4f} pH_over={row['ph_over_max']:.4f}"
+            )
 
     results.sort(key=lambda x: x["score"])
+    best = results[0]
     out_dir = ROOT / "results" / "pid_tuning" / datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -342,10 +476,19 @@ def main() -> int:
 
     summary = {
         "mode": args.mode,
+        "auto": args.auto,
         "season_days": args.season_days,
         "dt_min": args.dt_min,
-        "trials": args.trials,
-        "best": results[0],
+        "trials": len(results),
+        "stop_reason": stop_reason,
+        "targets": {
+            "ec_mae": args.target_ec_mae,
+            "ph_mae": args.target_ph_mae,
+            "ec_over_max": args.target_ec_over,
+            "ph_over_max": args.target_ph_over,
+        },
+        "gain_steps": gain_steps,
+        "best": best,
         "top": results[: args.top_k],
         "note": "These are Python coarse-tuning candidates. Confirm final PID values with PLC/PLCSIM.",
     }
@@ -353,7 +496,8 @@ def main() -> int:
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print("\nBest candidate:")
-    print(json.dumps(results[0], ensure_ascii=False, indent=2))
+    print(json.dumps(best, ensure_ascii=False, indent=2))
+    print(f"Stop reason: {stop_reason}")
     print(f"\nSaved: {csv_path}")
     print(f"Saved: {summary_path}")
     return 0
