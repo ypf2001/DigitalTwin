@@ -171,6 +171,30 @@ plc:
       bit: 1
       type: bool
       bytes: 1
+    Kp_EC_Set:
+      offset: 126
+      type: real
+      bytes: 4
+    Ki_EC_Set:
+      offset: 130
+      type: real
+      bytes: 4
+    Kd_EC_Set:
+      offset: 134
+      type: real
+      bytes: 4
+    Kp_pH_Set:
+      offset: 138
+      type: real
+      bytes: 4
+    Ki_pH_Set:
+      offset: 142
+      type: real
+      bytes: 4
+    Kd_pH_Set:
+      offset: 146
+      type: real
+      bytes: 4
 
     # PLC/PLCSIM 写回 Python 的执行结果与状态
     Remote_Comms_OK:

@@ -186,6 +186,45 @@ class PLCClient:
             logger.error(f"[PLC] Growth_Stage write failed: {e}")
             return False
 
+    def write_pid_params(self,
+                         kp_ec: float,
+                         ki_ec: float,
+                         kd_ec: float,
+                         kp_ph: float,
+                         ki_ph: float,
+                         kd_ph: float) -> bool:
+        """Write PLC PID parameters stored in DB1.
+
+        This lets Python coarse-tuning results replace the PLC gains without
+        editing SCL, recompiling, or downloading again.
+        """
+        names = [
+            "Kp_EC_Set", "Ki_EC_Set", "Kd_EC_Set",
+            "Kp_pH_Set", "Ki_pH_Set", "Kd_pH_Set",
+        ]
+        if not all(name in self.addr_map for name in names):
+            missing = [name for name in names if name not in self.addr_map]
+            logger.error(f"[PLC] PID address mapping missing: {missing}")
+            return False
+
+        try:
+            self._ensure_connected()
+            self._write_real("Kp_EC_Set", kp_ec)
+            self._write_real("Ki_EC_Set", ki_ec)
+            self._write_real("Kd_EC_Set", kd_ec)
+            self._write_real("Kp_pH_Set", kp_ph)
+            self._write_real("Ki_pH_Set", ki_ph)
+            self._write_real("Kd_pH_Set", kd_ph)
+            logger.info(
+                "[PLC] PID params written: "
+                f"EC=({kp_ec:.4f}, {ki_ec:.4f}, {kd_ec:.4f}), "
+                f"pH=({kp_ph:.4f}, {ki_ph:.4f}, {kd_ph:.4f})"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] PID params write failed: {e}")
+            return False
+
     def _calc_read_range(self, var_names: list) -> tuple[int, int]:
         min_off = float("inf")
         max_end = 0
@@ -277,6 +316,8 @@ class PLCClient:
             "Stage_EC_SP", "Stage_pH_SP",
             "Active_EC_SP", "Active_pH_SP",
             "Setpoint_Protection_Active", "Stage_Auto_SP_Enable",
+            "Kp_EC_Set", "Ki_EC_Set", "Kd_EC_Set",
+            "Kp_pH_Set", "Ki_pH_Set", "Kd_pH_Set",
             "q_f_cmd", "q_a_cmd",
             "Valve_F_Actual", "Valve_A_Actual",
             "AQ_Valve_F_Raw", "AQ_Valve_A_Raw",

@@ -1,0 +1,684 @@
+﻿FUNCTION_BLOCK "RateLimiter"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      target : Real;   // AI输出目标值
+      maxRateUp : Real := 5.0;   //  最大上升速率（单位/秒）
+      maxRateDown : Real := 5.0;   // 最大下降速率（单位/秒），
+      cycleTime : Real := 0.01;   // OB1扫描周期（秒），通常 5~15ms
+      enable : Bool := TRUE;   // 斜坡使能
+      reset : Bool;   // 复位：输出立即跳变到 target
+   END_VAR
+
+   VAR_OUTPUT 
+      output : Real;   // 平滑后的输出值
+      isLimited : Bool;   // TRUE = 正在限幅（被斜坡钳制）
+   END_VAR
+
+   VAR 
+      lastOutput : Real;   // 上周期输出值（静态保持）
+      initDone : Bool;   // 初始化完成标志
+   END_VAR
+
+   VAR_TEMP 
+      delta : Real;   // 与目标的偏差
+      maxStep : Real;   // 本周期允许的最大步长
+   END_VAR
+
+
+BEGIN
+	// ===================================================================
+	// RateLimiter — 防震荡物理护盾
+	// 将高频跳变的目标值平滑为有限速率的变化曲线，保护物理设备
+	// ===================================================================
+	
+	// --- 首次调用：避免从 0 跳到目标值的阶跃 ---
+	IF NOT #initDone THEN
+	    #output := #target;
+	    #lastOutput := #target;
+	    #initDone := TRUE;
+	    #isLimited := FALSE;
+	    RETURN;
+	END_IF;
+	
+	// --- 复位模式 ---
+	IF #reset THEN
+	    #output := #target;
+	    #lastOutput := #target;
+	    #isLimited := FALSE;
+	    RETURN;
+	END_IF;
+	
+	// --- 正常斜坡控制 ---
+	IF #enable AND #cycleTime > 0.0 THEN
+	    #delta := #target - #lastOutput;
+	    
+	    IF #delta > 0.0 THEN
+	        // === 上升方向 ===
+	        #maxStep := #maxRateUp * #cycleTime;
+	        IF #delta > #maxStep THEN
+	            #output := #lastOutput + #maxStep;
+	            #isLimited := TRUE;
+	        ELSE
+	            #output := #target;          // 在允许范围内，直接输出
+	            #isLimited := FALSE;
+	        END_IF;
+	    ELSIF #delta < 0.0 THEN
+	        // === 下降方向 ===
+	        #maxStep := #maxRateDown * #cycleTime;
+	        IF - #delta > #maxStep THEN        // 取绝对值比较
+	            #output := #lastOutput - #maxStep;
+	            #isLimited := TRUE;
+	        ELSE
+	            #output := #target;
+	            #isLimited := FALSE;
+	        END_IF;
+	    ELSE
+	        // delta = 0，目标未变化
+	        #output := #target;
+	        #isLimited := FALSE;
+	    END_IF;
+	ELSE
+	    // 斜坡禁用或周期无效 — 直通模式
+	    #output := #target;
+	    #isLimited := FALSE;
+	END_IF;
+	
+	// --- 保存本周期的输出，供下周期使用 ---
+	#lastOutput := #output;
+END_FUNCTION_BLOCK
+
+DATA_BLOCK "inst_RL_A"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+"RateLimiter"
+
+BEGIN
+
+END_DATA_BLOCK
+
+DATA_BLOCK "inst_RL_F"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+"RateLimiter"
+
+BEGIN
+
+END_DATA_BLOCK
+
+DATA_BLOCK "DB1"
+{ DB_Accessible_From_OPC_UA := 'FALSE' ;
+ S7_Optimized_Access := 'FALSE' }
+VERSION : 0.1
+NON_RETAIN
+   STRUCT 
+      // Python/SAC -> PLC. 地址需要和 config/simulation.yaml 保持一致。
+      EC_Set_SP : Real;   // DBD0，SAC 输出的目标 EC
+      pH_Set_SP : Real;   // DBD4，SAC 输出的目标 pH
+      EC_Actual : Real;   // DBD8，Python/传感器反馈的出口 EC
+      pH_Actual : Real;   // DBD12，Python/传感器反馈的出口 pH
+      SAC_Enable : Bool;   // DBX16.0，远程/SAC 控制使能
+      Reserved_17 : Byte;   // DBB17，占位，保证 Remote_Heartbeat 位于 DBW18
+      Remote_Heartbeat : Int;
+      Remote_Comms_OK : Bool;   // DBX20.0，PLC 判断 Python 通讯是否正常
+      Reserved_21 : Byte;   // DBB21，占位，保证 Watchdog_Timer 位于 DBW22
+      Watchdog_Timer : Int;
+      q_f_cmd : Real;   // DBD24，PLC 输出肥料母液流量 L/min
+      q_a_cmd : Real;   // DBD28，PLC 输出酸液流量 L/min
+      Valve_F_Actual : Real;   // DBD32，肥液执行量反馈
+      Valve_A_Actual : Real;   // DBD36，酸液执行量反馈
+      AQ_Valve_F_Raw : Int;
+      AQ_Valve_A_Raw : Int;
+      System_Alarm_Light : Bool;
+
+      // 以下为 PLC 内部状态，不建议 Python 直接读写。
+      Last_Heartbeat : Int;
+      Watchdog_Count : Int;
+      q_f_raw : Real;
+      q_a_raw : Real;
+      q_f_limited : Bool;
+      q_a_limited : Bool;
+
+      // 兼容旧 A 方案/旧 OB1 网络的变量。放在 Python 固定读写区之后，
+      // 不影响 EC_Set_SP、q_f_cmd 等前 45 字节地址。
+      Valve_F_Opt_SP : Real;
+      Valve_A_Opt_SP : Real;
+      Ramp_Target_F : Real;
+      Ramp_Target_A : Real;
+      Ramp_Step : Real;
+      Remote_Comms_Was_OK : Bool;
+      Actual_Valve_F : Real;
+      Actual_Valve_A : Real;
+      tWatchdog {InstructionName := 'TON_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TON_TIME;
+      Growth_Stage : Int;   // 0=INI, 1=DEV, 2=MID, 3=LATE
+      Stage_EC_SP : Real;   // 当前生长阶段固定 EC 保护值
+      Stage_pH_SP : Real;   // 当前生长阶段固定 pH 保护值
+      Active_EC_SP : Real;   // PLC 实际采用的 EC 目标
+      Active_pH_SP : Real;   // PLC 实际采用的 pH 目标
+      Setpoint_Protection_Active : Bool;   // SAC 目标越界时置 TRUE
+      Stage_Auto_SP_Enable : Bool;   // TRUE=PLC 根据 Growth_Stage 自动写 EC_Set_SP/pH_Set_SP
+
+      // PID 在线调参区。Python 粗调或 TIA 监控表可直接写这些值。
+      Kp_EC_Set : Real;   // EC 比例增益
+      Ki_EC_Set : Real;   // EC 积分增益
+      Kd_EC_Set : Real;   // EC 微分增益
+      Kp_pH_Set : Real;   // pH 比例增益
+      Ki_pH_Set : Real;   // pH 积分增益
+      Kd_pH_Set : Real;   // pH 微分增益
+   END_STRUCT;
+
+
+BEGIN
+   EC_Set_SP := 1.5;
+   pH_Set_SP := 6.0;
+   EC_Actual := 0.0;
+   pH_Actual := 7.0;
+   SAC_Enable := false;
+   Remote_Comms_OK := false;
+   q_f_cmd := 0.0;
+   q_a_cmd := 0.0;
+   Valve_F_Actual := 0.0;
+   Valve_A_Actual := 0.0;
+   AQ_Valve_F_Raw := 0;
+   AQ_Valve_A_Raw := 0;
+   System_Alarm_Light := false;
+   Valve_F_Opt_SP := 0.0;
+   Valve_A_Opt_SP := 0.0;
+   Ramp_Target_F := 0.0;
+   Ramp_Target_A := 0.0;
+   Ramp_Step := 0.0;
+   Remote_Comms_Was_OK := false;
+   Actual_Valve_F := 0.0;
+   Actual_Valve_A := 0.0;
+   Growth_Stage := 2;
+   Stage_EC_SP := 1.5;
+   Stage_pH_SP := 5.9;
+   Active_EC_SP := 1.5;
+   Active_pH_SP := 5.9;
+   Setpoint_Protection_Active := false;
+   Stage_Auto_SP_Enable := true;
+   Kp_EC_Set := 1.20;
+   Ki_EC_Set := 0.0;
+   Kd_EC_Set := 0.0;
+   Kp_pH_Set := 1.20;
+   Ki_pH_Set := 0.01;
+   Kd_pH_Set := 0.0;
+
+END_DATA_BLOCK
+
+FUNCTION_BLOCK "FB_FertigationControl"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      EC_Set_SP : Real;   // 上位机/SAC 目标 EC
+      pH_Set_SP : Real;   // 上位机/SAC 目标 pH
+      EC_Actual : Real;   // 出口 EC 反馈
+      pH_Actual : Real;   // 出口 pH 反馈
+      SAC_Enable : Bool;   // 远程控制使能
+      Remote_Heartbeat : Int;   // 上位机心跳
+      CycleTime : Real := 0.1;   // 调用周期，单位 s
+      Kp_EC : Real := 1.20;   // EC PID 比例增益
+      Ki_EC : Real := 0.0;   // EC 积分先关闭，避免到目标后继续累积导致过冲
+      Kd_EC : Real := 0.0;   // EC PID 微分增益，联调初期先置 0
+      Kp_pH : Real := 1.20;   // pH PID 比例增益，pH 偏高时加酸
+      Ki_pH : Real := 0.01;   // pH PID 积分增益
+      Kd_pH : Real := 0.0;   // pH PID 微分增益，联调初期先置 0
+      EC_Filter_Tau : Real := 2.0;   // EC 反馈滤波时间常数，单位 s，越大越稳但响应越慢
+      pH_Filter_Tau : Real := 2.0;   // pH 反馈滤波时间常数，单位 s
+      EC_Deadband : Real := 0.03;   // EC 小误差死区，避免输出在目标附近来回跳
+      pH_Deadband : Real := 0.04;   // pH 小误差死区
+      EC_MaxInputStep : Real := 0.15;   // 每周期允许进入滤波器的最大 EC 跳变
+      pH_MaxInputStep : Real := 0.15;   // 每周期允许进入滤波器的最大 pH 跳变
+      q_f_min : Real := 0.0;
+      q_f_max : Real := 10.0;
+      q_a_min : Real := 0.0;
+      q_a_max : Real := 4.0;
+      Watchdog_Limit : Int := 10000;   // 心跳超限后进入安全输出，需大于两次 Python 写入间隔内的 OB1 扫描次数
+      Growth_Stage : Int := 2;   // 0=INI, 1=DEV, 2=MID, 3=LATE
+   END_VAR
+
+   VAR_OUTPUT
+      Remote_Comms_OK : Bool;
+      Watchdog_Timer : Int;
+      Stage_EC_SP : Real;
+      Stage_pH_SP : Real;
+      Active_EC_SP : Real;
+      Active_pH_SP : Real;
+      Setpoint_Protection_Active : Bool;
+      q_f_cmd : Real;
+      q_a_cmd : Real;
+      Valve_F_Actual : Real;
+      Valve_A_Actual : Real;
+      AQ_Valve_F_Raw : Int;
+      AQ_Valve_A_Raw : Int;
+      System_Alarm_Light : Bool;
+   END_VAR
+
+   VAR
+      Last_Heartbeat : Int;
+      Watchdog_Count : Int;
+      q_f_raw : Real;
+      q_a_raw : Real;
+      EC_Integral : Real;
+      pH_Integral : Real;
+      EC_Error_Last : Real;
+      pH_Error_Last : Real;
+      EC_Filtered : Real;
+      pH_Filtered : Real;
+      Filter_Init : Bool;
+      inst_CommsWatchdog : "FB_CommsWatchdog_LAD";
+      inst_RL_F : "RateLimiter";
+      inst_RL_A : "RateLimiter";
+      tWatchdog {InstructionName := 'TON_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TON_TIME;
+   END_VAR
+
+   VAR_TEMP
+      EC_Error : Real;
+      pH_Error : Real;
+      q_f_target : Real;
+      q_a_target : Real;
+      q_f_feedforward : Real;
+      q_f_correction : Real;
+      q_a_feedforward : Real;
+      q_a_correction : Real;
+      Heartbeat_Changed : Bool;
+      EC_Derivative : Real;
+      pH_Derivative : Real;
+      q_f_pid : Real;
+      q_a_pid : Real;
+      EC_Alpha : Real;
+      pH_Alpha : Real;
+      EC_InputDelta : Real;
+      pH_InputDelta : Real;
+      EC_FilterTarget : Real;
+      pH_FilterTarget : Real;
+      Stage_EC_Min : Real;
+      Stage_EC_Max : Real;
+      Stage_pH_Min : Real;
+      Stage_pH_Max : Real;
+   END_VAR
+
+BEGIN
+   // ================================================================
+   // B 方案 PLC 执行层
+   // Python/SAC 只给 EC_set、pH_set；PLC 根据反馈计算 q_f、q_a。
+   // 当前版本先用简单比例控制，跑通后可替换为 PID / ESO-AFOPID。
+   // ================================================================
+
+   // --- 心跳监控 ---
+   // Python 每次写入都会递增 Remote_Heartbeat；PLC 看到变化则认为通信正常。
+   // 这里直接在执行层实现，避免外部 LAD 看门狗未下载或未刷新时锁死输出。
+   #Heartbeat_Changed := #Remote_Heartbeat <> #Last_Heartbeat;
+
+   IF #Heartbeat_Changed THEN
+      #Last_Heartbeat := #Remote_Heartbeat;
+      #Watchdog_Count := 0;
+      #Remote_Comms_OK := TRUE;
+   ELSE
+      IF #Watchdog_Count < #Watchdog_Limit THEN
+         #Watchdog_Count := #Watchdog_Count + 1;
+      END_IF;
+      #Remote_Comms_OK := #Watchdog_Count < #Watchdog_Limit;
+   END_IF;
+
+   #Watchdog_Timer := #Watchdog_Count;
+
+   // --- 生长阶段固定目标保护 ---
+   // 0=INI 出苗期，1=DEV 营养/形成期，2=MID 膨大期，3=LATE 后期/成熟期。
+   IF #Growth_Stage = 0 THEN
+      #Stage_EC_SP := 0.8;
+      #Stage_pH_SP := 6.2;
+      #Stage_EC_Min := 0.7;
+      #Stage_EC_Max := 0.9;
+      #Stage_pH_Min := 6.1;
+      #Stage_pH_Max := 6.3;
+   ELSIF #Growth_Stage = 1 THEN
+      #Stage_EC_SP := 1.1;
+      #Stage_pH_SP := 6.1;
+      #Stage_EC_Min := 0.9;
+      #Stage_EC_Max := 1.3;
+      #Stage_pH_Min := 6.0;
+      #Stage_pH_Max := 6.2;
+   ELSIF #Growth_Stage = 2 THEN
+      #Stage_EC_SP := 1.5;
+      #Stage_pH_SP := 5.9;
+      #Stage_EC_Min := 1.3;
+      #Stage_EC_Max := 1.7;
+      #Stage_pH_Min := 5.8;
+      #Stage_pH_Max := 6.1;
+   ELSE
+      #Stage_EC_SP := 1.0;
+      #Stage_pH_SP := 6.1;
+      #Stage_EC_Min := 0.8;
+      #Stage_EC_Max := 1.2;
+      #Stage_pH_Min := 6.0;
+      #Stage_pH_Max := 6.3;
+   END_IF;
+
+   #Active_EC_SP := #EC_Set_SP;
+   #Active_pH_SP := #pH_Set_SP;
+   #Setpoint_Protection_Active := FALSE;
+
+   IF (#EC_Set_SP < #Stage_EC_Min) OR (#EC_Set_SP > #Stage_EC_Max) THEN
+      #Active_EC_SP := #Stage_EC_SP;
+      #Setpoint_Protection_Active := TRUE;
+   END_IF;
+
+   IF (#pH_Set_SP < #Stage_pH_Min) OR (#pH_Set_SP > #Stage_pH_Max) THEN
+      #Active_pH_SP := #Stage_pH_SP;
+      #Setpoint_Protection_Active := TRUE;
+   END_IF;
+
+   // --- 安全状态：未使能或通讯超时，所有执行量归零 ---
+   IF (NOT #SAC_Enable) OR (NOT #Remote_Comms_OK) THEN
+      #q_f_raw := 0.0;
+      #q_a_raw := 0.0;
+      #q_f_cmd := 0.0;
+      #q_a_cmd := 0.0;
+      #Valve_F_Actual := 0.0;
+      #Valve_A_Actual := 0.0;
+      #AQ_Valve_F_Raw := 0;
+      #AQ_Valve_A_Raw := 0;
+      #System_Alarm_Light := NOT #Remote_Comms_OK;
+      RETURN;
+   END_IF;
+
+   // --- 反馈滤波 ---
+   // Python/传感器写入的 EC_Actual、pH_Actual 可能有瞬时抖动；
+   // PID 使用滤波后的值，避免泵阀跟着噪声频繁调整。
+   IF NOT #Filter_Init THEN
+      #EC_Filtered := #EC_Actual;
+      #pH_Filtered := #pH_Actual;
+      #Filter_Init := TRUE;
+   END_IF;
+
+   IF (#CycleTime > 0.0) AND (#EC_Filter_Tau > 0.0) THEN
+      #EC_Alpha := #CycleTime / (#EC_Filter_Tau + #CycleTime);
+   ELSE
+      #EC_Alpha := 1.0;
+   END_IF;
+
+   IF (#CycleTime > 0.0) AND (#pH_Filter_Tau > 0.0) THEN
+      #pH_Alpha := #CycleTime / (#pH_Filter_Tau + #CycleTime);
+   ELSE
+      #pH_Alpha := 1.0;
+   END_IF;
+
+   // 基本量程保护 + 输入跳变限制：明显不合理或过快的变化不直接进入滤波器。
+   IF (#EC_Actual >= 0.0) AND (#EC_Actual <= 10.0) THEN
+      #EC_InputDelta := #EC_Actual - #EC_Filtered;
+      IF #EC_InputDelta > #EC_MaxInputStep THEN
+         #EC_FilterTarget := #EC_Filtered + #EC_MaxInputStep;
+      ELSIF #EC_InputDelta < -#EC_MaxInputStep THEN
+         #EC_FilterTarget := #EC_Filtered - #EC_MaxInputStep;
+      ELSE
+         #EC_FilterTarget := #EC_Actual;
+      END_IF;
+      #EC_Filtered := #EC_Filtered + #EC_Alpha * (#EC_FilterTarget - #EC_Filtered);
+   END_IF;
+
+   IF (#pH_Actual >= 0.0) AND (#pH_Actual <= 14.0) THEN
+      #pH_InputDelta := #pH_Actual - #pH_Filtered;
+      IF #pH_InputDelta > #pH_MaxInputStep THEN
+         #pH_FilterTarget := #pH_Filtered + #pH_MaxInputStep;
+      ELSIF #pH_InputDelta < -#pH_MaxInputStep THEN
+         #pH_FilterTarget := #pH_Filtered - #pH_MaxInputStep;
+      ELSE
+         #pH_FilterTarget := #pH_Actual;
+      END_IF;
+      #pH_Filtered := #pH_Filtered + #pH_Alpha * (#pH_FilterTarget - #pH_Filtered);
+   END_IF;
+
+   // --- PID 闭环控制 ---
+   // EC 偏低：增加肥料母液流量；EC 偏高：减少肥料母液流量。
+   #EC_Error := #Active_EC_SP - #EC_Filtered;
+
+   // pH 偏高：增加酸液流量；pH 偏低：减少酸液流量。
+   #pH_Error := #pH_Filtered - #Active_pH_SP;
+
+   IF ABS(#EC_Error) < #EC_Deadband THEN
+      #EC_Error := 0.0;
+   END_IF;
+
+   IF ABS(#pH_Error) < #pH_Deadband THEN
+      #pH_Error := 0.0;
+   END_IF;
+
+   IF #CycleTime > 0.0 THEN
+      #EC_Integral := #EC_Integral + #EC_Error * #CycleTime;
+      #pH_Integral := #pH_Integral + #pH_Error * #CycleTime;
+
+      #EC_Derivative := (#EC_Error - #EC_Error_Last) / #CycleTime;
+      #pH_Derivative := (#pH_Error - #pH_Error_Last) / #CycleTime;
+   ELSE
+      #EC_Derivative := 0.0;
+      #pH_Derivative := 0.0;
+   END_IF;
+
+   // 积分限幅，防止长时间饱和后积分过大。
+   IF #EC_Integral > 5.0 THEN
+      #EC_Integral := 5.0;
+   ELSIF #EC_Integral < -5.0 THEN
+      #EC_Integral := -5.0;
+   END_IF;
+
+   IF #pH_Integral > 5.0 THEN
+      #pH_Integral := 5.0;
+   ELSIF #pH_Integral < -5.0 THEN
+      #pH_Integral := -5.0;
+   END_IF;
+
+   // EC 平衡前馈 + 分段助推：
+   // 当前数字孪生清水流量 q_w=136 L/min，肥料母液 EC=35 dS/m。
+   // q_f_feedforward 是目标 EC 的保守维持流量；EC=0.8 时约 2.93 L/min。
+   // 当实际 EC 远低于目标时额外助推，接近目标后只保留维持流量。
+   IF (#Active_EC_SP > 0.0) AND (#Active_EC_SP < 34.0) THEN
+      #q_f_feedforward := 0.92 * (#Active_EC_SP * 136.0) / (35.0 - #Active_EC_SP);
+   ELSE
+      #q_f_feedforward := 0.0;
+   END_IF;
+
+   IF #EC_Error > 0.35 THEN
+      #q_f_correction := 2.50 * #EC_Error + 0.80;
+   ELSIF #EC_Error > 0.08 THEN
+      #q_f_correction := 1.60 * #EC_Error + 0.20;
+   ELSIF #EC_Error > 0.03 THEN
+      #q_f_correction := #Kp_EC * #EC_Error;
+   ELSIF #EC_Error < -0.08 THEN
+      #q_f_correction := 3.50 * #EC_Error;
+   ELSIF #EC_Error < -0.03 THEN
+      #q_f_correction := 2.00 * #EC_Error;
+   ELSE
+      #q_f_correction := 0.0;
+   END_IF;
+
+   #q_f_pid := #q_f_feedforward + #q_f_correction;
+
+   // pH also needs a holding flow. The target pH values are stage-fixed,
+   // so a small feedforward keeps the root-zone pH from drifting back to water pH.
+   IF #Active_pH_SP <= 5.95 THEN
+      #q_a_feedforward := 1.10;
+   ELSIF #Active_pH_SP <= 6.15 THEN
+      #q_a_feedforward := 1.05;
+   ELSIF #Active_pH_SP <= 6.30 THEN
+      #q_a_feedforward := 0.80;
+   ELSE
+      #q_a_feedforward := 0.0;
+   END_IF;
+
+   IF #pH_Error > 0.45 THEN
+      #q_a_correction := #q_a_max;
+   ELSIF #pH_Error > 0.25 THEN
+      #q_a_correction := 3.20 * #pH_Error + 0.85;
+   ELSIF #pH_Error > 0.0 THEN
+      #q_a_correction := 2.20 * #pH_Error + #Ki_pH * #pH_Integral + #Kd_pH * #pH_Derivative;
+   ELSIF #pH_Error < -0.10 THEN
+      #q_a_correction := 2.50 * #pH_Error;
+   ELSE
+      #q_a_correction := 0.0;
+   END_IF;
+
+   #q_a_pid := #q_a_feedforward + #q_a_correction;
+
+   #q_f_target := #q_f_pid;
+   #q_a_target := #q_a_pid;
+
+   #EC_Error_Last := #EC_Error;
+   #pH_Error_Last := #pH_Error;
+
+   // --- 硬保护：宁愿少，也不继续推过设定值 ---
+   // PID 参数只影响响应速度；这里负责最终兜底。
+   // EC 一旦接近或高于目标，立即停止加肥，避免继续越过设定值。
+   IF #EC_Filtered >= (#Active_EC_SP - 0.02) THEN
+      #q_f_target := 0.0;
+      #EC_Integral := 0.0;
+   END_IF;
+
+   // pH 的执行方向相反：加酸会降低 pH。
+   // 低于或接近 pH 目标时立即停止加酸，避免 pH 被压得过低。
+   IF #pH_Filtered <= (#Active_pH_SP + 0.03) THEN
+      #q_a_target := 0.0;
+      #pH_Integral := 0.0;
+   END_IF;
+
+   // --- 物理限幅 ---
+   IF #q_f_target < #q_f_min THEN
+      #q_f_target := #q_f_min;
+   ELSIF #q_f_target > #q_f_max THEN
+      #q_f_target := #q_f_max;
+   END_IF;
+
+   IF #q_a_target < #q_a_min THEN
+      #q_a_target := #q_a_min;
+   ELSIF #q_a_target > #q_a_max THEN
+      #q_a_target := #q_a_max;
+   END_IF;
+
+   // --- 斜坡限速，保护泵阀 ---
+   #inst_RL_F(
+      target := #q_f_target,
+      maxRateUp := 1.5,
+      maxRateDown := 2.0,
+      cycleTime := #CycleTime,
+      enable := TRUE,
+      reset := FALSE
+   );
+
+   #inst_RL_A(
+      target := #q_a_target,
+      maxRateUp := 1.0,
+      maxRateDown := 1.2,
+      cycleTime := #CycleTime,
+      enable := TRUE,
+      reset := FALSE
+   );
+
+   #q_f_cmd := #inst_RL_F.output;
+   #q_a_cmd := #inst_RL_A.output;
+   #q_f_raw := #q_f_cmd;
+   #q_a_raw := #q_a_cmd;
+
+   #Valve_F_Actual := #q_f_cmd;
+   #Valve_A_Actual := #q_a_cmd;
+
+   // --- 0~27648 模拟量换算 ---
+   #AQ_Valve_F_Raw := REAL_TO_INT(#q_f_cmd / #q_f_max * 27648.0);
+   #AQ_Valve_A_Raw := REAL_TO_INT(#q_a_cmd / #q_a_max * 27648.0);
+
+   #System_Alarm_Light := FALSE;
+END_FUNCTION_BLOCK
+
+DATA_BLOCK "inst_FertigationControl"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+"FB_FertigationControl"
+
+BEGIN
+
+END_DATA_BLOCK
+
+FUNCTION "FC_CallFertigationControl" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+
+BEGIN
+   // 在 OB1 中调用本 FC，即可完成：
+   // DB1 输入区 -> FB_FertigationControl -> DB1 输出区。
+   IF "DB1".Stage_Auto_SP_Enable THEN
+      IF "DB1".Growth_Stage = 0 THEN
+         "DB1".EC_Set_SP := 0.8;
+         "DB1".pH_Set_SP := 6.2;
+      ELSIF "DB1".Growth_Stage = 1 THEN
+         "DB1".EC_Set_SP := 1.1;
+         "DB1".pH_Set_SP := 6.1;
+      ELSIF "DB1".Growth_Stage = 2 THEN
+         "DB1".EC_Set_SP := 1.5;
+         "DB1".pH_Set_SP := 5.9;
+      ELSE
+         "DB1".EC_Set_SP := 1.0;
+         "DB1".pH_Set_SP := 6.1;
+      END_IF;
+   END_IF;
+
+   "inst_FertigationControl"(
+      EC_Set_SP := "DB1".EC_Set_SP,
+      pH_Set_SP := "DB1".pH_Set_SP,
+      EC_Actual := "DB1".EC_Actual,
+      pH_Actual := "DB1".pH_Actual,
+      SAC_Enable := "DB1".SAC_Enable,
+      Remote_Heartbeat := "DB1".Remote_Heartbeat,
+      CycleTime := 0.1,
+      Kp_EC := "DB1".Kp_EC_Set,
+      Ki_EC := "DB1".Ki_EC_Set,
+      Kd_EC := "DB1".Kd_EC_Set,
+      Kp_pH := "DB1".Kp_pH_Set,
+      Ki_pH := "DB1".Ki_pH_Set,
+      Kd_pH := "DB1".Kd_pH_Set,
+      EC_Filter_Tau := 2.0,
+      pH_Filter_Tau := 2.0,
+      EC_Deadband := 0.03,
+      pH_Deadband := 0.04,
+      EC_MaxInputStep := 0.15,
+      pH_MaxInputStep := 0.15,
+      q_f_min := 0.0,
+      q_f_max := 10.0,
+      q_a_min := 0.0,
+      q_a_max := 4.0,
+      Watchdog_Limit := 10000,
+      Growth_Stage := "DB1".Growth_Stage,
+      Remote_Comms_OK => "DB1".Remote_Comms_OK,
+      Watchdog_Timer => "DB1".Watchdog_Timer,
+      Stage_EC_SP => "DB1".Stage_EC_SP,
+      Stage_pH_SP => "DB1".Stage_pH_SP,
+      Active_EC_SP => "DB1".Active_EC_SP,
+      Active_pH_SP => "DB1".Active_pH_SP,
+      Setpoint_Protection_Active => "DB1".Setpoint_Protection_Active,
+      q_f_cmd => "DB1".q_f_cmd,
+      q_a_cmd => "DB1".q_a_cmd,
+      Valve_F_Actual => "DB1".Valve_F_Actual,
+      Valve_A_Actual => "DB1".Valve_A_Actual,
+      AQ_Valve_F_Raw => "DB1".AQ_Valve_F_Raw,
+      AQ_Valve_A_Raw => "DB1".AQ_Valve_A_Raw,
+      System_Alarm_Light => "DB1".System_Alarm_Light
+   );
+
+   // 同步部分内部状态到 DB1，方便在线监控。
+   "DB1".Last_Heartbeat := "inst_FertigationControl".Last_Heartbeat;
+   "DB1".Watchdog_Count := "inst_FertigationControl".Watchdog_Count;
+   "DB1".q_f_raw := "inst_FertigationControl".q_f_raw;
+   "DB1".q_a_raw := "inst_FertigationControl".q_a_raw;
+
+   // 兼容旧变量名，若旧监控画面或旧网络还在看 Actual_Valve_F/A，
+   // 这里同步为当前 B 方案执行层输出。
+   "DB1".Actual_Valve_F := "DB1".Valve_F_Actual;
+   "DB1".Actual_Valve_A := "DB1".Valve_A_Actual;
+   "DB1".Valve_F_Opt_SP := "DB1".q_f_cmd;
+   "DB1".Valve_A_Opt_SP := "DB1".q_a_cmd;
+   "DB1".Ramp_Target_F := "DB1".q_f_cmd;
+   "DB1".Ramp_Target_A := "DB1".q_a_cmd;
+   "DB1".Remote_Comms_Was_OK := "DB1".Remote_Comms_OK;
+END_FUNCTION
+
