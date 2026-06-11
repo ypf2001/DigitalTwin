@@ -93,6 +93,57 @@ def get_plc_software(project, plc_name: str | None = None):
     return matches[0]
 
 
+def force_project_offline(project) -> int:
+    """Try to switch all PLC device items in the project to offline mode."""
+    load_openness()
+
+    from Siemens.Engineering.Online import OnlineProvider  # type: ignore
+
+    switched = 0
+    for device in project.Devices:
+        for item in iter_device_items(device):
+            try:
+                provider = item.GetService[OnlineProvider]()
+            except Exception:
+                provider = None
+
+            if provider is None:
+                continue
+
+            try:
+                provider.GoOffline()
+                switched += 1
+            except Exception:
+                # Already offline or not currently connected. Import can proceed.
+                pass
+    return switched
+
+
+def force_project_online(project) -> int:
+    """Try to switch all PLC device items in the project to online mode."""
+    load_openness()
+
+    from Siemens.Engineering.Online import OnlineProvider  # type: ignore
+
+    switched = 0
+    for device in project.Devices:
+        for item in iter_device_items(device):
+            try:
+                provider = item.GetService[OnlineProvider]()
+            except Exception:
+                provider = None
+
+            if provider is None:
+                continue
+
+            try:
+                provider.GoOnline()
+                switched += 1
+            except Exception:
+                pass
+    return switched
+
+
 def find_plc_block(plc_software, block_name: str):
     block = plc_software.BlockGroup.Blocks.Find(block_name)
     if block is None:

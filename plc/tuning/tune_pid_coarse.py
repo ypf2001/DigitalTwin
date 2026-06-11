@@ -113,6 +113,25 @@ class PLCLikePID:
         self.rl_f = RateLimiter(max_up=1.5, max_down=2.0)
         self.rl_a = RateLimiter(max_up=1.0, max_down=1.2)
 
+    @staticmethod
+    def _fuzzy_gains(
+        kp: float,
+        ki: float,
+        kd: float,
+        error: float,
+        derivative: float,
+        error_ref: float,
+        deriv_ref: float,
+    ) -> tuple[float, float, float]:
+        """Scale base PID gains with the same fuzzy rules used in PLC SCL."""
+        e = float(np.clip(abs(error) / max(error_ref, 1e-6), 0.0, 1.0))
+        de = float(np.clip(abs(derivative) / max(deriv_ref, 1e-6), 0.0, 1.0))
+
+        kp_eff = kp * (0.75 + 0.55 * e + 0.20 * de)
+        ki_eff = ki * (1.20 - 0.70 * e - 0.30 * de)
+        kd_eff = kd * (0.60 + 0.30 * e + 0.80 * de)
+        return kp_eff, max(0.0, ki_eff), kd_eff
+
     def step(self, ec_sp: float, ph_sp: float, ec_actual: float, ph_actual: float, dt_s: float) -> tuple[float, float]:
         ec_error = ec_sp - ec_actual
         ph_error = ph_actual - ph_sp
@@ -134,12 +153,16 @@ class PLCLikePID:
         else:
             q_f_ff = 0.0
 
+        kp_ec, ki_ec, kd_ec = self._fuzzy_gains(
+            self.c.kp_ec, self.c.ki_ec, self.c.kd_ec, ec_error, ec_d, error_ref=0.35, deriv_ref=0.20
+        )
+
         if ec_error > 0.35:
             q_f_corr = 2.50 * ec_error + 0.80
         elif ec_error > 0.08:
             q_f_corr = 1.60 * ec_error + 0.20
         elif ec_error > 0.03:
-            q_f_corr = self.c.kp_ec * ec_error + self.c.ki_ec * self.ec_i + self.c.kd_ec * ec_d
+            q_f_corr = kp_ec * ec_error + ki_ec * self.ec_i + kd_ec * ec_d
         elif ec_error < -0.08:
             q_f_corr = 3.50 * ec_error
         elif ec_error < -0.03:
@@ -156,12 +179,16 @@ class PLCLikePID:
         else:
             q_a_ff = 0.0
 
+        kp_ph, ki_ph, kd_ph = self._fuzzy_gains(
+            self.c.kp_ph, self.c.ki_ph, self.c.kd_ph, ph_error, ph_d, error_ref=0.45, deriv_ref=0.20
+        )
+
         if ph_error > 0.45:
             q_a_corr = self.q_a_max
         elif ph_error > 0.25:
             q_a_corr = 3.20 * ph_error + 0.85
         elif ph_error > 0.0:
-            q_a_corr = self.c.kp_ph * ph_error + self.c.ki_ph * self.ph_i + self.c.kd_ph * ph_d
+            q_a_corr = kp_ph * ph_error + ki_ph * self.ph_i + kd_ph * ph_d
         elif ph_error < -0.10:
             q_a_corr = 2.50 * ph_error
         else:

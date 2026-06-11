@@ -8,6 +8,9 @@ from pathlib import Path
 DEFAULT_PUBLIC_API = Path(
     r"D:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21\net48"
 )
+DEFAULT_BIN_PUBLIC_API = Path(
+    r"D:\Program Files\Siemens\Automation\Portal V21\Bin\PublicAPI"
+)
 
 
 def load_openness(public_api_dir: str | os.PathLike[str] | None = None) -> Path:
@@ -27,6 +30,12 @@ def load_openness(public_api_dir: str | os.PathLike[str] | None = None) -> Path:
     import clr  # type: ignore
 
     sys.path.append(str(api_dir))
+    if DEFAULT_BIN_PUBLIC_API.exists():
+        sys.path.append(str(DEFAULT_BIN_PUBLIC_API))
+        contract_dll = DEFAULT_BIN_PUBLIC_API / "Siemens.Engineering.Contract.dll"
+        if contract_dll.exists():
+            clr.AddReference(str(contract_dll))
+
     for dll_name in (
         "Siemens.Engineering.Base.dll",
         "Siemens.Engineering.Step7.dll",

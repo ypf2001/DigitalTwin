@@ -41,6 +41,19 @@ PowerShell 常用运行命令：
      --fixed-dev-ec 1.1 --fixed-dev-ph 6.1 `
      --fixed-mid-ec 1.5 --fixed-mid-ph 5.9 `
      --fixed-late-ec 1.0 --fixed-late-ph 6.1
+
+     .\.venv\Scripts\python.exe .\experiments\run_full_season_plc.py `
+  --manual-test `
+  --target-runtime-min 1 `
+  --plc-wait-s 1 `
+  --log-every 10
+
+  cd "D:\Digital Twin"
+.\.venv\Scripts\python.exe .\experiments\run_full_season_plc.py `
+  --manual-test `
+  --target-runtime-min 10 `
+  --plc-wait-s 1 `
+  --log-every 10
 """
 
 from __future__ import annotations
