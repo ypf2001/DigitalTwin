@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from plc_client import PLCClient
+from plc.tuning.write_fertilizer_channels_to_plc import _load_config as _load_fertilizer_config
 
 
 def _latest_summary() -> Path:
@@ -42,12 +43,12 @@ def _preflight_plc() -> None:
     if not plc.connect():
         raise RuntimeError("PLC connection failed.")
     try:
-        # PID online tuning block ends at byte 150 in config/simulation.yaml.
-        plc._client.db_read(plc.db_number, 0, 150)
+        # PID + N/P/K online tuning block ends at byte 268 in config/simulation.yaml.
+        plc._client.db_read(plc.db_number, 0, 268)
     except Exception as exc:
         raise RuntimeError(
-            "PLC is connected, but DB1 is too small for online PID tuning. "
-            "Download the latest TIA project to PLCSIM/PLC first; DB1 must include offsets 126-149."
+            "PLC is connected, but DB1 is too small for online PID/NPK tuning. "
+            "Download the latest TIA project to PLCSIM/PLC first; DB1 must include offsets 126-267."
         ) from exc
     finally:
         plc.disconnect()
@@ -68,6 +69,18 @@ def _write_pid(params: dict[str, float]) -> None:
         )
         if not ok:
             raise RuntimeError("PID parameter write failed.")
+    finally:
+        plc.disconnect()
+
+
+def _write_default_fertilizer_channels() -> None:
+    channels = _load_fertilizer_config(ROOT / "config" / "fertilizer_channels.json")
+    plc = PLCClient()
+    if not plc.connect():
+        raise RuntimeError("PLC connection failed.")
+    try:
+        if not plc.write_fertilizer_channels(channels):
+            raise RuntimeError("Fertilizer channel write failed.")
     finally:
         plc.disconnect()
 
@@ -253,6 +266,7 @@ def main() -> int:
     args = parser.parse_args()
 
     _preflight_plc()
+    _write_default_fertilizer_channels()
 
     history = []
     best_row = None

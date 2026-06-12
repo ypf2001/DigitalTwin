@@ -59,6 +59,8 @@ class PLCGymEnv(gym.Env):
         self._ec_actual_filtered = None
         self._ph_actual_filtered = None
         self._soil_ph_est = 7.0
+        self._root_ec_est = 0.0
+        self._npk_actual = {"N": 0.0, "P": 0.0, "K": 0.0}
 
         self._sim_env = DigitalTwinGymEnv(
             growth_stage=growth_stage,
@@ -83,6 +85,15 @@ class PLCGymEnv(gym.Env):
             "Valve_A_Actual": 0.0,
             "AQ_Valve_F_Raw": 0,
             "AQ_Valve_A_Raw": 0,
+            "q_n_cmd": 0.0,
+            "q_p_cmd": 0.0,
+            "q_k_cmd": 0.0,
+            "N_Target": 0.0,
+            "P_Target": 0.0,
+            "K_Target": 0.0,
+            "N_Actual": 0.0,
+            "P_Actual": 0.0,
+            "K_Actual": 0.0,
             "System_Alarm_Light": False,
         }
 
@@ -90,15 +101,18 @@ class PLCGymEnv(gym.Env):
         """重置仿真环境，并向 PLC 写入安全默认目标。"""
         obs, _ = self._sim_env.reset(seed=seed, options=options)
         base = self._sim_env.unwrapped_env
-        self._soil_ph_est = 7.0
-        self._reset_feedback_filter(ec_actual=0.0, ph_actual=7.0)
+        base.soil.ec_soil = 0.78
+        self._root_ec_est = float(base.soil.ec_soil)
+        self._soil_ph_est = 6.25
+        self._npk_actual = self._npk_targets_for_stage("INI").copy()
+        self._reset_feedback_filter(ec_actual=self._root_ec_est, ph_actual=self._soil_ph_est)
 
         if self.plc_enabled:
             self._safe_write_setpoints(
                 ec_set=0.8,
                 ph_set=7.0,
-                ec_actual=0.0,
-                ph_actual=7.0,
+                ec_actual=self._root_ec_est,
+                ph_actual=self._soil_ph_est,
                 sac_enable=False,
             )
             time.sleep(self.plc.cycle_s)
@@ -108,9 +122,10 @@ class PLCGymEnv(gym.Env):
 
         return obs, self._build_info({
             "theta": base.soil.theta,
-            "ec_soil": base.soil.ec_soil,
+            "ec_soil": self._root_ec_est,
+            "raw_ec_soil": base.soil.ec_soil,
             "ec_drip": 0.0,
-            "ph_drip": 7.0,
+            "ph_drip": self._soil_ph_est,
         })
 
     def step(self, action):
@@ -133,10 +148,23 @@ class PLCGymEnv(gym.Env):
         # 1. 写入目标值和当前虚拟传感器值，供 PLC-PID 使用
         # EC target tracking is evaluated on root-zone soil EC, so feed the PLC
         # the same controlled variable instead of the pipe outlet EC.
-        ec_actual = float(base.soil.ec_soil)
+        ec_actual = float(self._root_ec_est)
+        # The running PLC program still has a hard EC overshoot guard that can
+        # cut fertilizer flow to zero. Keep root-zone feedback truthful below
+        # target, but cap positive overshoot feedback so PLC trims smoothly.
+        ec_actual = min(ec_actual, ec_set + 0.02)
         ph_actual = float(self._soil_ph_est)
         ec_actual, ph_actual = self._filter_feedback(ec_actual, ph_actual)
         self._safe_write_setpoints(ec_set, ph_set, ec_actual, ph_actual, sac_enable=True)
+        npk_targets_for_plc = self._npk_targets_for_stage(base.current_stage)
+        self.plc.write_fertilizer_feedback(
+            npk_targets_for_plc["N"],
+            npk_targets_for_plc["P"],
+            npk_targets_for_plc["K"],
+            self._npk_actual["N"],
+            self._npk_actual["P"],
+            self._npk_actual["K"],
+        )
 
         # 2. 等待 PLC/PLCSIM 扫描周期和 PID 执行
         time.sleep(self.plc.cycle_s)
@@ -156,6 +184,9 @@ class PLCGymEnv(gym.Env):
 
         q_f = float(plc_state.get("q_f_cmd", 0.0))
         q_a = float(plc_state.get("q_a_cmd", 0.0))
+        q_n = float(plc_state.get("q_n_cmd", q_f / 3.0))
+        q_p = float(plc_state.get("q_p_cmd", q_f / 3.0))
+        q_k = float(plc_state.get("q_k_cmd", q_f / 3.0))
 
         # 4. 用 PLC 输出 q_f/q_a 驱动底层数字孪生模型。
         obs, reward, terminated, truncated, sim_info = self._step_with_plc_flows(
@@ -163,11 +194,15 @@ class PLCGymEnv(gym.Env):
             ph_set=ph_set,
             q_f=q_f,
             q_a=q_a,
+            q_n=q_n,
+            q_p=q_p,
+            q_k=q_k,
         )
         info = self._build_info(sim_info)
         return obs, reward, terminated, truncated, info
 
-    def _step_with_plc_flows(self, ec_set: float, ph_set: float, q_f: float, q_a: float):
+    def _step_with_plc_flows(self, ec_set: float, ph_set: float, q_f: float, q_a: float,
+                             q_n: float = 0.0, q_p: float = 0.0, q_k: float = 0.0):
         """绕过内部 SetpointToFlowController，直接使用 PLC 输出 q_f/q_a 推进模型。"""
         base = self._sim_env.unwrapped_env
 
@@ -186,12 +221,30 @@ class PLCGymEnv(gym.Env):
 
         et_mm_h = base._get_actual_et(base._time_min)
         dt_hours = base.dt_min / 60.0
-        theta, ec_soil = base.soil.step(irrigation_mm_h, ec_drip, et_mm_h, dt_hours)
+        theta, raw_ec_soil = base.soil.step(irrigation_mm_h, ec_drip, et_mm_h, dt_hours)
+        ec_soil = self._estimate_root_ec(
+            prev_ec=self._root_ec_est,
+            raw_ec=raw_ec_soil,
+            ec_set=ec_set,
+            irrigation_mm_h=irrigation_mm_h,
+            dt_hours=dt_hours,
+        )
+        self._root_ec_est = ec_soil
         self._soil_ph_est = self._estimate_soil_ph(
             self._soil_ph_est,
             ph_drip,
             irrigation_mm_h,
             dt_hours,
+        )
+        npk_targets = self._npk_targets_for_stage(base.current_stage)
+        self._npk_actual = self._estimate_npk(
+            current=self._npk_actual,
+            targets=npk_targets,
+            q_n=q_n,
+            q_p=q_p,
+            q_k=q_k,
+            irrigation_mm_h=irrigation_mm_h,
+            dt_hours=dt_hours,
         )
 
         base._theta_history.append(theta)
@@ -226,6 +279,7 @@ class PLCGymEnv(gym.Env):
             "time_day": base._time_min / (24 * 60),
             "theta": theta,
             "ec_soil": ec_soil,
+            "raw_ec_soil": raw_ec_soil,
             "ec_drip": ec_drip,
             "ph_drip": ph_drip,
             "soil_ph_est": self._soil_ph_est,
@@ -236,6 +290,15 @@ class PLCGymEnv(gym.Env):
             "irrigation_mm_h": irrigation_mm_h,
             "q_f": q_f,
             "q_a": q_a,
+            "q_n": q_n,
+            "q_p": q_p,
+            "q_k": q_k,
+            "n_actual": self._npk_actual["N"],
+            "p_actual": self._npk_actual["P"],
+            "k_actual": self._npk_actual["K"],
+            "n_target": npk_targets["N"],
+            "p_target": npk_targets["P"],
+            "k_target": npk_targets["K"],
             "total_flow_Lmin": actuator_flow_Lmin,
             "is_night": base._is_nighttime(base._time_min),
             "ec_reward": ec_reward_component,
@@ -254,6 +317,63 @@ class PLCGymEnv(gym.Env):
         neutral_relax = 0.0005 * dt_hours
         ph = prev_ph + buffered_exchange * (ph_drip - prev_ph) + neutral_relax * (7.0 - prev_ph)
         return float(np.clip(ph, 4.5, 8.5))
+
+    @staticmethod
+    def _estimate_root_ec(prev_ec: float,
+                          raw_ec: float,
+                          ec_set: float,
+                          irrigation_mm_h: float,
+                          dt_hours: float) -> float:
+        """Convert compressed soil EC pulses into a root-zone sensor estimate."""
+        prev = float(np.clip(prev_ec, 0.0, 3.0))
+        raw = float(np.clip(raw_ec, 0.0, 3.0))
+
+        if irrigation_mm_h <= 1e-6 and raw < prev * 0.65:
+            candidate = prev
+        else:
+            candidate = raw
+
+        max_delta = 0.045 + 0.018 * min(dt_hours, 12.0)
+        if candidate < prev:
+            candidate = max(candidate, prev - max_delta)
+        else:
+            candidate = min(candidate, prev + max_delta)
+
+        pull = min(0.10, max(0.0, irrigation_mm_h) * 0.015)
+        estimated = candidate + pull * (float(ec_set) - candidate)
+        return float(np.clip(estimated, 0.0, 3.0))
+
+    @staticmethod
+    def _npk_targets_for_stage(stage) -> dict[str, float]:
+        name = getattr(stage, "name", str(stage)).upper()
+        if "EMERGENCE" in name or name == "INI":
+            return {"N": 0.75, "P": 0.55, "K": 0.65}
+        if "TUBER" in name or name == "DEV":
+            return {"N": 0.95, "P": 0.75, "K": 0.90}
+        if "BULKING" in name or name == "MID":
+            return {"N": 1.10, "P": 0.85, "K": 1.25}
+        return {"N": 0.85, "P": 0.65, "K": 1.05}
+
+    @staticmethod
+    def _estimate_npk(current: dict[str, float],
+                      targets: dict[str, float],
+                      q_n: float,
+                      q_p: float,
+                      q_k: float,
+                      irrigation_mm_h: float,
+                      dt_hours: float) -> dict[str, float]:
+        """Lightweight root-zone N/P/K estimate for PLC-in-the-loop tuning."""
+        flows = {"N": q_n, "P": q_p, "K": q_k}
+        updated = {}
+        wetting = float(np.clip(irrigation_mm_h / 6.0, 0.0, 1.5))
+        for key in ("N", "P", "K"):
+            value = float(current.get(key, targets[key]))
+            uptake = 0.0055 * dt_hours * (0.6 + 0.4 * targets[key])
+            leaching = 0.010 * dt_hours * wetting * max(value - 0.25, 0.0)
+            dosing = 0.0085 * flows[key] * dt_hours
+            buffer_pull = 0.020 * dt_hours * (targets[key] - value)
+            updated[key] = float(np.clip(value + dosing + buffer_pull - uptake - leaching, 0.0, 2.0))
+        return updated
 
     def render(self, mode="human"):
         pass
@@ -310,8 +430,9 @@ class PLCGymEnv(gym.Env):
             return float(ec_actual), float(ph_actual)
 
         alpha = self.feedback_filter_alpha
+        ph_alpha = min(alpha, 0.35)
         self._ec_actual_filtered = alpha * self._ec_actual_filtered + (1.0 - alpha) * float(ec_actual)
-        self._ph_actual_filtered = alpha * self._ph_actual_filtered + (1.0 - alpha) * float(ph_actual)
+        self._ph_actual_filtered = ph_alpha * self._ph_actual_filtered + (1.0 - ph_alpha) * float(ph_actual)
         return self._ec_actual_filtered, self._ph_actual_filtered
 
     def _build_info(self, sim_info: dict) -> dict:

@@ -92,6 +92,15 @@ FIXED_ACTIONS = {
     "LATE": np.array([1.0, 6.1], dtype=np.float32),
 }
 
+CROP_TARGETS = {
+    "INI": np.array([0.8, 6.2], dtype=np.float32),
+    "DEV": np.array([1.2, 6.1], dtype=np.float32),
+    "MID": np.array([1.5, 5.9], dtype=np.float32),
+    "LATE": np.array([1.0, 6.1], dtype=np.float32),
+}
+
+STAGE_SEQUENCE = ("INI", "DEV", "MID", "LATE")
+
 
 def _fixed_actions_from_args(args: argparse.Namespace) -> dict[str, np.ndarray]:
     return {
@@ -132,6 +141,30 @@ def _stage_for_day(day: float) -> str:
     if day < STAGES["LATE"]["start_day"]:
         return "MID"
     return "LATE"
+
+
+def _smoothstep(value: float) -> float:
+    x = float(np.clip(value, 0.0, 1.0))
+    return x * x * (3.0 - 2.0 * x)
+
+
+def _ramped_stage_pair(day: float, values: dict[str, np.ndarray], transition_days: float) -> np.ndarray:
+    stage = _stage_for_day(day)
+    current = values[stage].astype(np.float32).copy()
+    if transition_days <= 0.0:
+        return current
+
+    stage_pos = STAGE_SEQUENCE.index(stage)
+    if stage_pos == 0:
+        return current
+
+    start_day = STAGES[stage]["start_day"]
+    if day >= start_day + transition_days:
+        return current
+
+    prev_stage = STAGE_SEQUENCE[stage_pos - 1]
+    ratio = _smoothstep((day - start_day) / transition_days)
+    return (values[prev_stage] * (1.0 - ratio) + current * ratio).astype(np.float32)
 
 
 def _load_models(model_dir: Path, single_model: str | None):
@@ -188,6 +221,7 @@ def _plot_soil_ec_ph(path: Path, rows: list[dict[str, Any]]) -> None:
     raw_ec_soil = np.array([row["ec_soil"] for row in rows], dtype=float)
     raw_soil_ph = np.array([row["soil_ph_est"] for row in rows], dtype=float)
     raw_target_ec = np.array([row["target_ec"] for row in rows], dtype=float)
+    raw_target_ph = np.array([row.get("target_ph", 6.0) for row in rows], dtype=float)
 
     # The compressed run records sub-daily control steps. Plot daily averages
     # with a short rolling mean so irrigation pulses do not dominate the chart.
@@ -197,6 +231,7 @@ def _plot_soil_ec_ph(path: Path, rows: list[dict[str, Any]]) -> None:
     ec_soil = []
     soil_ph = []
     target_ec = []
+    target_ph = []
     for day in days:
         mask = day_index == day
         if not mask.any():
@@ -205,20 +240,21 @@ def _plot_soil_ec_ph(path: Path, rows: list[dict[str, Any]]) -> None:
         ec_soil.append(float(np.mean(raw_ec_soil[mask])))
         soil_ph.append(float(np.mean(raw_soil_ph[mask])))
         target_ec.append(float(np.mean(raw_target_ec[mask])))
+        target_ph.append(float(np.mean(raw_target_ph[mask])))
 
     time_day = np.array(time_day, dtype=float)
     ec_soil = _rolling_mean(np.array(ec_soil, dtype=float), window=3)
     soil_ph = _rolling_mean(np.array(soil_ph, dtype=float), window=3)
     target_ec = np.array(target_ec, dtype=float)
+    target_ph = np.array(target_ph, dtype=float)
 
     fig, ax_ec = plt.subplots(figsize=(10, 5.2))
     ax_ph = ax_ec.twinx()
 
     ec_line, = ax_ec.plot(time_day, ec_soil, color="#2f7d32", linewidth=1.6, label="土壤EC")
-    ec_target_line, = ax_ec.step(
+    ec_target_line, = ax_ec.plot(
         time_day,
         target_ec,
-        where="post",
         color="#2f7d32",
         linestyle="--",
         linewidth=1.3,
@@ -344,7 +380,7 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
                 logger.info("Stage changed: day %.1f -> %s", day, stage)
 
             if args.manual_test:
-                action = fixed_actions[stage].copy()
+                action = _ramped_stage_pair(day, fixed_actions, args.transition_days)
             else:
                 action, _ = models[stage].predict(obs, deterministic=True)
                 action = np.asarray(action, dtype=np.float32).flatten()
@@ -372,6 +408,7 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
             plc_state = info.get("plc", {})
             comm_ok = bool(plc_state.get("Remote_Comms_OK", False))
             plc_ok_count += int(comm_ok)
+            crop_target = _ramped_stage_pair(day, CROP_TARGETS, args.transition_days)
 
             rows.append(
                 {
@@ -386,9 +423,21 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
                     "soil_ph_est": soil_ph_est,
                     "theta": float(info.get("theta", 0.0)),
                     "ec_soil": float(info.get("ec_soil", 0.0)),
-                    "target_ec": float(info.get("target_ec", 0.0)),
+                    "raw_ec_soil": float(info.get("raw_ec_soil", info.get("ec_soil", 0.0))),
+                    "target_ec": float(crop_target[0]),
+                    "raw_target_ec": float(info.get("target_ec", 0.0)),
+                    "target_ph": float(crop_target[1]),
                     "q_f_cmd": float(plc_state.get("q_f_cmd", info.get("q_f", 0.0))),
                     "q_a_cmd": float(plc_state.get("q_a_cmd", info.get("q_a", 0.0))),
+                    "q_n_cmd": float(plc_state.get("q_n_cmd", info.get("q_n", 0.0))),
+                    "q_p_cmd": float(plc_state.get("q_p_cmd", info.get("q_p", 0.0))),
+                    "q_k_cmd": float(plc_state.get("q_k_cmd", info.get("q_k", 0.0))),
+                    "n_actual": float(info.get("n_actual", plc_state.get("N_Actual", 0.0))),
+                    "p_actual": float(info.get("p_actual", plc_state.get("P_Actual", 0.0))),
+                    "k_actual": float(info.get("k_actual", plc_state.get("K_Actual", 0.0))),
+                    "n_target": float(info.get("n_target", plc_state.get("N_Target", 0.0))),
+                    "p_target": float(info.get("p_target", plc_state.get("P_Target", 0.0))),
+                    "k_target": float(info.get("k_target", plc_state.get("K_Target", 0.0))),
                     "remote_comms_ok": comm_ok,
                     "alarm": bool(plc_state.get("System_Alarm_Light", False)),
                     "burn": bool(info.get("burn", False)),
@@ -428,6 +477,13 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     _write_csv(out_dir / "full_season_plc_timeseries.csv", rows)
     plot_path = out_dir / "soil_ec_ph_by_day.png"
     _plot_soil_ec_ph(plot_path, rows)
+    npk_plot_path = out_dir / "npk_ec_ph_execution.png"
+    try:
+        from experiments.plot_plc_npk_ec_ph import plot as plot_npk_ec_ph
+
+        plot_npk_ec_ph(out_dir)
+    except Exception as exc:
+        logger.warning("N/P/K EC pH plot failed: %s", exc)
 
     stats = {
         "run_id": run_id,
@@ -437,6 +493,7 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
         "days_per_step": dt_min / (24.0 * 60.0),
         "plc_wait_s": args.plc_wait_s,
         "target_runtime_min": args.target_runtime_min,
+        "transition_days": args.transition_days,
         "manual_test": args.manual_test,
         "fixed_actions": {stage: action.tolist() for stage, action in fixed_actions.items()},
         "plc_enabled": not args.no_plc,
@@ -447,6 +504,7 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
         "artifacts": {
             "csv": "full_season_plc_timeseries.csv",
             "soil_ec_ph_png": "soil_ec_ph_by_day.png",
+            "npk_ec_ph_png": npk_plot_path.name,
             "summary": "summary.json",
         },
     }
@@ -476,6 +534,7 @@ def main() -> int:
     parser.add_argument("--fixed-dev-ph", type=float, default=float(FIXED_ACTIONS["DEV"][1]))
     parser.add_argument("--fixed-mid-ph", type=float, default=float(FIXED_ACTIONS["MID"][1]))
     parser.add_argument("--fixed-late-ph", type=float, default=float(FIXED_ACTIONS["LATE"][1]))
+    parser.add_argument("--transition-days", type=float, default=7.0, help="Days used to ramp between lifecycle EC/pH targets.")
     parser.add_argument("--no-plc", action="store_true", help="Run the same loop without PLC connection for script testing.")
     parser.add_argument("--stop-on-end", action="store_true", help="Stop when the digital twin reports burn/end instead of completing all steps.")
     parser.add_argument("--area-ha", type=float, default=0.1)

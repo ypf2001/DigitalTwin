@@ -45,6 +45,30 @@ REQUIRED_PID_TAGS = [
     "Kd_pH_Set",
 ]
 
+REQUIRED_FERTILIZER_CHANNEL_TAGS = [
+    "N_Enable",
+    "N_Ratio",
+    "Kp_N_Set",
+    "Ki_N_Set",
+    "Kd_N_Set",
+    "N_Max",
+    "q_n_cmd",
+    "P_Enable",
+    "P_Ratio",
+    "Kp_P_Set",
+    "Ki_P_Set",
+    "Kd_P_Set",
+    "P_Max",
+    "q_p_cmd",
+    "K_Enable",
+    "K_Ratio",
+    "Kp_K_Set",
+    "Ki_K_Set",
+    "Kd_K_Set",
+    "K_Max",
+    "q_k_cmd",
+]
+
 
 def _check(condition: bool, ok: str, fail: str, errors: list[str]) -> None:
     if condition:
@@ -56,7 +80,7 @@ def _check(condition: bool, ok: str, fail: str, errors: list[str]) -> None:
 
 def _check_addresses(addr_map: dict, errors: list[str]) -> None:
     # 只检查通讯契约是否完整，不在这里判断每个 offset 的物理含义。
-    required = REQUIRED_WRITE_TAGS + REQUIRED_READ_TAGS + REQUIRED_PID_TAGS
+    required = REQUIRED_WRITE_TAGS + REQUIRED_READ_TAGS + REQUIRED_PID_TAGS + REQUIRED_FERTILIZER_CHANNEL_TAGS
     for tag in required:
         _check(
             tag in addr_map,

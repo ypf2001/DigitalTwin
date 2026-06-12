@@ -380,10 +380,22 @@ Python 读取 q_f_cmd、q_a_cmd
 | `Watchdog_Timer` | INT | PLC → Python | 看门狗计数 |
 | `q_f_cmd` | REAL | PLC → Python | 施肥泵 / 母液流量输出 |
 | `q_a_cmd` | REAL | PLC → Python | 酸泵 / 酸液流量输出 |
+| `q_n_cmd` | REAL | PLC → Python | 氮肥通道计量泵输出 |
+| `q_p_cmd` | REAL | PLC → Python | 磷肥通道计量泵输出 |
+| `q_k_cmd` | REAL | PLC → Python | 钾肥通道计量泵输出 |
+| `N_Enable` / `P_Enable` / `K_Enable` | REAL | Python → PLC | 三路肥液通道启用开关，`>=0.5` 表示启用 |
+| `N_Ratio` / `P_Ratio` / `K_Ratio` | REAL | Python → PLC | 总肥液流量 `q_f_cmd` 到氮/磷/钾三路的分配比例 |
+| `N_Target` / `P_Target` / `K_Target` | REAL | Python → PLC | 根区氮/磷/钾目标值 |
+| `N_Actual` / `P_Actual` / `K_Actual` | REAL | Python → PLC | 根区氮/磷/钾反馈值 |
+| `Kp_N_Set` / `Ki_N_Set` / `Kd_N_Set` | REAL | Python → PLC | 氮肥通道 PID 参数 |
+| `Kp_P_Set` / `Ki_P_Set` / `Kd_P_Set` | REAL | Python → PLC | 磷肥通道 PID 参数 |
+| `Kp_K_Set` / `Ki_K_Set` / `Kd_K_Set` | REAL | Python → PLC | 钾肥通道 PID 参数 |
+| `N_Max` / `P_Max` / `K_Max` | REAL | Python → PLC | 三路计量泵最大流量限幅 |
 | `Valve_F_Actual` | REAL | PLC → Python | 施肥阀实际开度 |
 | `Valve_A_Actual` | REAL | PLC → Python | 酸阀实际开度 |
 | `AQ_Valve_F_Raw` | INT | PLC → Python | 施肥模拟量输出原始值 |
 | `AQ_Valve_A_Raw` | INT | PLC → Python | 酸液模拟量输出原始值 |
+| `AQ_Valve_N_Raw` / `AQ_Valve_P_Raw` / `AQ_Valve_K_Raw` | INT | PLC → Python | 氮/磷/钾三路模拟量输出原始值 |
 | `System_Alarm_Light` | BOOL | PLC → Python | 系统报警 |
 
 PLC 中建议建立两个 PID：
@@ -400,6 +412,22 @@ PV = pH_Actual
 OUT = q_a_cmd
 ```
 
+多肥液版本中，PLC 还保留三路 N/P/K 微调 PID。默认情况下，总肥液需求由 EC_PID 给出：
+
+```text
+q_f_cmd = EC_PID(EC_Set_SP, EC_Actual)
+```
+
+然后 PLC 按比例分配到三路肥液：
+
+```text
+q_n_cmd = q_f_cmd * N_Ratio + N_PID(N_Target, N_Actual)
+q_p_cmd = q_f_cmd * P_Ratio + P_PID(P_Target, P_Actual)
+q_k_cmd = q_f_cmd * K_Ratio + K_PID(K_Target, K_Actual)
+```
+
+如果没有在线 N/P/K 传感器，三路 PID 参数可以先保持为 0，只用 `N_Ratio/P_Ratio/K_Ratio` 做配方分配。换肥料时优先改配方比例和通道启用状态，不需要改 PLC 主程序。
+
 注意：DB 块需要关闭“优化的块访问”，否则 Snap7 可能无法按偏移地址读写。
 
 ---
@@ -413,13 +441,68 @@ OUT = q_a_cmd
 ```text
 Agent action [EC_set, pH_set]
         ↓
-Python 写入 PLC/PLCSIM：EC_Set_SP、pH_Set_SP、EC_Actual、pH_Actual
+Python 写入 PLC/PLCSIM：
+EC_Set_SP、pH_Set_SP、EC_Actual、pH_Actual、
+N_Target/P_Target/K_Target、N_Actual/P_Actual/K_Actual
         ↓
-PLC/PLCSIM 内部 EC-PID、pH-PID 计算 q_f_cmd、q_a_cmd
+PLC/PLCSIM 内部执行：
+EC-PID → q_f_cmd
+pH-PID → q_a_cmd
+N/P/K 分配与微调 PID → q_n_cmd、q_p_cmd、q_k_cmd
         ↓
-Python 回读 q_f_cmd、q_a_cmd
+Python 回读 q_f_cmd、q_a_cmd、q_n_cmd、q_p_cmd、q_k_cmd
         ↓
-数字孪生模型推进田间状态
+混合罐 + 管道滞后 + 根区水盐/NPK 模型继续推进田间状态
+```
+
+当前 PLC 在环版本已经加入多肥液和混合肥料仿真：
+
+1. `q_f_cmd` 表示总肥液需求，由 EC_PID 根据 EC 目标和反馈计算。
+2. `q_n_cmd/q_p_cmd/q_k_cmd` 表示氮、磷、钾三路肥液计量泵输出。
+3. Python 侧数字孪生把水、总肥液、酸液送入 `mixing_tank.py`，得到混合肥液 EC 和 pH。
+4. 混合后的 EC/pH 再经过 `pipe_dynamics.py` 的管道滞后，进入根区模型。
+5. `plc_gym_env.py` 内部用轻量根区 N/P/K 估算模型记录 `n_actual/p_actual/k_actual`，并与 `n_target/p_target/k_target` 对比画图。
+6. `experiments/plot_plc_npk_ec_ph.py` 会输出 `npk_ec_ph_execution.png`，同时显示 EC、pH、N/P/K 和 PLC 各泵执行量。
+
+为了让压缩生命周期仿真更接近真实部署，当前还加入了两项处理：
+
+1. 生命周期目标平滑过渡：`experiments/run_full_season_plc.py` 新增 `--transition-days`，默认 7 天。四个生育阶段切换时，EC/pH 目标和 PLC 执行给定不再硬跳，而是在过渡天数内平滑切换。
+2. 根区 EC 观测缓冲：`plc_gym_env.py` 保留土壤模型原始输出 `raw_ec_soil`，同时生成更接近传感器读数的 `ec_soil`。这样压缩仿真中夜间/非灌溉步不会把根区 EC 瞬间打成 0，PLC PID 反馈也不会被不真实尖峰牵动。
+
+全生命周期 PLC 在环测试示例：
+
+```powershell
+cd "D:\Digital Twin"
+
+D:\Miniconda3\python.exe .\plc\tuning\write_pid_to_plc.py `
+  --kp-ec 1.305 --ki-ec 0.0118 --kd-ec 0.0214 `
+  --kp-ph 3.05 --ki-ph 0.024 --kd-ph 0.010
+
+D:\Miniconda3\python.exe .\experiments\run_full_season_plc.py `
+  --manual-test `
+  --season-days 110 `
+  --steps 360 `
+  --plc-wait-s 0.03 `
+  --transition-days 7 `
+  --fixed-ini-ec 0.8 --fixed-ini-ph 6.1 `
+  --fixed-dev-ec 1.1 --fixed-dev-ph 6.0 `
+  --fixed-mid-ec 1.38 --fixed-mid-ph 5.8 `
+  --fixed-late-ec 0.90 --fixed-late-ph 6.0
+```
+
+运行结果会保存到：
+
+```text
+results/full_season_plc/<run_id>/
+```
+
+其中：
+
+```text
+full_season_plc_timeseries.csv：完整时序数据，包含 ec_soil、raw_ec_soil、pH、N/P/K、各泵输出
+npk_ec_ph_execution.png：N/P/K、EC、pH 和 PLC 执行量效果图
+soil_ec_ph_by_day.png：日均 EC/pH 运行图
+summary.json：运行参数和最终状态
 ```
 
 使用时需要：

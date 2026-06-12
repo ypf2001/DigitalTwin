@@ -195,6 +195,126 @@ plc:
       offset: 146
       type: real
       bytes: 4
+    N_Enable:
+      offset: 150
+      type: real
+      bytes: 4
+    N_Ratio:
+      offset: 154
+      type: real
+      bytes: 4
+    N_Target:
+      offset: 158
+      type: real
+      bytes: 4
+    N_Actual:
+      offset: 162
+      type: real
+      bytes: 4
+    Kp_N_Set:
+      offset: 166
+      type: real
+      bytes: 4
+    Ki_N_Set:
+      offset: 170
+      type: real
+      bytes: 4
+    Kd_N_Set:
+      offset: 174
+      type: real
+      bytes: 4
+    N_Max:
+      offset: 178
+      type: real
+      bytes: 4
+    q_n_cmd:
+      offset: 182
+      type: real
+      bytes: 4
+    AQ_Valve_N_Raw:
+      offset: 186
+      type: int
+      bytes: 2
+    P_Enable:
+      offset: 190
+      type: real
+      bytes: 4
+    P_Ratio:
+      offset: 194
+      type: real
+      bytes: 4
+    P_Target:
+      offset: 198
+      type: real
+      bytes: 4
+    P_Actual:
+      offset: 202
+      type: real
+      bytes: 4
+    Kp_P_Set:
+      offset: 206
+      type: real
+      bytes: 4
+    Ki_P_Set:
+      offset: 210
+      type: real
+      bytes: 4
+    Kd_P_Set:
+      offset: 214
+      type: real
+      bytes: 4
+    P_Max:
+      offset: 218
+      type: real
+      bytes: 4
+    q_p_cmd:
+      offset: 222
+      type: real
+      bytes: 4
+    AQ_Valve_P_Raw:
+      offset: 226
+      type: int
+      bytes: 2
+    K_Enable:
+      offset: 230
+      type: real
+      bytes: 4
+    K_Ratio:
+      offset: 234
+      type: real
+      bytes: 4
+    K_Target:
+      offset: 238
+      type: real
+      bytes: 4
+    K_Actual:
+      offset: 242
+      type: real
+      bytes: 4
+    Kp_K_Set:
+      offset: 246
+      type: real
+      bytes: 4
+    Ki_K_Set:
+      offset: 250
+      type: real
+      bytes: 4
+    Kd_K_Set:
+      offset: 254
+      type: real
+      bytes: 4
+    K_Max:
+      offset: 258
+      type: real
+      bytes: 4
+    q_k_cmd:
+      offset: 262
+      type: real
+      bytes: 4
+    AQ_Valve_K_Raw:
+      offset: 266
+      type: int
+      bytes: 2
 
     # PLC/PLCSIM 写回 Python 的执行结果与状态
     Remote_Comms_OK:

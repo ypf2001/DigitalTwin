@@ -225,6 +225,82 @@ class PLCClient:
             logger.error(f"[PLC] PID params write failed: {e}")
             return False
 
+    def write_fertilizer_channels(self, channels: dict[str, dict]) -> bool:
+        """Write N/P/K fertilizer channel configuration into DB1.
+
+        Expected channel keys are "N", "P", and "K". Each channel may contain:
+        enable, ratio, target, actual, kp, ki, kd, max_flow.
+        Missing values keep conservative defaults.
+        """
+        channel_tags = {
+            "N": ("N_Enable", "N_Ratio", "N_Target", "N_Actual", "Kp_N_Set", "Ki_N_Set", "Kd_N_Set", "N_Max"),
+            "P": ("P_Enable", "P_Ratio", "P_Target", "P_Actual", "Kp_P_Set", "Ki_P_Set", "Kd_P_Set", "P_Max"),
+            "K": ("K_Enable", "K_Ratio", "K_Target", "K_Actual", "Kp_K_Set", "Ki_K_Set", "Kd_K_Set", "K_Max"),
+        }
+        required = [tag for tags in channel_tags.values() for tag in tags]
+        missing = [name for name in required if name not in self.addr_map]
+        if missing:
+            logger.error(f"[PLC] fertilizer channel address mapping missing: {missing}")
+            return False
+
+        defaults = {
+            "N": {"enable": 1.0, "ratio": 0.3333, "target": 0.0, "actual": 0.0, "kp": 0.0, "ki": 0.0, "kd": 0.0, "max_flow": 4.0},
+            "P": {"enable": 1.0, "ratio": 0.3333, "target": 0.0, "actual": 0.0, "kp": 0.0, "ki": 0.0, "kd": 0.0, "max_flow": 4.0},
+            "K": {"enable": 1.0, "ratio": 0.3334, "target": 0.0, "actual": 0.0, "kp": 0.0, "ki": 0.0, "kd": 0.0, "max_flow": 4.0},
+        }
+
+        try:
+            self._ensure_connected()
+            for key, tags in channel_tags.items():
+                cfg = {**defaults[key], **channels.get(key, {})}
+                values = [
+                    1.0 if bool(cfg.get("enable", True)) else 0.0,
+                    float(cfg.get("ratio", defaults[key]["ratio"])),
+                    float(cfg.get("target", 0.0)),
+                    float(cfg.get("actual", 0.0)),
+                    float(cfg.get("kp", 0.0)),
+                    float(cfg.get("ki", 0.0)),
+                    float(cfg.get("kd", 0.0)),
+                    float(cfg.get("max_flow", 4.0)),
+                ]
+                for tag, value in zip(tags, values):
+                    self._write_real(tag, value)
+            logger.info("[PLC] fertilizer channel config written: %s", channels)
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] fertilizer channel config write failed: {e}")
+            return False
+
+    def write_fertilizer_feedback(self,
+                                  n_target: float,
+                                  p_target: float,
+                                  k_target: float,
+                                  n_actual: float,
+                                  p_actual: float,
+                                  k_actual: float) -> bool:
+        """Write online/estimated N/P/K target and feedback values into DB1."""
+        names = ["N_Target", "P_Target", "K_Target", "N_Actual", "P_Actual", "K_Actual"]
+        missing = [name for name in names if name not in self.addr_map]
+        if missing:
+            logger.error(f"[PLC] fertilizer feedback address mapping missing: {missing}")
+            return False
+        try:
+            self._ensure_connected()
+            self._write_real("N_Target", n_target)
+            self._write_real("P_Target", p_target)
+            self._write_real("K_Target", k_target)
+            self._write_real("N_Actual", n_actual)
+            self._write_real("P_Actual", p_actual)
+            self._write_real("K_Actual", k_actual)
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] fertilizer feedback write failed: {e}")
+            return False
+
+    def write_fertilizer_actuals(self, n_actual: float, p_actual: float, k_actual: float) -> bool:
+        """Backward-compatible helper that updates actuals while preserving zero targets."""
+        return self.write_fertilizer_feedback(0.0, 0.0, 0.0, n_actual, p_actual, k_actual)
+
     def _calc_read_range(self, var_names: list) -> tuple[int, int]:
         min_off = float("inf")
         max_end = 0
@@ -318,9 +394,14 @@ class PLCClient:
             "Setpoint_Protection_Active", "Stage_Auto_SP_Enable",
             "Kp_EC_Set", "Ki_EC_Set", "Kd_EC_Set",
             "Kp_pH_Set", "Ki_pH_Set", "Kd_pH_Set",
+            "N_Enable", "N_Ratio", "N_Target", "N_Actual", "Kp_N_Set", "Ki_N_Set", "Kd_N_Set", "N_Max",
+            "P_Enable", "P_Ratio", "P_Target", "P_Actual", "Kp_P_Set", "Ki_P_Set", "Kd_P_Set", "P_Max",
+            "K_Enable", "K_Ratio", "K_Target", "K_Actual", "Kp_K_Set", "Ki_K_Set", "Kd_K_Set", "K_Max",
             "q_f_cmd", "q_a_cmd",
+            "q_n_cmd", "q_p_cmd", "q_k_cmd",
             "Valve_F_Actual", "Valve_A_Actual",
             "AQ_Valve_F_Raw", "AQ_Valve_A_Raw",
+            "AQ_Valve_N_Raw", "AQ_Valve_P_Raw", "AQ_Valve_K_Raw",
             "System_Alarm_Light",
         ]
         legacy = [

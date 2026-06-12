@@ -1,0 +1,35 @@
+{
+  "N": {
+    "name": "nitrogen",
+    "enable": true,
+    "ratio": 0.3,
+    "target": 0.0,
+    "actual": 0.0,
+    "kp": 0.25,
+    "ki": 0.01,
+    "kd": 0.0,
+    "max_flow": 4.0
+  },
+  "P": {
+    "name": "phosphorus",
+    "enable": true,
+    "ratio": 0.27,
+    "target": 0.0,
+    "actual": 0.0,
+    "kp": 0.12,
+    "ki": 0.006,
+    "kd": 0.0,
+    "max_flow": 4.0
+  },
+  "K": {
+    "name": "potassium",
+    "enable": true,
+    "ratio": 0.34,
+    "target": 0.0,
+    "actual": 0.0,
+    "kp": 0.25,
+    "ki": 0.008,
+    "kd": 0.0,
+    "max_flow": 4.0
+  }
+}

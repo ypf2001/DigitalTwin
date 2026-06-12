@@ -167,6 +167,43 @@ NON_RETAIN
       Kp_pH_Set : Real;   // pH 比例增益
       Ki_pH_Set : Real;   // pH 积分增益
       Kd_pH_Set : Real;   // pH 微分增益
+
+      // 多肥液通道在线配置区。Enable 使用 Real(>=0.5 启用)，便于 Snap7 按 DBD 写入。
+      N_Enable : Real;      // 氮肥通道启用
+      N_Ratio : Real;       // 总肥液 q_f_cmd 分配比例
+      N_Target : Real;      // 可选氮目标；无在线 N 传感器时保持 0
+      N_Actual : Real;      // 可选氮反馈；无在线 N 传感器时保持 0
+      Kp_N_Set : Real;
+      Ki_N_Set : Real;
+      Kd_N_Set : Real;
+      N_Max : Real;
+      q_n_cmd : Real;       // 氮肥计量泵输出 L/min
+      AQ_Valve_N_Raw : Int;
+      N_Reserved : Int;
+
+      P_Enable : Real;      // 磷肥通道启用
+      P_Ratio : Real;
+      P_Target : Real;
+      P_Actual : Real;
+      Kp_P_Set : Real;
+      Ki_P_Set : Real;
+      Kd_P_Set : Real;
+      P_Max : Real;
+      q_p_cmd : Real;       // 磷肥计量泵输出 L/min
+      AQ_Valve_P_Raw : Int;
+      P_Reserved : Int;
+
+      K_Enable : Real;      // 钾肥通道启用
+      K_Ratio : Real;
+      K_Target : Real;
+      K_Actual : Real;
+      Kp_K_Set : Real;
+      Ki_K_Set : Real;
+      Kd_K_Set : Real;
+      K_Max : Real;
+      q_k_cmd : Real;       // 钾肥计量泵输出 L/min
+      AQ_Valve_K_Raw : Int;
+      K_Reserved : Int;
    END_STRUCT;
 
 
@@ -205,6 +242,39 @@ BEGIN
    Kp_pH_Set := 1.20;
    Ki_pH_Set := 0.01;
    Kd_pH_Set := 0.0;
+   N_Enable := 1.0;
+   N_Ratio := 0.3333;
+   N_Target := 0.0;
+   N_Actual := 0.0;
+   Kp_N_Set := 0.0;
+   Ki_N_Set := 0.0;
+   Kd_N_Set := 0.0;
+   N_Max := 4.0;
+   q_n_cmd := 0.0;
+   AQ_Valve_N_Raw := 0;
+   N_Reserved := 0;
+   P_Enable := 1.0;
+   P_Ratio := 0.3333;
+   P_Target := 0.0;
+   P_Actual := 0.0;
+   Kp_P_Set := 0.0;
+   Ki_P_Set := 0.0;
+   Kd_P_Set := 0.0;
+   P_Max := 4.0;
+   q_p_cmd := 0.0;
+   AQ_Valve_P_Raw := 0;
+   P_Reserved := 0;
+   K_Enable := 1.0;
+   K_Ratio := 0.3334;
+   K_Target := 0.0;
+   K_Actual := 0.0;
+   Kp_K_Set := 0.0;
+   Ki_K_Set := 0.0;
+   Kd_K_Set := 0.0;
+   K_Max := 4.0;
+   q_k_cmd := 0.0;
+   AQ_Valve_K_Raw := 0;
+   K_Reserved := 0;
 
 END_DATA_BLOCK
 
@@ -235,6 +305,30 @@ VERSION : 0.1
       q_f_max : Real := 10.0;
       q_a_min : Real := 0.0;
       q_a_max : Real := 4.0;
+      N_Enable : Real := 1.0;
+      N_Ratio : Real := 0.3333;
+      N_Target : Real := 0.0;
+      N_Actual : Real := 0.0;
+      Kp_N : Real := 0.0;
+      Ki_N : Real := 0.0;
+      Kd_N : Real := 0.0;
+      N_Max : Real := 4.0;
+      P_Enable : Real := 1.0;
+      P_Ratio : Real := 0.3333;
+      P_Target : Real := 0.0;
+      P_Actual : Real := 0.0;
+      Kp_P : Real := 0.0;
+      Ki_P : Real := 0.0;
+      Kd_P : Real := 0.0;
+      P_Max : Real := 4.0;
+      K_Enable : Real := 1.0;
+      K_Ratio : Real := 0.3334;
+      K_Target : Real := 0.0;
+      K_Actual : Real := 0.0;
+      Kp_K : Real := 0.0;
+      Ki_K : Real := 0.0;
+      Kd_K : Real := 0.0;
+      K_Max : Real := 4.0;
       Watchdog_Limit : Int := 10000;   // 心跳超限后进入安全输出，需大于两次 Python 写入间隔内的 OB1 扫描次数
       Growth_Stage : Int := 2;   // 0=INI, 1=DEV, 2=MID, 3=LATE
    END_VAR
@@ -253,6 +347,12 @@ VERSION : 0.1
       Valve_A_Actual : Real;
       AQ_Valve_F_Raw : Int;
       AQ_Valve_A_Raw : Int;
+      q_n_cmd : Real;
+      q_p_cmd : Real;
+      q_k_cmd : Real;
+      AQ_Valve_N_Raw : Int;
+      AQ_Valve_P_Raw : Int;
+      AQ_Valve_K_Raw : Int;
       System_Alarm_Light : Bool;
    END_VAR
 
@@ -263,8 +363,14 @@ VERSION : 0.1
       q_a_raw : Real;
       EC_Integral : Real;
       pH_Integral : Real;
+      N_Integral : Real;
+      P_Integral : Real;
+      K_Integral : Real;
       EC_Error_Last : Real;
       pH_Error_Last : Real;
+      N_Error_Last : Real;
+      P_Error_Last : Real;
+      K_Error_Last : Real;
       Active_EC_SP_Last : Real;
       Active_pH_SP_Last : Real;
       Setpoint_Track_Init : Bool;
@@ -320,6 +426,17 @@ VERSION : 0.1
       pH_H_Acid : Real;
       pH_Denom : Real;
       Feedforward_Only : Bool;
+      N_Error : Real;
+      P_Error : Real;
+      K_Error : Real;
+      N_Derivative : Real;
+      P_Derivative : Real;
+      K_Derivative : Real;
+      q_n_target : Real;
+      q_p_target : Real;
+      q_k_target : Real;
+      q_npk_sum : Real;
+      q_npk_scale : Real;
    END_VAR
 
 BEGIN
@@ -430,10 +547,16 @@ BEGIN
       #q_a_raw := 0.0;
       #q_f_cmd := 0.0;
       #q_a_cmd := 0.0;
+      #q_n_cmd := 0.0;
+      #q_p_cmd := 0.0;
+      #q_k_cmd := 0.0;
       #Valve_F_Actual := 0.0;
       #Valve_A_Actual := 0.0;
       #AQ_Valve_F_Raw := 0;
       #AQ_Valve_A_Raw := 0;
+      #AQ_Valve_N_Raw := 0;
+      #AQ_Valve_P_Raw := 0;
+      #AQ_Valve_K_Raw := 0;
       #System_Alarm_Light := NOT #Remote_Comms_OK;
       RETURN;
    END_IF;
@@ -566,7 +689,7 @@ BEGIN
 
    // 真实管道存在约 8 min 纯滞后。目标刚改变时，反馈仍是旧目标；
    // 此时若让 PID 强修正，会把正确前馈推偏。先用前馈等待管道响应。
-   #Feedforward_Only := #Setpoint_Age_S < 600.0;
+   #Feedforward_Only := #Setpoint_Age_S < 60.0;
 
    // pH 前馈按混合模型连续计算，避免目标 pH 改变时分档前馈偏差过大。
    IF (#Active_EC_SP > 0.0) AND (#Active_EC_SP < 34.0) THEN
@@ -639,8 +762,11 @@ BEGIN
 
    // --- 硬保护：超过目标才削减，接近目标时保留前馈维持量 ---
    // 原先接近目标即停肥会造成出口 EC 周期性下探；这里改为目标附近保持理论前馈。
-   IF (NOT #Feedforward_Only) AND (#EC_Filtered > (#Active_EC_SP + 0.03)) THEN
-      #q_f_target := 0.0;
+   IF (NOT #Feedforward_Only) AND (#EC_Filtered > (#Active_EC_SP + 0.08)) THEN
+      #q_f_target := 0.45 * #q_f_feedforward;
+      #EC_Integral := 0.0;
+   ELSIF (NOT #Feedforward_Only) AND (#EC_Filtered > (#Active_EC_SP + 0.03)) THEN
+      #q_f_target := 0.75 * #q_f_feedforward;
       #EC_Integral := 0.0;
    ELSIF (NOT #Feedforward_Only) AND (#EC_Filtered >= (#Active_EC_SP - 0.02)) THEN
       #q_f_target := #q_f_feedforward;
@@ -650,11 +776,14 @@ BEGIN
    // pH 的执行方向相反：加酸会降低 pH。
    // 管道存在滞后，出口接近目标时管道内仍有酸液继续到达；
    // 因此 pH 需要提前停酸/减酸，不能等到低于目标才停。
-   IF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP + 0.08)) THEN
+   IF (NOT #Feedforward_Only) AND (#pH_Filtered <= #Active_pH_SP) THEN
       #q_a_target := 0.0;
       #pH_Integral := 0.0;
-   ELSIF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP + 0.18)) THEN
-      #q_a_target := 0.35 * #q_a_feedforward;
+   ELSIF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP + 0.07)) THEN
+      #q_a_target := 0.75 * #q_a_feedforward;
+      #pH_Integral := 0.0;
+   ELSIF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP + 0.13)) THEN
+      #q_a_target := 0.95 * #q_a_feedforward;
       #pH_Integral := 0.0;
    END_IF;
 
@@ -695,12 +824,117 @@ BEGIN
    #q_f_raw := #q_f_cmd;
    #q_a_raw := #q_a_cmd;
 
+   // --- 多肥液通道分配 ---
+   // q_f_cmd 保留为“总肥液需求”，N/P/K 三路按 Ratio 分配。
+   // 若后续接入在线 N/P/K 传感器，可通过 Target/Actual + PID 对单通道微调。
+   IF #CycleTime > 0.0 THEN
+      #N_Error := #N_Target - #N_Actual;
+      #P_Error := #P_Target - #P_Actual;
+      #K_Error := #K_Target - #K_Actual;
+      #N_Integral := #N_Integral + #N_Error * #CycleTime;
+      #P_Integral := #P_Integral + #P_Error * #CycleTime;
+      #K_Integral := #K_Integral + #K_Error * #CycleTime;
+      #N_Derivative := (#N_Error - #N_Error_Last) / #CycleTime;
+      #P_Derivative := (#P_Error - #P_Error_Last) / #CycleTime;
+      #K_Derivative := (#K_Error - #K_Error_Last) / #CycleTime;
+   ELSE
+      #N_Error := 0.0;
+      #P_Error := 0.0;
+      #K_Error := 0.0;
+      #N_Derivative := 0.0;
+      #P_Derivative := 0.0;
+      #K_Derivative := 0.0;
+   END_IF;
+
+   IF #N_Integral > 5.0 THEN
+      #N_Integral := 5.0;
+   ELSIF #N_Integral < -5.0 THEN
+      #N_Integral := -5.0;
+   END_IF;
+   IF #P_Integral > 5.0 THEN
+      #P_Integral := 5.0;
+   ELSIF #P_Integral < -5.0 THEN
+      #P_Integral := -5.0;
+   END_IF;
+   IF #K_Integral > 5.0 THEN
+      #K_Integral := 5.0;
+   ELSIF #K_Integral < -5.0 THEN
+      #K_Integral := -5.0;
+   END_IF;
+
+   IF #N_Enable >= 0.5 THEN
+      #q_n_target := #q_f_cmd * #N_Ratio + #Kp_N * #N_Error + #Ki_N * #N_Integral + #Kd_N * #N_Derivative;
+   ELSE
+      #q_n_target := 0.0;
+      #N_Integral := 0.0;
+   END_IF;
+
+   IF #P_Enable >= 0.5 THEN
+      #q_p_target := #q_f_cmd * #P_Ratio + #Kp_P * #P_Error + #Ki_P * #P_Integral + #Kd_P * #P_Derivative;
+   ELSE
+      #q_p_target := 0.0;
+      #P_Integral := 0.0;
+   END_IF;
+
+   IF #K_Enable >= 0.5 THEN
+      #q_k_target := #q_f_cmd * #K_Ratio + #Kp_K * #K_Error + #Ki_K * #K_Integral + #Kd_K * #K_Derivative;
+   ELSE
+      #q_k_target := 0.0;
+      #K_Integral := 0.0;
+   END_IF;
+
+   IF #q_n_target < 0.0 THEN
+      #q_n_target := 0.0;
+   ELSIF #q_n_target > #N_Max THEN
+      #q_n_target := #N_Max;
+   END_IF;
+   IF #q_p_target < 0.0 THEN
+      #q_p_target := 0.0;
+   ELSIF #q_p_target > #P_Max THEN
+      #q_p_target := #P_Max;
+   END_IF;
+   IF #q_k_target < 0.0 THEN
+      #q_k_target := 0.0;
+   ELSIF #q_k_target > #K_Max THEN
+      #q_k_target := #K_Max;
+   END_IF;
+
+   #q_npk_sum := #q_n_target + #q_p_target + #q_k_target;
+   IF (#q_npk_sum > #q_f_cmd) AND (#q_npk_sum > 0.0) THEN
+      #q_npk_scale := #q_f_cmd / #q_npk_sum;
+      #q_n_target := #q_n_target * #q_npk_scale;
+      #q_p_target := #q_p_target * #q_npk_scale;
+      #q_k_target := #q_k_target * #q_npk_scale;
+   END_IF;
+
+   #q_n_cmd := #q_n_target;
+   #q_p_cmd := #q_p_target;
+   #q_k_cmd := #q_k_target;
+   #N_Error_Last := #N_Error;
+   #P_Error_Last := #P_Error;
+   #K_Error_Last := #K_Error;
+
    #Valve_F_Actual := #q_f_cmd;
    #Valve_A_Actual := #q_a_cmd;
 
    // --- 0~27648 模拟量换算 ---
    #AQ_Valve_F_Raw := REAL_TO_INT(#q_f_cmd / #q_f_max * 27648.0);
    #AQ_Valve_A_Raw := REAL_TO_INT(#q_a_cmd / #q_a_max * 27648.0);
+   IF #N_Max > 0.0 THEN
+      #AQ_Valve_N_Raw := REAL_TO_INT(#q_n_cmd / #N_Max * 27648.0);
+   ELSE
+      #AQ_Valve_N_Raw := 0;
+   END_IF;
+   IF #P_Max > 0.0 THEN
+      #AQ_Valve_P_Raw := REAL_TO_INT(#q_p_cmd / #P_Max * 27648.0);
+   ELSE
+      #AQ_Valve_P_Raw := 0;
+   END_IF;
+   IF #K_Max > 0.0 THEN
+      #AQ_Valve_K_Raw := REAL_TO_INT(#q_k_cmd / #K_Max * 27648.0);
+   ELSE
+      #AQ_Valve_K_Raw := 0;
+   END_IF;
 
    #System_Alarm_Light := FALSE;
 END_FUNCTION_BLOCK
@@ -762,6 +996,30 @@ BEGIN
       q_f_max := 10.0,
       q_a_min := 0.0,
       q_a_max := 4.0,
+      N_Enable := "DB1".N_Enable,
+      N_Ratio := "DB1".N_Ratio,
+      N_Target := "DB1".N_Target,
+      N_Actual := "DB1".N_Actual,
+      Kp_N := "DB1".Kp_N_Set,
+      Ki_N := "DB1".Ki_N_Set,
+      Kd_N := "DB1".Kd_N_Set,
+      N_Max := "DB1".N_Max,
+      P_Enable := "DB1".P_Enable,
+      P_Ratio := "DB1".P_Ratio,
+      P_Target := "DB1".P_Target,
+      P_Actual := "DB1".P_Actual,
+      Kp_P := "DB1".Kp_P_Set,
+      Ki_P := "DB1".Ki_P_Set,
+      Kd_P := "DB1".Kd_P_Set,
+      P_Max := "DB1".P_Max,
+      K_Enable := "DB1".K_Enable,
+      K_Ratio := "DB1".K_Ratio,
+      K_Target := "DB1".K_Target,
+      K_Actual := "DB1".K_Actual,
+      Kp_K := "DB1".Kp_K_Set,
+      Ki_K := "DB1".Ki_K_Set,
+      Kd_K := "DB1".Kd_K_Set,
+      K_Max := "DB1".K_Max,
       Watchdog_Limit := 10000,
       Growth_Stage := "DB1".Growth_Stage,
       Remote_Comms_OK => "DB1".Remote_Comms_OK,
@@ -777,6 +1035,12 @@ BEGIN
       Valve_A_Actual => "DB1".Valve_A_Actual,
       AQ_Valve_F_Raw => "DB1".AQ_Valve_F_Raw,
       AQ_Valve_A_Raw => "DB1".AQ_Valve_A_Raw,
+      q_n_cmd => "DB1".q_n_cmd,
+      q_p_cmd => "DB1".q_p_cmd,
+      q_k_cmd => "DB1".q_k_cmd,
+      AQ_Valve_N_Raw => "DB1".AQ_Valve_N_Raw,
+      AQ_Valve_P_Raw => "DB1".AQ_Valve_P_Raw,
+      AQ_Valve_K_Raw => "DB1".AQ_Valve_K_Raw,
       System_Alarm_Light => "DB1".System_Alarm_Light
    );
 
