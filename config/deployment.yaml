@@ -1,0 +1,113 @@
+deployment:
+  # 当前配置档案。simulation_plc 用于 PLCSIM/纯仿真；field_plc 预留给真实 PLC。
+  profile: simulation_plc
+  description: >
+    Deployment-facing parameters. Simulation can use these defaults, but field
+    deployment should update them after pump, sensor, tank, and pipe calibration.
+
+  modes:
+    # 纯仿真/PLCSIM 阶段：EC/pH 反馈由数字孪生模型写回 DB1。
+    simulation_plc:
+      process_feedback: simulated_outlet
+      plc_target: plcsim
+    # 真实部署阶段：EC/pH 反馈来自真实出口传感器。
+    field_plc:
+      process_feedback: real_outlet_sensors
+      plc_target: real_s7
+
+  db_contract:
+    # DB1 是上位机与 PLC 的固定通讯契约。真实部署前不要随意改 offset。
+    db_number: 1
+    optimized_access_required: false
+    # 上位机必须周期写入这些变量，Remote_Heartbeat 用于 PLC 通讯看门狗。
+    required_write_tags:
+      - EC_Set_SP
+      - pH_Set_SP
+      - EC_Actual
+      - pH_Actual
+      - SAC_Enable
+      - Remote_Heartbeat
+    # 上位机至少应读取这些变量，用于监控执行量、安全状态和实际生效目标。
+    required_read_tags:
+      - Remote_Comms_OK
+      - Watchdog_Timer
+      - Active_EC_SP
+      - Active_pH_SP
+      - q_f_cmd
+      - q_a_cmd
+      - System_Alarm_Light
+
+  process_model:
+    # 以下参数现在服务于仿真；真实部署时要用现场标定值替换。
+    source_water:
+      # 清水主管流量。真实系统建议由流量计测得，而不是写死。
+      q_w_l_min: 136.0
+      # 原水本底 EC。后续做酸液 EC 串扰补偿时会用到。
+      ec_source_ds_m: 0.0
+      ph_water: 7.2
+    fertilizer_stock:
+      # 当前版本只有 1 路等效复合肥母液，未来可扩展 A/B/C 多路肥液。
+      channels: 1
+      ec_conc_ds_m: 35.0
+      channel_names:
+        - F1_compound
+    acid_stock:
+      # 当前版本只有 1 路酸液，pH 独立控制。
+      channels: 1
+      ph_acid: 3.9
+      # 酸液对 EC 的贡献系数，真实部署时需要通过实验拟合。
+      ec_gain_ds_m_per_l_min: 0.0
+    pipe:
+      # 管道纯滞后和惯性。真实系统必须现场测阶跃响应后再填写。
+      tau_min: 8.0
+      t_min: 3.5
+
+  actuator_limits:
+    # PLC 输出流量限幅，必须和泵/阀实际能力一致。
+    q_f_total_l_min:
+      min: 0.0
+      max: 10.0
+    q_a_l_min:
+      min: 0.0
+      max: 4.0
+    # 斜坡限速用于保护泵阀，也能减少长管道滞后下的过冲。
+    rate_limit_l_min_s:
+      q_f_up: 1.5
+      q_f_down: 2.0
+      q_a_up: 1.0
+      q_a_down: 1.2
+
+  safety_limits:
+    # 目标值安全边界。真实部署时建议比作物理论边界更保守。
+    ec_sp_ds_m:
+      min: 0.7
+      max: 2.5
+    ph_sp:
+      min: 5.8
+      max: 6.8
+    # 出口报警阈值，用于现场联锁和上位机报警。
+    outlet_alarm:
+      ec_high_ds_m: 3.0
+      ph_low: 5.4
+      ph_high: 7.0
+    # PLC 内部心跳超时阈值，按 OB1 扫描周期折算。
+    heartbeat_timeout_scans: 10000
+
+  commissioning_targets:
+    # 快速管道模型验收标准，用于先验证控制逻辑。
+    outlet_fast_pipe:
+      ec_mae_max: 0.03
+      ph_mae_max: 0.03
+    # 真实管道延迟下的验收标准，允许动态误差更大。
+    outlet_real_pipe:
+      ec_mae_max: 0.08
+      ph_mae_max: 0.10
+
+  future_multichannel_fertilizer:
+    # 多路肥液扩展规划：当前关闭，后续把 q_f_cmd 视作 q_f_total_cmd 后再拆分。
+    enabled: false
+    planned_channels:
+      - A_calcium
+      - B_np_k
+      - C_micro
+    control_rule: total_ec_by_plc_ratio_split_by_recipe

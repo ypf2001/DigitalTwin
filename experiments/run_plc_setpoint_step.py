@@ -58,17 +58,17 @@ def _plot(out_dir: Path, rows: list[dict[str, float]]) -> Path:
     ph = np.array([r["ph_actual"] for r in rows], dtype=float)
     q_f = np.array([r["q_f_cmd"] for r in rows], dtype=float)
     q_a = np.array([r["q_a_cmd"] for r in rows], dtype=float)
-    ec_sp = rows[0]["ec_set"]
-    ph_sp = rows[0]["ph_set"]
+    ec_sp = np.array([r["ec_set"] for r in rows], dtype=float)
+    ph_sp = np.array([r["ph_set"] for r in rows], dtype=float)
 
     fig, axes = plt.subplots(3, 1, figsize=(11, 8), sharex=True)
     axes[0].plot(t, ec, color="#26734d", linewidth=1.5, label="EC actual")
-    axes[0].axhline(ec_sp, color="#26734d", linestyle="--", linewidth=1.0, label="EC set")
+    axes[0].step(t, ec_sp, where="post", color="#26734d", linestyle="--", linewidth=1.0, label="EC set")
     axes[0].set_ylabel("EC")
     axes[0].legend(loc="best")
 
     axes[1].plot(t, ph, color="#2f5f9f", linewidth=1.5, label="pH actual")
-    axes[1].axhline(ph_sp, color="#2f5f9f", linestyle="--", linewidth=1.0, label="pH set")
+    axes[1].step(t, ph_sp, where="post", color="#2f5f9f", linestyle="--", linewidth=1.0, label="pH set")
     axes[1].set_ylabel("pH")
     axes[1].legend(loc="best")
 
@@ -96,11 +96,15 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
     cfg = load_config()
     q_w = float(args.q_w if args.q_w is not None else cfg.env().get("q_w", 136.0))
 
+    # 这里保留最小过程模型，只验证 PLC 出口闭环；田间/根区模型不参与。
     tank = MixingTank()
+    # sim_step_s 是仿真时间步长，plc_wait_s 是真实等待时间。
+    # 设 sim_step_s > plc_wait_s 可以快速跑完 8min 管道延迟，而不用真的等 8 分钟。
+    sim_step_s = float(args.sim_step_s if args.sim_step_s is not None else args.plc_wait_s)
     pipe = PipeDynamics(
         tau=args.pipe_tau_min,
         T=args.pipe_t_min,
-        dt=max(args.plc_wait_s / 60.0, 1e-6),
+        dt=max(sim_step_s / 60.0, 1e-6),
     )
     tank.reset()
     pipe.reset()
@@ -117,7 +121,7 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
     ec_actual = float(args.ec_initial)
     ph_actual = float(args.ph_initial)
     stage = STAGE_INDEX[args.stage.upper()]
-    total_steps = max(1, int(round(args.duration_s / args.plc_wait_s)))
+    total_steps = max(1, int(round(args.duration_s / sim_step_s)))
 
     fieldnames = [
         "step",
@@ -146,7 +150,7 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
         plc.write_growth_stage(stage)
 
         for step in range(total_steps):
-            t_s = step * args.plc_wait_s
+            t_s = step * sim_step_s
             ec_set = args.ec_set
             ph_set = args.ph_set
             if args.change_at_s is not None and t_s >= args.change_at_s:
@@ -155,6 +159,8 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
 
             ec_feedback = ec_set if args.disable_ec_loop else ec_actual
             ph_feedback = ph_set if args.disable_ph_loop else ph_actual
+            # DB1 写入顺序：目标值 + 出口反馈 + SAC_Enable。
+            # 真实部署时 ec_actual/ph_actual 应来自传感器；纯仿真时由 tank/pipe 模型回写。
             ok = plc.write_setpoints(
                 ec_set=ec_set,
                 ph_set=ph_set,
@@ -167,6 +173,7 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
 
             q_f = float(state.get("q_f_cmd", 0.0))
             q_a = float(state.get("q_a_cmd", 0.0))
+            # PLC 只输出执行量 q_f/q_a；过程响应由这里模拟，再写回下一轮 DB1。
             ec_tank, ph_tank = tank.step(q_f=q_f, q_a=q_a, q_w=q_w)
             ec_actual, ph_actual = pipe.step(ec_tank, ph_tank)
 
@@ -208,7 +215,7 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
 
     plot_path = _plot(out_dir, rows)
 
-    tail = rows[max(0, len(rows) - max(3, int(round(30.0 / args.plc_wait_s)))) :]
+    tail = rows[max(0, len(rows) - max(3, int(round(30.0 / sim_step_s)))) :]
     metrics = {
         "ec_final": rows[-1]["ec_actual"],
         "ph_final": rows[-1]["ph_actual"],
@@ -239,6 +246,7 @@ def main() -> int:
     parser.add_argument("--stage", choices=["INI", "DEV", "MID", "LATE"], default="MID")
     parser.add_argument("--duration-s", type=float, default=300.0)
     parser.add_argument("--plc-wait-s", type=float, default=1.0)
+    parser.add_argument("--sim-step-s", type=float, default=None, help="Simulated seconds advanced per PLC exchange. Defaults to --plc-wait-s.")
     parser.add_argument("--pipe-tau-min", type=float, default=None, help="Pipe pure delay in minutes. Default uses config.")
     parser.add_argument("--pipe-t-min", type=float, default=None, help="Pipe first-order time constant in minutes. Default uses config.")
     parser.add_argument("--q-w", type=float, default=None)

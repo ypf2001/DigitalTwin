@@ -326,7 +326,7 @@ BEGIN
    // ================================================================
    // B 方案 PLC 执行层
    // Python/SAC 只给 EC_set、pH_set；PLC 根据反馈计算 q_f、q_a。
-   // 当前版本先用简单比例控制，跑通后可替换为 PID / ESO-AFOPID。
+   // 当前版本为“前馈 + 模糊自适应 PID + 长管道提前停酸/保前馈”。
    // ================================================================
 
    // --- 心跳监控 ---
@@ -648,12 +648,13 @@ BEGIN
    END_IF;
 
    // pH 的执行方向相反：加酸会降低 pH。
-   // 明显低于目标才停酸，接近目标时保留前馈维持量。
-   IF (NOT #Feedforward_Only) AND (#pH_Filtered < (#Active_pH_SP - 0.03)) THEN
+   // 管道存在滞后，出口接近目标时管道内仍有酸液继续到达；
+   // 因此 pH 需要提前停酸/减酸，不能等到低于目标才停。
+   IF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP + 0.08)) THEN
       #q_a_target := 0.0;
       #pH_Integral := 0.0;
-   ELSIF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP + 0.03)) THEN
-      #q_a_target := #q_a_feedforward;
+   ELSIF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP + 0.18)) THEN
+      #q_a_target := 0.35 * #q_a_feedforward;
       #pH_Integral := 0.0;
    END_IF;
 

@@ -62,6 +62,10 @@ class _Config:
     def plc(self) -> dict:
         return self._data.get("plc", {})
 
+    def deployment(self) -> dict:
+        """真实部署/PLCSIM 预检相关参数。"""
+        return self._data.get("deployment", {})
+
     def season_comparison(self) -> dict:
         return self._data.get("season_comparison", {})
 
