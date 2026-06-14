@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 import matplotlib
@@ -6,138 +8,155 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
-from matplotlib.patches import Circle, FancyArrowPatch, Polygon, Rectangle
+from matplotlib.patches import FancyArrowPatch, Polygon, Rectangle
 
 
-OUT_DIR = Path(r"D:\Digital Twin\results\diagrams")
+ROOT = Path(__file__).resolve().parents[1]
+OUT_DIR = ROOT / "outputs" / "figures"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-OUT_PNG = OUT_DIR / "physical_connection_readable.png"
-OUT_SVG = OUT_DIR / "physical_connection_readable.svg"
-
-FONT_PATH = r"C:\Windows\Fonts\simhei.ttf"
-font_manager.fontManager.addfont(FONT_PATH)
-FONT = font_manager.FontProperties(fname=FONT_PATH)
+OUT_PNG = OUT_DIR / "figure_3_1_plc_fertigation_workflow.png"
+OUT_SVG = OUT_DIR / "figure_3_1_plc_fertigation_workflow.svg"
 
 
-def text(ax, x, y, s, size=9, ha="center", va="center", weight=None):
-    ax.text(x, y, s, fontsize=size, fontproperties=FONT, ha=ha, va=va, fontweight=weight)
+def _load_font() -> font_manager.FontProperties:
+    for font_path in (
+        Path(r"C:\Windows\Fonts\simsun.ttc"),
+        Path(r"C:\Windows\Fonts\simhei.ttf"),
+        Path(r"C:\Windows\Fonts\msyh.ttc"),
+    ):
+        if font_path.exists():
+            font_manager.fontManager.addfont(str(font_path))
+            return font_manager.FontProperties(fname=str(font_path))
+    return font_manager.FontProperties()
 
 
-def main():
-    fig, ax = plt.subplots(figsize=(16, 9), dpi=180)
-    ax.set_xlim(0, 160)
-    ax.set_ylim(-12, 92)
+FONT = _load_font()
+
+
+def main() -> None:
+    fig, ax = plt.subplots(figsize=(16.5, 9.2), dpi=240)
+    ax.set_xlim(0, 170)
+    ax.set_ylim(-14, 108)
     ax.axis("off")
 
-    lw = 1.35
+    lw = 1.45
     thin = 1.0
 
-    def group(x, y, w, h, title):
-        ax.add_patch(Rectangle((x, y), w, h, fill=False, lw=1.1, ls=(0, (8, 5))))
-        text(ax, x + w / 2, y + h + 2.5, title, 12)
+    def text(x, y, s, size=9.0, ha="center", va="center", weight=None):
+        ax.text(x, y, s, fontsize=size, fontproperties=FONT, ha=ha, va=va, fontweight=weight)
 
-    def box(x, y, w, h, label, n=None):
+    def group(x, y, w, h, label):
+        ax.add_patch(Rectangle((x, y), w, h, fill=False, lw=1.05, ls=(0, (7, 4))))
+        text(x + w / 2, y + h + 2.0, label, 11.2, weight="bold")
+
+    def box(x, y, w, h, label, n=None, size=8.6):
         ax.add_patch(Rectangle((x, y), w, h, fill=False, lw=thin))
-        text(ax, x + w / 2, y + h / 2, label, 9)
-        if n is not None:
-            text(ax, x - 2.5, y + h + 2.0, str(n), 9)
+        text(x + w / 2, y + h / 2, label, size)
+        if n:
+            text(x - 2.0, y + h + 1.6, n, 8.0)
 
-    def line(points, arrow=False, dashed=False):
+    def arrow(points, dashed=False):
         xs, ys = zip(*points)
-        ax.plot(xs, ys, color="black", lw=lw if not dashed else 0.9, ls="--" if dashed else "-")
-        if arrow:
+        ax.plot(xs, ys, color="black", lw=0.85 if dashed else lw, ls="--" if dashed else "-")
+        if len(points) >= 2:
             ax.add_patch(FancyArrowPatch(points[-2], points[-1], arrowstyle="->", mutation_scale=10, lw=0, color="black"))
 
-    def valve(x, y, vertical=True, n=None):
+    def valve(x, y, n=None, vertical=False):
         if vertical:
-            p1 = [[x - 1.7, y + 2.2], [x, y], [x + 1.7, y + 2.2]]
-            p2 = [[x - 1.7, y - 2.2], [x, y], [x + 1.7, y - 2.2]]
+            p1 = [[x - 1.4, y + 2.0], [x, y], [x + 1.4, y + 2.0]]
+            p2 = [[x - 1.4, y - 2.0], [x, y], [x + 1.4, y - 2.0]]
         else:
-            p1 = [[x - 2.2, y - 1.7], [x, y], [x - 2.2, y + 1.7]]
-            p2 = [[x + 2.2, y - 1.7], [x, y], [x + 2.2, y + 1.7]]
+            p1 = [[x - 2.0, y - 1.4], [x, y], [x - 2.0, y + 1.4]]
+            p2 = [[x + 2.0, y - 1.4], [x, y], [x + 2.0, y + 1.4]]
         ax.add_patch(Polygon(p1, fill=False, lw=thin))
         ax.add_patch(Polygon(p2, fill=False, lw=thin))
-        if n is not None:
-            text(ax, x - 4.5, y + 4.0, str(n), 9)
+        if n:
+            text(x - 4.0, y + 3.7, n, 8.0)
 
-    def pump(x, y, n):
-        ax.add_patch(Circle((x, y), 3.7, fill=False, lw=thin))
-        ax.add_patch(Polygon([[x - 1.1, y - 1.8], [x + 2.0, y], [x - 1.1, y + 1.8]], fill=False, lw=thin))
-        text(ax, x, y - 5.8, "计量泵", 8)
-        text(ax, x - 5.2, y + 4.8, str(n), 9)
+    # Top control structure.
+    group(10, 92, 150, 11, "上位机监控与仿真层")
+    box(21, 95, 34, 5.5, "Python / 数字孪生 / 配方管理", "1")
+    box(69, 95, 28, 5.5, "TIA Portal", "2")
+    box(116, 95, 28, 5.5, "Snap7", "3")
 
-    group(8, 36, 36, 32, "原水与预处理区")
-    group(55, 35, 36, 34, "PLC 控制与混合检测区")
-    group(100, 26, 52, 48, "多肥液通道 / 酸碱储液区")
-    group(28, 6, 120, 18, "栽培区 / 灌溉管网")
+    group(10, 76, 150, 11, "PLC 控制柜")
+    box(21, 79, 24, 5.5, "PLC CPU", "4")
+    box(55, 79, 25, 5.5, "I/O 模块", "5")
+    box(91, 79, 24, 5.5, "继电器", "6")
+    box(126, 79, 26, 5.5, "变频器 / 24V 电源", "7")
+    arrow([(130, 95), (68, 84.5)], dashed=True)
+    text(105, 89.5, "以太网 TCP/IP", 8.8)
 
-    box(18, 62, 14, 7, "灌溉水源", 1)
-    valve(25, 55, True, 2)
-    box(18, 46, 14, 7, "过滤器", 3)
-    box(18, 38, 14, 6, "流量计", 4)
-    line([(25, 62), (25, 57)])
-    line([(25, 53), (25, 46)])
-    line([(25, 38), (25, 32), (60, 32), (60, 42)], arrow=True)
+    # Field layout groups.
+    group(9, 37, 43, 21, "清水与预处理区")
+    group(59, 32, 57, 28, "混合主管与检测区")
+    group(124, 31, 38, 31, "肥液 / 酸碱液区")
+    group(52, 7, 102, 15, "灌溉主管 / 支路")
 
-    box(62, 59, 22, 8, "上位机 Python\nTIA Portal / Snap7", 5)
-    box(61, 47, 22, 8, "PLC 控制器", 6)
-    box(61, 37, 22, 7, "I/O 模块", 7)
-    line([(73, 59), (73, 55)], arrow=True)
-    text(ax, 84, 57, "以太网 TCP/IP", 8, ha="left")
+    # Water line.
+    box(14, 48, 12, 6, "清水水源", "8")
+    box(32, 48, 12, 6, "过滤器", "9")
+    valve(50, 51, "10")
+    arrow([(26, 51), (32, 51)])
+    arrow([(44, 51), (50, 51), (62, 51)])
+    text(48, 45.0, "清水主管", 8.2)
 
-    ax.plot([60, 92], [32, 32], color="black", lw=lw)
-    text(ax, 76, 34.5, "混合主管", 9)
-    for x, label, n in [(64, "压力", 8), (74, "EC", 9), (84, "pH", 10)]:
-        box(x - 3.8, 26, 7.6, 4.5, label, n)
-        line([(x, 32), (x, 30.5)])
-        line([(x, 30), (72, 37)], dashed=True)
+    # Fertilizer branches and pump group.
+    tanks = [("A肥液罐", "11", "17"), ("B肥液罐", "12", "18"), ("酸液罐", "13", "19"), ("碱液罐", "14", "20")]
+    for (label, tank_no, valve_no), y in zip(tanks, (57, 51, 45, 39)):
+        box(146, y - 2.5, 10, 5, label, tank_no, 7.9)
+        valve(136, y, valve_no)
+        arrow([(146, y), (138, y)])
+        ax.plot([134, 126, 126], [y, y, 51], color="black", lw=thin)
+    box(120, 63, 24, 6, "计量泵组", "21")
+    arrow([(132, 63), (132, 55), (116, 51)])
 
-    channel_data = [
-        ("肥液1", 11, 68),
-        ("肥液2", 12, 61),
-        ("肥液3", 13, 54),
-        ("肥液4", 14, 47),
-        ("酸液", 15, 40),
-        ("碱液", 16, 33),
-    ]
-    for i, (label, n, y) in enumerate(channel_data):
-        box(140, y - 2.5, 8, 5, label, n)
-        pump(128, y, 17 + i)
-        valve(114, y, False)
-        line([(140, y), (132, y)], arrow=True)
-        line([(124, y), (100, y), (100, 32), (92, 32)], arrow=True)
-        line([(73, 37), (128, y - 3.5)], dashed=True)
-    text(ax, 114, 73, "23 手动阀组", 9)
+    # Mixing, sensing, and irrigation.
+    box(64, 47, 22, 8, "混合主管", "15")
+    arrow([(62, 51), (64, 51)])
+    arrow([(86, 51), (96, 51)])
+    text(75, 57.2, "清水主管 + 肥液支路 + 酸/碱液支路", 8.0)
 
-    valve(60, 23, True, 24)
-    box(50, 13, 10, 5, "持压阀", 25)
-    line([(60, 32), (60, 23), (60, 15), (38, 15), (138, 15)], arrow=True)
-    line([(73, 37), (60, 23)], dashed=True)
+    for x, label, n in ((99, "压力", "22"), (109, "EC", "23"), (119, "pH", "24")):
+        box(x - 3.5, 43, 7, 5, label, n, 7.8)
+        ax.plot([x, x], [51, 48], color="black", lw=thin)
+    text(109, 39.0, "压力 / EC / pH 检测", 8.0)
 
-    for i, x in enumerate([48, 72, 96, 120], 1):
-        line([(x, 15), (x, 21)])
-        valve(x, 21, True)
-        ax.plot([x - 8, x + 8], [22.5, 22.5], color="black", lw=thin)
-        text(ax, x, 9.5, f"灌溉支路{i}", 8)
-    text(ax, 92, 6.5, "26 灌溉管网 / 滴灌带 / 种植槽", 9)
+    valve(130, 51, "25")
+    text(130, 46.5, "持压阀", 8.0)
+    arrow([(122, 51), (130, 51), (143, 51)])
+    text(143, 54.5, "灌溉主管", 8.6)
 
-    line([(138, 15), (154, 15), (154, 32), (84, 32)], arrow=True)
-    valve(154, 24, True, 27)
-    text(ax, 145, 29, "回液 / 取样支路", 8)
+    arrow([(143, 51), (143, 15), (60, 15)])
+    for i, x in enumerate((68, 91, 114, 137), start=1):
+        ax.plot([x, x], [15, 21], color="black", lw=thin)
+        valve(x, 21, vertical=True)
+        ax.plot([x - 7, x + 7], [22.3, 22.3], color="black", lw=thin)
+        for dx in (-4, 0, 4):
+            ax.plot([x + dx, x + dx], [22.3, 19.0], color="black", lw=thin)
+        text(x, 10.5, f"灌溉支路{i}", 8.0)
+    text(103, 5.6, "26 灌溉主管 / 支路 / 滴灌带", 8.4)
 
-    text(ax, 92, 27, "实线：水肥管路", 8)
-    text(ax, 92, 25, "虚线：电源 / 控制 / 采样信号", 8)
+    # Signal path, intentionally simplified to avoid crossing the hydraulic drawing.
+    arrow([(68, 79), (68, 67), (132, 67)], dashed=True)
+    arrow([(132, 67), (132, 57)], dashed=True)
+    arrow([(68, 67), (109, 67), (109, 48)], dashed=True)
+    text(76, 69.2, "控制 / 采样信号", 8.0, ha="left")
+    text(15, 31.0, "实线：水肥管路流向", 8.2, ha="left")
+    text(15, 27.5, "虚线：控制与采样信号", 8.2, ha="left")
 
-    text(ax, 80, -2.7, "图 3.1  PLC 控制水肥一体化实物连接与系统工作流程示意图", 16, weight="bold")
+    title = "图 3.1 PLC 控制水肥一体化实物连接与系统工作流程示意图"
+    text(85, -1.0, title, 14.0, weight="bold")
     legend = (
-        "1.灌溉水源  2.进水电动阀  3.过滤器  4.流量计  5.上位机  6.PLC控制器  7.I/O模块  8.压力传感器  "
-        "9.EC传感器  10.pH传感器  11-14.肥液通道储液罐\n"
-        "15.酸液罐  16.碱液罐  17-22.计量泵组  23.手动阀组  24.主管电动阀  25.持压阀  26.灌溉管网  27.回液/取样阀"
+        "1.Python/数字孪生/配方管理  2.TIA Portal  3.Snap7  4.PLC CPU  5.I/O模块  6.继电器  7.变频器/24V电源  "
+        "8.清水水源  9.过滤器  10.清水主管阀\n"
+        "11.A肥液罐  12.B肥液罐  13.酸液罐  14.碱液罐  15.混合主管  17.A肥液支路阀  18.B肥液支路阀  "
+        "19.酸液支路阀  20.碱液支路阀  21.计量泵组  22.压力传感器  23.EC传感器  24.pH传感器  25.持压阀  26.灌溉主管/支路"
     )
-    text(ax, 80, -10.0, legend, 10, va="bottom")
+    text(85, -9.3, legend, 8.4, va="bottom")
 
-    fig.savefig(OUT_PNG, bbox_inches="tight", pad_inches=0.35)
-    fig.savefig(OUT_SVG, bbox_inches="tight", pad_inches=0.35)
+    fig.savefig(OUT_PNG, bbox_inches="tight", pad_inches=0.32)
+    fig.savefig(OUT_SVG, bbox_inches="tight", pad_inches=0.32)
     print(OUT_PNG)
     print(OUT_SVG)
 
