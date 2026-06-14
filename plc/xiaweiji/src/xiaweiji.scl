@@ -204,6 +204,11 @@ NON_RETAIN
       q_k_cmd : Real;       // 钾肥计量泵输出 L/min
       AQ_Valve_K_Raw : Int;
       K_Reserved : Int;
+
+      // PLC 细调窗口：PID 只允许在前馈流量基础上做有限百分比修正。
+      // 推荐范围 0.05~0.15；0.10 表示 EC 肥液输出允许 ±10% 修正。
+      EC_Trim_Band : Real;
+      pH_Trim_Band : Real;
    END_STRUCT;
 
 
@@ -275,6 +280,8 @@ BEGIN
    q_k_cmd := 0.0;
    AQ_Valve_K_Raw := 0;
    K_Reserved := 0;
+   EC_Trim_Band := 0.10;
+   pH_Trim_Band := 0.08;
 
 END_DATA_BLOCK
 
@@ -299,6 +306,8 @@ VERSION : 0.1
       pH_Filter_Tau : Real := 2.0;   // pH 反馈滤波时间常数，单位 s
       EC_Deadband : Real := 0.03;   // EC 小误差死区，避免输出在目标附近来回跳
       pH_Deadband : Real := 0.04;   // pH 小误差死区
+      EC_Trim_Band : Real := 0.10;   // PLC 细调窗口，限制 EC PID 在前馈基础上 ±5%~±15%
+      pH_Trim_Band : Real := 0.08;   // PLC 细调窗口，限制 pH PID 在前馈基础上 ±5%~±15%
       EC_MaxInputStep : Real := 0.15;   // 每周期允许进入滤波器的最大 EC 跳变
       pH_MaxInputStep : Real := 0.15;   // 每周期允许进入滤波器的最大 pH 跳变
       q_f_min : Real := 0.0;
@@ -426,6 +435,15 @@ VERSION : 0.1
       pH_H_Acid : Real;
       pH_Denom : Real;
       Feedforward_Only : Bool;
+      pH_NearFactor : Real;
+      EC_Trim_Band_Safe : Real;
+      pH_Trim_Band_Safe : Real;
+      q_f_trim_span : Real;
+      q_a_trim_span : Real;
+      q_f_trim_min : Real;
+      q_f_trim_max : Real;
+      q_a_trim_min : Real;
+      q_a_trim_max : Real;
       N_Error : Real;
       P_Error : Real;
       K_Error : Real;
@@ -519,8 +537,10 @@ BEGIN
       #Setpoint_Track_Init := TRUE;
    END_IF;
 
-   #Setpoint_Changed := (ABS(#Active_EC_SP - #Active_EC_SP_Last) > 0.005)
-      OR (ABS(#Active_pH_SP - #Active_pH_SP_Last) > 0.005);
+   // 只把真正的阶段切换/人工大改目标当作 Setpoint_Changed。
+   // 连续小步逼近目标会反复清积分和进入 Feedforward_Only，导致 PID 执行量跳动。
+   #Setpoint_Changed := (ABS(#Active_EC_SP - #Active_EC_SP_Last) > 0.05)
+      OR (ABS(#Active_pH_SP - #Active_pH_SP_Last) > 0.03);
 
    IF #SAC_Enable AND NOT #SAC_Enable_Last THEN
       #Setpoint_Changed := TRUE;
@@ -736,6 +756,22 @@ BEGIN
       #q_f_correction := 0.0;
    END_IF;
 
+   #EC_Trim_Band_Safe := #EC_Trim_Band;
+   IF #EC_Trim_Band_Safe < 0.05 THEN
+      #EC_Trim_Band_Safe := 0.05;
+   ELSIF #EC_Trim_Band_Safe > 0.15 THEN
+      #EC_Trim_Band_Safe := 0.15;
+   END_IF;
+
+   #q_f_trim_span := #q_f_feedforward * #EC_Trim_Band_Safe;
+   IF #q_f_correction > #q_f_trim_span THEN
+      #q_f_correction := #q_f_trim_span;
+   ELSIF #q_f_correction < -#q_f_trim_span THEN
+      #q_f_correction := -#q_f_trim_span;
+   END_IF;
+   #q_f_trim_min := #q_f_feedforward - #q_f_trim_span;
+   #q_f_trim_max := #q_f_feedforward + #q_f_trim_span;
+
    #q_f_pid := #q_f_feedforward + #q_f_correction;
 
    IF #Feedforward_Only THEN
@@ -752,6 +788,22 @@ BEGIN
       #q_a_correction := 0.0;
    END_IF;
 
+   #pH_Trim_Band_Safe := #pH_Trim_Band;
+   IF #pH_Trim_Band_Safe < 0.05 THEN
+      #pH_Trim_Band_Safe := 0.05;
+   ELSIF #pH_Trim_Band_Safe > 0.15 THEN
+      #pH_Trim_Band_Safe := 0.15;
+   END_IF;
+
+   #q_a_trim_span := #q_a_feedforward * #pH_Trim_Band_Safe;
+   IF #q_a_correction > #q_a_trim_span THEN
+      #q_a_correction := #q_a_trim_span;
+   ELSIF #q_a_correction < -#q_a_trim_span THEN
+      #q_a_correction := -#q_a_trim_span;
+   END_IF;
+   #q_a_trim_min := #q_a_feedforward - #q_a_trim_span;
+   #q_a_trim_max := #q_a_feedforward + #q_a_trim_span;
+
    #q_a_pid := #q_a_feedforward + #q_a_correction;
 
    #q_f_target := #q_f_pid;
@@ -760,31 +812,49 @@ BEGIN
    #EC_Error_Last := #EC_Error;
    #pH_Error_Last := #pH_Error;
 
-   // --- 硬保护：超过目标才削减，接近目标时保留前馈维持量 ---
-   // 原先接近目标即停肥会造成出口 EC 周期性下探；这里改为目标附近保持理论前馈。
-   IF (NOT #Feedforward_Only) AND (#EC_Filtered > (#Active_EC_SP + 0.08)) THEN
-      #q_f_target := 0.45 * #q_f_feedforward;
+   // --- EC 超调保护：轻微超调时只做小幅削肥，避免 q_f_cmd 阶跃振荡 ---
+   // 压缩仿真和真实传感器都会有滞后/滤波，目标附近优先保持前馈维持量。
+   IF (NOT #Feedforward_Only) AND (#EC_Filtered > (#Active_EC_SP + 0.12)) THEN
+      #q_f_target := #q_f_trim_min;
       #EC_Integral := 0.0;
-   ELSIF (NOT #Feedforward_Only) AND (#EC_Filtered > (#Active_EC_SP + 0.03)) THEN
-      #q_f_target := 0.75 * #q_f_feedforward;
+   ELSIF (NOT #Feedforward_Only) AND (#EC_Filtered > (#Active_EC_SP + 0.06)) THEN
+      #q_f_target := #q_f_feedforward - 0.50 * #q_f_trim_span;
       #EC_Integral := 0.0;
-   ELSIF (NOT #Feedforward_Only) AND (#EC_Filtered >= (#Active_EC_SP - 0.02)) THEN
+   ELSIF (NOT #Feedforward_Only) AND (#EC_Filtered >= (#Active_EC_SP - 0.01)) THEN
       #q_f_target := #q_f_feedforward;
       #EC_Integral := 0.0;
    END_IF;
 
    // pH 的执行方向相反：加酸会降低 pH。
-   // 管道存在滞后，出口接近目标时管道内仍有酸液继续到达；
-   // 因此 pH 需要提前停酸/减酸，不能等到低于目标才停。
-   IF (NOT #Feedforward_Only) AND (#pH_Filtered <= #Active_pH_SP) THEN
-      #q_a_target := 0.0;
+   // 管道存在滞后，目标附近优先维持前馈，不让酸泵跟着微小误差高频抽动。
+   IF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP - 0.08)) THEN
+      #q_a_target := #q_a_trim_min;
       #pH_Integral := 0.0;
-   ELSIF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP + 0.07)) THEN
-      #q_a_target := 0.75 * #q_a_feedforward;
+   ELSIF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP - 0.04)) THEN
+      #pH_NearFactor := (#pH_Filtered - (#Active_pH_SP - 0.08)) / 0.04;
+      IF #pH_NearFactor < 0.0 THEN
+         #pH_NearFactor := 0.0;
+      ELSIF #pH_NearFactor > 1.0 THEN
+         #pH_NearFactor := 1.0;
+      END_IF;
+      #q_a_target := #q_a_trim_min + (#q_a_feedforward - #q_a_trim_min) * #pH_NearFactor;
       #pH_Integral := 0.0;
-   ELSIF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP + 0.13)) THEN
-      #q_a_target := 0.95 * #q_a_feedforward;
+   ELSIF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP + 0.08)) THEN
+      #q_a_target := #q_a_feedforward;
       #pH_Integral := 0.0;
+   END_IF;
+
+   // 最终保险：PLC 细调始终锁在前馈窗口内，Python 负责粗目标和配方。
+   IF #q_f_target < #q_f_trim_min THEN
+      #q_f_target := #q_f_trim_min;
+   ELSIF #q_f_target > #q_f_trim_max THEN
+      #q_f_target := #q_f_trim_max;
+   END_IF;
+
+   IF #q_a_target < #q_a_trim_min THEN
+      #q_a_target := #q_a_trim_min;
+   ELSIF #q_a_target > #q_a_trim_max THEN
+      #q_a_target := #q_a_trim_max;
    END_IF;
 
    // --- 物理限幅 ---
@@ -812,8 +882,8 @@ BEGIN
 
    #inst_RL_A(
       target := #q_a_target,
-      maxRateUp := 1.0,
-      maxRateDown := 1.2,
+      maxRateUp := 0.40,
+      maxRateDown := 0.45,
       cycleTime := #CycleTime,
       enable := TRUE,
       reset := FALSE
@@ -987,11 +1057,13 @@ BEGIN
       Ki_pH := "DB1".Ki_pH_Set,
       Kd_pH := "DB1".Kd_pH_Set,
       EC_Filter_Tau := 2.0,
-      pH_Filter_Tau := 2.0,
+      pH_Filter_Tau := 4.0,
       EC_Deadband := 0.03,
-      pH_Deadband := 0.04,
+      pH_Deadband := 0.06,
+      EC_Trim_Band := "DB1".EC_Trim_Band,
+      pH_Trim_Band := "DB1".pH_Trim_Band,
       EC_MaxInputStep := 0.15,
-      pH_MaxInputStep := 0.15,
+      pH_MaxInputStep := 0.10,
       q_f_min := 0.0,
       q_f_max := 10.0,
       q_a_min := 0.0,

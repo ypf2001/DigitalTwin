@@ -316,6 +316,15 @@ plc:
       type: int
       bytes: 2
 
+    EC_Trim_Band:
+      offset: 270
+      type: real
+      bytes: 4
+    pH_Trim_Band:
+      offset: 274
+      type: real
+      bytes: 4
+
     # PLC/PLCSIM 写回 Python 的执行结果与状态
     Remote_Comms_OK:
       offset: 20

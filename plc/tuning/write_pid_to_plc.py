@@ -11,7 +11,8 @@ r"""把 PID 参数写入 PLC DB1。
    cd "D:\Digital Twin"
    .\.venv\Scripts\python.exe .\plc\tuning\write_pid_to_plc.py `
      --kp-ec 0.8 --ki-ec 0.002 --kd-ec 0.0 `
-     --kp-ph 1.2 --ki-ph 0.005 --kd-ph 0.0
+     --kp-ph 1.2 --ki-ph 0.005 --kd-ph 0.0 `
+     --ec-trim-band 0.10 --ph-trim-band 0.15
 """
 
 from __future__ import annotations
@@ -47,6 +48,18 @@ def main() -> int:
     parser.add_argument("--kp-ph", type=float, default=None)
     parser.add_argument("--ki-ph", type=float, default=None)
     parser.add_argument("--kd-ph", type=float, default=None)
+    parser.add_argument(
+        "--ec-trim-band",
+        type=float,
+        default=None,
+        help="Optional PLC fine-trim window around EC feedforward, e.g. 0.10 for +/-10%.",
+    )
+    parser.add_argument(
+        "--ph-trim-band",
+        type=float,
+        default=None,
+        help="Optional PLC fine-trim window around pH feedforward, e.g. 0.08 for +/-8%.",
+    )
     args = parser.parse_args()
 
     if args.summary:
@@ -77,6 +90,8 @@ def main() -> int:
             kp_ph=params["kp_ph"],
             ki_ph=params["ki_ph"],
             kd_ph=params["kd_ph"],
+            ec_trim_band=args.ec_trim_band,
+            ph_trim_band=args.ph_trim_band,
         )
         if not ok:
             raise SystemExit("PID write failed.")
@@ -93,6 +108,12 @@ def main() -> int:
             f"Ki={state.get('Ki_pH_Set', params['ki_ph']):.6f}, "
             f"Kd={state.get('Kd_pH_Set', params['kd_ph']):.6f}"
         )
+        if args.ec_trim_band is not None or args.ph_trim_band is not None:
+            print(
+                "  Fine trim: "
+                f"EC={args.ec_trim_band if args.ec_trim_band is not None else 'unchanged'}, "
+                f"pH={args.ph_trim_band if args.ph_trim_band is not None else 'unchanged'}"
+            )
     finally:
         plc.disconnect()
 

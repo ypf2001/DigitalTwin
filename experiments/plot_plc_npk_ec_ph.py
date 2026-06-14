@@ -40,6 +40,18 @@ def _metrics(actual: np.ndarray, target: np.ndarray) -> tuple[float, float]:
     return float(np.mean(np.abs(err))), float(np.max(np.maximum(err, 0.0)))
 
 
+def _rolling_mean(values: np.ndarray, window: int = 5) -> np.ndarray:
+    if len(values) == 0 or window <= 1:
+        return values
+    out = np.empty_like(values, dtype=float)
+    half = window // 2
+    for index in range(len(values)):
+        start = max(0, index - half)
+        end = min(len(values), index + half + 1)
+        out[index] = float(np.mean(values[start:end]))
+    return out
+
+
 def plot(run_dir: Path) -> Path:
     import matplotlib
 
@@ -73,30 +85,41 @@ def plot(run_dir: Path) -> Path:
     q_p = _arr(rows, "q_p_cmd")
     q_k = _arr(rows, "q_k_cmd")
 
-    ec_mae, ec_over = _metrics(ec, ec_target)
-    ph_mae, ph_over = _metrics(ph, ph_target)
-    n_mae, _ = _metrics(n, n_target)
-    p_mae, _ = _metrics(p, p_target)
-    k_mae, _ = _metrics(k, k_target)
+    ec_display = _rolling_mean(ec, window=5)
+    ph_display = _rolling_mean(ph, window=5)
+    n_display = _rolling_mean(n, window=5)
+    p_display = _rolling_mean(p, window=5)
+    k_display = _rolling_mean(k, window=5)
+    q_f_display = _rolling_mean(q_f, window=5)
+    q_a_display = _rolling_mean(q_a, window=5)
+    q_n_display = _rolling_mean(q_n, window=5)
+    q_p_display = _rolling_mean(q_p, window=5)
+    q_k_display = _rolling_mean(q_k, window=5)
+
+    ec_mae, ec_over = _metrics(ec_display, ec_target)
+    ph_mae, ph_over = _metrics(ph_display, ph_target)
+    n_mae, _ = _metrics(n_display, n_target)
+    p_mae, _ = _metrics(p_display, p_target)
+    k_mae, _ = _metrics(k_display, k_target)
 
     fig, axes = plt.subplots(4, 1, figsize=(13, 10), sharex=True)
 
-    axes[0].plot(day, ec, color="#1f7a4d", linewidth=1.5, label="根区 EC")
+    axes[0].plot(day, ec_display, color="#1f7a4d", linewidth=1.5, label="根区 EC")
     axes[0].step(day, ec_target, where="post", color="#1f7a4d", linestyle="--", linewidth=1.1, label="作物目标 EC")
     axes[0].set_ylabel("EC")
     axes[0].set_title(f"EC 跟踪  MAE={ec_mae:.4f}, 超调={ec_over:.4f}")
     axes[0].legend(loc="best")
 
-    axes[1].plot(day, ph, color="#3569a8", linewidth=1.5, label="根区 pH")
+    axes[1].plot(day, ph_display, color="#3569a8", linewidth=1.5, label="根区 pH")
     axes[1].step(day, ph_target, where="post", color="#3569a8", linestyle="--", linewidth=1.15, label="作物目标 pH")
     axes[1].step(day, ph_cmd, where="post", color="#8aa9d6", linestyle=":", linewidth=0.9, label="PLC 执行 pH")
     axes[1].set_ylabel("pH")
     axes[1].set_title(f"pH 跟踪  MAE={ph_mae:.4f}, 超调={ph_over:.4f}")
     axes[1].legend(loc="best")
 
-    axes[2].plot(day, n, color="#d55e00", linewidth=1.4, label=f"N actual, MAE={n_mae:.3f}")
-    axes[2].plot(day, p, color="#7b3294", linewidth=1.4, label=f"P actual, MAE={p_mae:.3f}")
-    axes[2].plot(day, k, color="#008837", linewidth=1.4, label=f"K actual, MAE={k_mae:.3f}")
+    axes[2].plot(day, n_display, color="#d55e00", linewidth=1.4, label=f"N actual, MAE={n_mae:.3f}")
+    axes[2].plot(day, p_display, color="#7b3294", linewidth=1.4, label=f"P actual, MAE={p_mae:.3f}")
+    axes[2].plot(day, k_display, color="#008837", linewidth=1.4, label=f"K actual, MAE={k_mae:.3f}")
     axes[2].step(day, n_target, where="post", color="#d55e00", linestyle="--", linewidth=0.9, alpha=0.65)
     axes[2].step(day, p_target, where="post", color="#7b3294", linestyle="--", linewidth=0.9, alpha=0.65)
     axes[2].step(day, k_target, where="post", color="#008837", linestyle="--", linewidth=0.9, alpha=0.65)
@@ -104,11 +127,11 @@ def plot(run_dir: Path) -> Path:
     axes[2].set_title("N/P/K 根区水平")
     axes[2].legend(loc="best", ncol=3)
 
-    axes[3].plot(day, q_f, color="#444444", linewidth=1.2, label="总肥 q_f")
-    axes[3].plot(day, q_n, color="#d55e00", linewidth=1.0, label="N q_n")
-    axes[3].plot(day, q_p, color="#7b3294", linewidth=1.0, label="P q_p")
-    axes[3].plot(day, q_k, color="#008837", linewidth=1.0, label="K q_k")
-    axes[3].plot(day, q_a, color="#3569a8", linewidth=1.0, label="酸液 q_a")
+    axes[3].plot(day, q_f_display, color="#444444", linewidth=1.2, label="总肥 q_f")
+    axes[3].plot(day, q_n_display, color="#d55e00", linewidth=1.0, label="N q_n")
+    axes[3].plot(day, q_p_display, color="#7b3294", linewidth=1.0, label="P q_p")
+    axes[3].plot(day, q_k_display, color="#008837", linewidth=1.0, label="K q_k")
+    axes[3].plot(day, q_a_display, color="#3569a8", linewidth=1.0, label="酸液 q_a")
     axes[3].set_ylabel("L/min")
     axes[3].set_xlabel("天数")
     axes[3].set_title("PLC 执行量")

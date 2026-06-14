@@ -192,7 +192,9 @@ class PLCClient:
                          kd_ec: float,
                          kp_ph: float,
                          ki_ph: float,
-                         kd_ph: float) -> bool:
+                         kd_ph: float,
+                         ec_trim_band: float = None,
+                         ph_trim_band: float = None) -> bool:
         """Write PLC PID parameters stored in DB1.
 
         This lets Python coarse-tuning results replace the PLC gains without
@@ -207,6 +209,16 @@ class PLCClient:
             logger.error(f"[PLC] PID address mapping missing: {missing}")
             return False
 
+        requested_trim_names = []
+        if ec_trim_band is not None:
+            requested_trim_names.append("EC_Trim_Band")
+        if ph_trim_band is not None:
+            requested_trim_names.append("pH_Trim_Band")
+        missing_trim = [name for name in requested_trim_names if name not in self.addr_map]
+        if missing_trim:
+            logger.error(f"[PLC] fine-trim address mapping missing: {missing_trim}")
+            return False
+
         try:
             self._ensure_connected()
             self._write_real("Kp_EC_Set", kp_ec)
@@ -215,11 +227,21 @@ class PLCClient:
             self._write_real("Kp_pH_Set", kp_ph)
             self._write_real("Ki_pH_Set", ki_ph)
             self._write_real("Kd_pH_Set", kd_ph)
+            if ec_trim_band is not None:
+                self._write_real("EC_Trim_Band", ec_trim_band)
+            if ph_trim_band is not None:
+                self._write_real("pH_Trim_Band", ph_trim_band)
             logger.info(
                 "[PLC] PID params written: "
                 f"EC=({kp_ec:.4f}, {ki_ec:.4f}, {kd_ec:.4f}), "
                 f"pH=({kp_ph:.4f}, {ki_ph:.4f}, {kd_ph:.4f})"
             )
+            if requested_trim_names:
+                logger.info(
+                    "[PLC] fine-trim bands written: EC=%s, pH=%s",
+                    f"{ec_trim_band:.4f}" if ec_trim_band is not None else "unchanged",
+                    f"{ph_trim_band:.4f}" if ph_trim_band is not None else "unchanged",
+                )
             return True
         except Exception as e:
             logger.error(f"[PLC] PID params write failed: {e}")

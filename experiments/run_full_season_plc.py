@@ -86,10 +86,10 @@ STAGES = {
 }
 
 FIXED_ACTIONS = {
-    "INI": np.array([0.8, 6.2], dtype=np.float32),
-    "DEV": np.array([1.1, 6.1], dtype=np.float32),
-    "MID": np.array([1.5, 5.9], dtype=np.float32),
-    "LATE": np.array([1.0, 6.1], dtype=np.float32),
+    "INI": np.array([0.75, 6.172], dtype=np.float32),
+    "DEV": np.array([1.115, 6.068], dtype=np.float32),
+    "MID": np.array([1.445, 5.856], dtype=np.float32),
+    "LATE": np.array([0.928, 6.072], dtype=np.float32),
 }
 
 CROP_TARGETS = {
@@ -165,6 +165,40 @@ def _ramped_stage_pair(day: float, values: dict[str, np.ndarray], transition_day
     prev_stage = STAGE_SEQUENCE[stage_pos - 1]
     ratio = _smoothstep((day - start_day) / transition_days)
     return (values[prev_stage] * (1.0 - ratio) + current * ratio).astype(np.float32)
+
+
+def _ramped_stage_pair_custom(day: float,
+                              values: dict[str, np.ndarray],
+                              transition_days: float,
+                              ec_transition_days: float | None = None,
+                              ph_transition_days: float | None = None,
+                              ph_down_transition_days: float | None = None,
+                              ph_up_transition_days: float | None = None) -> np.ndarray:
+    stage = _stage_for_day(day)
+    current = values[stage].astype(np.float32).copy()
+    stage_pos = STAGE_SEQUENCE.index(stage)
+    if stage_pos == 0:
+        return current
+
+    start_day = STAGES[stage]["start_day"]
+    prev_stage = STAGE_SEQUENCE[stage_pos - 1]
+    prev = values[prev_stage].astype(np.float32)
+
+    ec_days = transition_days if ec_transition_days is None else ec_transition_days
+    ph_days = transition_days if ph_transition_days is None else ph_transition_days
+    if current[1] < prev[1] and ph_down_transition_days is not None:
+        ph_days = ph_down_transition_days
+    elif current[1] > prev[1] and ph_up_transition_days is not None:
+        ph_days = ph_up_transition_days
+
+    result = current.copy()
+    for idx, days in ((0, ec_days), (1, ph_days)):
+        if days <= 0.0 or day >= start_day + days:
+            result[idx] = current[idx]
+        else:
+            ratio = _smoothstep((day - start_day) / days)
+            result[idx] = prev[idx] * (1.0 - ratio) + current[idx] * ratio
+    return result.astype(np.float32)
 
 
 def _load_models(model_dir: Path, single_model: str | None):
@@ -380,15 +414,27 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
                 logger.info("Stage changed: day %.1f -> %s", day, stage)
 
             if args.manual_test:
-                action = _ramped_stage_pair(day, fixed_actions, args.transition_days)
+                action = _ramped_stage_pair_custom(
+                    day,
+                    fixed_actions,
+                    args.transition_days,
+                    ec_transition_days=args.ec_transition_days,
+                    ph_transition_days=args.ph_transition_days,
+                    ph_down_transition_days=args.ph_down_transition_days,
+                    ph_up_transition_days=args.ph_up_transition_days,
+                )
+                ec_min = action_cfg.get("plc_ec_set_min", 0.5)
+                ph_min = action_cfg.get("plc_ph_set_min", 5.5)
             else:
                 action, _ = models[stage].predict(obs, deterministic=True)
                 action = np.asarray(action, dtype=np.float32).flatten()
+                ec_min = action_cfg.get("ec_set_min", 0.8)
+                ph_min = action_cfg.get("ph_set_min", 5.8)
 
             action = np.array(
                 [
-                    np.clip(action[0], action_cfg.get("ec_set_min", 0.8), action_cfg.get("ec_set_max", 2.5)),
-                    np.clip(action[1], action_cfg.get("ph_set_min", 5.8), action_cfg.get("ph_set_max", 6.8)),
+                    np.clip(action[0], ec_min, action_cfg.get("ec_set_max", 2.5)),
+                    np.clip(action[1], ph_min, action_cfg.get("ph_set_max", 6.8)),
                 ],
                 dtype=np.float32,
             )
@@ -534,7 +580,16 @@ def main() -> int:
     parser.add_argument("--fixed-dev-ph", type=float, default=float(FIXED_ACTIONS["DEV"][1]))
     parser.add_argument("--fixed-mid-ph", type=float, default=float(FIXED_ACTIONS["MID"][1]))
     parser.add_argument("--fixed-late-ph", type=float, default=float(FIXED_ACTIONS["LATE"][1]))
-    parser.add_argument("--transition-days", type=float, default=7.0, help="Days used to ramp between lifecycle EC/pH targets.")
+    parser.add_argument(
+        "--transition-days",
+        type=float,
+        default=6.0,
+        help="Days used to ramp between lifecycle EC/pH targets. Use 0 for hard fixed stage setpoints.",
+    )
+    parser.add_argument("--ec-transition-days", type=float, default=None, help="Override transition days for EC setpoints in manual-test mode.")
+    parser.add_argument("--ph-transition-days", type=float, default=None, help="Override transition days for pH setpoints in manual-test mode.")
+    parser.add_argument("--ph-down-transition-days", type=float, default=3.0, help="pH transition days when the next stage pH setpoint is lower.")
+    parser.add_argument("--ph-up-transition-days", type=float, default=None, help="pH transition days when the next stage pH setpoint is higher.")
     parser.add_argument("--no-plc", action="store_true", help="Run the same loop without PLC connection for script testing.")
     parser.add_argument("--stop-on-end", action="store_true", help="Stop when the digital twin reports burn/end instead of completing all steps.")
     parser.add_argument("--area-ha", type=float, default=0.1)

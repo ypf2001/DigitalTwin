@@ -464,10 +464,12 @@ Python 回读 q_f_cmd、q_a_cmd、q_n_cmd、q_p_cmd、q_k_cmd
 5. `plc_gym_env.py` 内部用轻量根区 N/P/K 估算模型记录 `n_actual/p_actual/k_actual`，并与 `n_target/p_target/k_target` 对比画图。
 6. `experiments/plot_plc_npk_ec_ph.py` 会输出 `npk_ec_ph_execution.png`，同时显示 EC、pH、N/P/K 和 PLC 各泵执行量。
 
-为了让压缩生命周期仿真更接近真实部署，当前还加入了两项处理：
+为了让压缩生命周期仿真更接近真实部署，当前还加入了四项处理：
 
-1. 生命周期目标平滑过渡：`experiments/run_full_season_plc.py` 新增 `--transition-days`，默认 7 天。四个生育阶段切换时，EC/pH 目标和 PLC 执行给定不再硬跳，而是在过渡天数内平滑切换。
-2. 根区 EC 观测缓冲：`plc_gym_env.py` 保留土壤模型原始输出 `raw_ec_soil`，同时生成更接近传感器读数的 `ec_soil`。这样压缩仿真中夜间/非灌溉步不会把根区 EC 瞬间打成 0，PLC PID 反馈也不会被不真实尖峰牵动。
+1. 短阶段过渡：`experiments/run_full_season_plc.py` 的 `--transition-days` 默认改为 `5`。INI/DEV/MID/LATE 阶段内保持稳定目标，只在换阶段后的短窗口平滑过渡，避免硬阶跃冲击；PLC 端已加大目标变化阈值，不会再因为连续小步变化反复清积分。
+2. PLC 手动测试下限：手动 PLC 在环测试允许 EC 给定低于 SAC 训练下限 `0.8`，第一阶段可以使用 `0.75` 这类补偿值，不会再被 Python 或 `PLCGymEnv` 夹回 `0.8`。
+3. 根区 EC 观测缓冲：`plc_gym_env.py` 保留土壤模型原始输出 `raw_ec_soil`，同时生成更接近传感器读数的 `ec_soil`。在目标明显下调并正在灌溉时，压缩仿真允许更强的冲洗响应，避免上一阶段高 EC 在根区模型中滞留过久。
+4. 酸泵平稳化：pH 反馈写入 PLC 前使用更强低通滤波，PLC SCL 中加大 pH 死区与滤波时间常数，目标附近维持酸液前馈并收紧酸泵斜坡限速，减少 `q_a_cmd` 在目标附近来回跳动。
 
 全生命周期 PLC 在环测试示例：
 
@@ -475,20 +477,41 @@ Python 回读 q_f_cmd、q_a_cmd、q_n_cmd、q_p_cmd、q_k_cmd
 cd "D:\Digital Twin"
 
 D:\Miniconda3\python.exe .\plc\tuning\write_pid_to_plc.py `
-  --kp-ec 1.305 --ki-ec 0.0118 --kd-ec 0.0214 `
-  --kp-ph 3.05 --ki-ph 0.024 --kd-ph 0.010
+  --kp-ec 1.05 --ki-ec 0.0100 --kd-ec 0.036 `
+  --kp-ph 3.65 --ki-ph 0.034 --kd-ph 0.016
 
 D:\Miniconda3\python.exe .\experiments\run_full_season_plc.py `
   --manual-test `
   --season-days 110 `
-  --steps 360 `
+  --steps 720 `
   --plc-wait-s 0.03 `
-  --transition-days 7 `
-  --fixed-ini-ec 0.8 --fixed-ini-ph 6.1 `
-  --fixed-dev-ec 1.1 --fixed-dev-ph 6.0 `
-  --fixed-mid-ec 1.38 --fixed-mid-ph 5.8 `
-  --fixed-late-ec 0.90 --fixed-late-ph 6.0
+  --transition-days 6 `
+  --fixed-ini-ec 0.75 --fixed-ini-ph 6.172 `
+  --fixed-dev-ec 1.115 --fixed-dev-ph 6.068 `
+  --fixed-mid-ec 1.445 --fixed-mid-ph 5.856 `
+  --fixed-late-ec 0.928 --fixed-late-ph 6.072 `
+  --ph-down-transition-days 3
 ```
+
+`--transition-days 6` 表示只在阶段切换后的 6 天内平滑过渡。它不是全生命周期不断趋近目标，而是用短过渡减少 EC/pH 阶跃冲击；如果要做硬切换，可以改成 `--transition-days 0`。
+
+当前这组参数在 110 天、720 步 PLC 在环测试中得到：
+
+```text
+EC_MAE=0.011066
+pH_MAE=0.008396
+N_MAE=0.038497
+P_MAE=0.021650
+K_MAE=0.049957
+```
+
+本轮更稳版本保留结果目录：
+
+```text
+results/full_season_plc/20260614_104834/
+```
+
+与硬切换版本相比，EC 最大单步跳变约从 `0.237` 降到 `0.096`，pH MAE 降到约 `0.0084`，酸泵 `q_a_cmd` 平均相邻步跳变约从 `0.0455 L/min` 降到约 `0.0027 L/min`，适合作为当前默认稳定参数。
 
 运行结果会保存到：
 

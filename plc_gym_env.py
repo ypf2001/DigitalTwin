@@ -52,10 +52,25 @@ class PLCGymEnv(gym.Env):
         self.plc = plc_client
         self.plc_enabled = plc_enabled and (self.plc is not None)
         plc_cfg = load_config().plc()
+        action_cfg = load_config().action()
         feedback_filter_cfg = plc_cfg.get("feedback_filter", {})
         self.feedback_filter_enabled = bool(feedback_filter_cfg.get("enabled", True))
         self.feedback_filter_alpha = float(feedback_filter_cfg.get("alpha", 0.8))
         self.feedback_filter_alpha = float(np.clip(self.feedback_filter_alpha, 0.0, 0.99))
+        self.plc_action_low = np.array(
+            [
+                float(action_cfg.get("plc_ec_set_min", 0.5)),
+                float(action_cfg.get("plc_ph_set_min", 5.5)),
+            ],
+            dtype=np.float32,
+        )
+        self.plc_action_high = np.array(
+            [
+                float(action_cfg.get("ec_set_max", 2.5)),
+                float(action_cfg.get("ph_set_max", 6.8)),
+            ],
+            dtype=np.float32,
+        )
         self._ec_actual_filtered = None
         self._ph_actual_filtered = None
         self._soil_ph_est = 7.0
@@ -135,7 +150,9 @@ class PLCGymEnv(gym.Env):
         如果未启用 PLC，则退化为 DigitalTwinGymEnv 的纯仿真执行层。
         """
         action = np.asarray(action, dtype=np.float32).flatten()
-        action_clipped = np.clip(action, self.action_space.low, self.action_space.high)
+        clip_low = self.plc_action_low if self.plc_enabled else self.action_space.low
+        clip_high = self.plc_action_high if self.plc_enabled else self.action_space.high
+        action_clipped = np.clip(action, clip_low, clip_high)
         ec_set = float(action_clipped[0])
         ph_set = float(action_clipped[1])
 
@@ -149,10 +166,11 @@ class PLCGymEnv(gym.Env):
         # EC target tracking is evaluated on root-zone soil EC, so feed the PLC
         # the same controlled variable instead of the pipe outlet EC.
         ec_actual = float(self._root_ec_est)
-        # The running PLC program still has a hard EC overshoot guard that can
-        # cut fertilizer flow to zero. Keep root-zone feedback truthful below
-        # target, but cap positive overshoot feedback so PLC trims smoothly.
-        ec_actual = min(ec_actual, ec_set + 0.02)
+        # In compressed full-season simulation, raw root-zone EC can jump much
+        # faster than a real sensor/soil volume. Keep the PLC feedback close to
+        # the controlled setpoint so the PLC trims around feedforward instead of
+        # repeatedly entering the hard fertilizer-cut protection branch.
+        ec_actual = min(ec_actual, ec_set + 0.025)
         ph_actual = float(self._soil_ph_est)
         ec_actual, ph_actual = self._filter_feedback(ec_actual, ph_actual)
         self._safe_write_setpoints(ec_set, ph_set, ec_actual, ph_actual, sac_enable=True)
@@ -333,14 +351,36 @@ class PLCGymEnv(gym.Env):
         else:
             candidate = raw
 
-        max_delta = 0.045 + 0.018 * min(dt_hours, 12.0)
         if candidate < prev:
-            candidate = max(candidate, prev - max_delta)
+            # Compressed full-season runs represent several field hours in one
+            # PLC step. When the recipe drops EC sharply, allow a stronger
+            # flushing response so the root-zone estimate does not carry the
+            # previous stage's high EC for unrealistically long.
+            if irrigation_mm_h > 1e-6 and ec_set < prev - 0.18:
+                max_down_delta = 0.070 + 0.020 * min(dt_hours, 12.0)
+            else:
+                max_down_delta = 0.030 + 0.007 * min(dt_hours, 12.0)
+            candidate = max(candidate, prev - max_down_delta)
         else:
-            candidate = min(candidate, prev + max_delta)
+            max_up_delta = 0.035 + 0.010 * min(dt_hours, 12.0)
+            candidate = min(candidate, prev + max_up_delta)
 
-        pull = min(0.10, max(0.0, irrigation_mm_h) * 0.015)
-        estimated = candidate + pull * (float(ec_set) - candidate)
+        pull = min(0.20, max(0.0, irrigation_mm_h) * 0.030)
+        estimated_raw = candidate + pull * (float(ec_set) - candidate)
+
+        set_gap = abs(float(ec_set) - prev)
+        if irrigation_mm_h <= 1e-6:
+            sensor_alpha = 0.88
+        elif set_gap > 0.25:
+            sensor_alpha = 0.45
+        elif set_gap > 0.12:
+            sensor_alpha = 0.60
+        else:
+            # In steady stages, root-zone EC sensors should show the buffered
+            # root volume rather than every compressed soil-model pulse.
+            sensor_alpha = 0.76
+
+        estimated = sensor_alpha * prev + (1.0 - sensor_alpha) * estimated_raw
         return float(np.clip(estimated, 0.0, 3.0))
 
     @staticmethod
@@ -368,11 +408,14 @@ class PLCGymEnv(gym.Env):
         wetting = float(np.clip(irrigation_mm_h / 6.0, 0.0, 1.5))
         for key in ("N", "P", "K"):
             value = float(current.get(key, targets[key]))
-            uptake = 0.0055 * dt_hours * (0.6 + 0.4 * targets[key])
-            leaching = 0.010 * dt_hours * wetting * max(value - 0.25, 0.0)
-            dosing = 0.0085 * flows[key] * dt_hours
-            buffer_pull = 0.020 * dt_hours * (targets[key] - value)
-            updated[key] = float(np.clip(value + dosing + buffer_pull - uptake - leaching, 0.0, 2.0))
+            uptake = 0.0045 * dt_hours * (0.6 + 0.4 * targets[key])
+            leaching = 0.0060 * dt_hours * wetting * max(value - 0.25, 0.0)
+            dosing = 0.0042 * flows[key] * dt_hours
+            buffer_pull = 0.030 * dt_hours * (targets[key] - value)
+            raw_next = value + dosing + buffer_pull - uptake - leaching
+            max_delta = 0.030 + 0.006 * min(dt_hours, 12.0)
+            raw_next = float(np.clip(raw_next, value - max_delta, value + max_delta))
+            updated[key] = float(np.clip(raw_next, 0.0, 2.0))
         return updated
 
     def render(self, mode="human"):
@@ -430,7 +473,10 @@ class PLCGymEnv(gym.Env):
             return float(ec_actual), float(ph_actual)
 
         alpha = self.feedback_filter_alpha
-        ph_alpha = min(alpha, 0.35)
+        # Acid dosing is the remaining noisy actuator in compressed
+        # full-season runs. Filter pH a little more strongly than EC so the PLC
+        # does not chase small synthetic pH ripples with alternating acid flow.
+        ph_alpha = float(np.clip(max(alpha, 0.72), 0.0, 0.90))
         self._ec_actual_filtered = alpha * self._ec_actual_filtered + (1.0 - alpha) * float(ec_actual)
         self._ph_actual_filtered = ph_alpha * self._ph_actual_filtered + (1.0 - ph_alpha) * float(ph_actual)
         return self._ec_actual_filtered, self._ph_actual_filtered

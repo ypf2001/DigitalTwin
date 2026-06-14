@@ -120,3 +120,45 @@ This function is not supported in online mode.
 - Python 粗调：快速筛选范围。
 - PLC 精调：确定最终参数。
 - 最终论文/结果图：以 PLC/PLCSIM 在环运行结果为准。
+
+## 2026-06-14 PLC 前馈细调窗口
+
+当前推荐分工：
+
+```text
+Python 粗调：阶段 EC/pH 目标、N/P/K 配方比例、混合肥料仿真参数
+PLC 细调：在前馈流量基础上用 EC/pH PID 做小范围修正
+```
+
+SCL 已加入 `EC_Trim_Band` 和 `pH_Trim_Band`：
+
+```text
+EC_Trim_Band = 0.10  表示 q_f 只允许在前馈量附近 ±10% 修正
+pH_Trim_Band = 0.15  表示 q_a 只允许在前馈量附近 ±15% 修正
+```
+
+PLC 内部会把这两个值自动夹在 `0.05~0.15`，也就是只允许 ±5%~±15% 的细调。这样 Python 不再追泵阀细节，PLC 也不会因为 PID 误差把前馈量推得太远。
+
+写入 PID 时可以顺手写入细调窗口：
+
+```powershell
+cd "D:\Digital Twin"
+.\.venv\Scripts\python.exe .\plc\tuning\write_pid_to_plc.py `
+  --kp-ec 1.05 --ki-ec 0.010 --kd-ec 0.036 `
+  --kp-ph 3.65 --ki-ph 0.034 --kd-ph 0.016 `
+  --ec-trim-band 0.10 --ph-trim-band 0.15
+```
+
+注意：`EC_Trim_Band` 和 `pH_Trim_Band` 是 DB1 末尾新增字段，需要把最新 `xiaweiji.scl` 导入/下载到 TIA Portal 或 PLCSIM 后才会在真实 PLC 中生效。
+
+2026-06-14 实测窗口版 PLC 细调结果：
+
+```text
+阶段 EC 目标：INI=0.750, DEV=1.115, MID=1.445, LATE=0.928
+阶段 pH 目标：INI=6.172, DEV=6.068, MID=5.856, LATE=6.072
+EC/常规过渡时间：6 days
+pH 下降过渡时间：3 days
+EC_Trim_Band=0.10, pH_Trim_Band=0.15
+结果目录：D:\Digital Twin\results\full_season_plc\20260614_104834
+EC_MAE=0.011066, pH_MAE=0.008396
+```
