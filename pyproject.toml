@@ -1,0 +1,16 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+python_files = ["test_*.py"]
+norecursedirs = [
+  ".git",
+  ".idea",
+  ".venv",
+  "venv",
+  "env",
+  "node_modules",
+  "rl_logs",
+  "rl_models",
+  "results",
+  "pic_output",
+]
