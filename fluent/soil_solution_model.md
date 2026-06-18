@@ -16,15 +16,15 @@ PLC/Python full_season_plc_timeseries.csv
 
 ## 2. Fluent 建模建议
 
-几何可以先用 2D 轴对称根区剖面：
+当前按你已经建立的 3D 圆柱土柱模型：
 
 ```text
-半径: 0.30~0.50 m
-深度: 0.60~1.00 m
-滴灌入口: 顶部中心 0.02~0.05 m 宽
-底部: pressure-outlet 或 outflow
-侧边: wall / symmetry
-土体: porous zone
+高度: 500 mm
+半径: 50 mm
+顶部圆面: inlet
+底部圆面: outlet
+侧壁: wall
+圆柱体积: soil
 ```
 
 物理模型：
@@ -41,13 +41,16 @@ UDS: 4 个
   UDS-3 = K
 ```
 
-多孔介质阻力先按 Darcy 量级给定，后续可用实测入渗曲线校准：
+多孔介质参数先使用河套灌区论文初值和项目当前土壤参数，后续用实测入渗曲线校准：
 
 ```text
-permeability K = 1e-11 ~ 1e-10 m2
-viscous resistance = 1 / K
-inertial resistance = 0
 porosity = 0.42
+K_sat = 15.3 mm/d = 1.771e-7 m/s
+intrinsic permeability = 1.814e-14 m2
+viscous resistance = 5.513e13 1/m2
+inertial resistance = 0
+molecular diffusion = 8.102e-10 m2/s
+dispersivity = 0.05 m
 ```
 
 ## 3. 从本项目导出 Fluent 边界
@@ -75,10 +78,10 @@ k_drip              K 入口等效浓度
 
 ## 4. UDF 挂接位置
 
-编译 `fluent/soil_solution_percolation_udf.c` 后，在 Fluent 中挂接：
+编译 `fluent/soil_solution_percolation_udf.c` 后，在 Fluent 中挂接。边界名称使用当前圆柱模型的 `inlet/soil/outlet/wall`：
 
 ```text
-Velocity inlet:
+inlet:
   velocity magnitude -> drip_velocity_profile
 
 UDS boundary conditions:
@@ -90,7 +93,7 @@ UDS boundary conditions:
 UDS diffusivity:
   soil_solution_diffusivity
 
-UDS source terms:
+soil cell zone UDS source terms:
   UDS-0 -> ec_root_sink
   UDS-1 -> n_root_sink
   UDS-2 -> p_root_sink

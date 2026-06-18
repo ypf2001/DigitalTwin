@@ -1,8 +1,9 @@
 ; Fluent journal template for the soil solution percolation model.
-; Edit zone names before running:
-;   drip-inlet
-;   soil-zone
-;   bottom-outlet
+; Current 3D cylinder zone names:
+;   inlet   - top circular face, X = 500 mm
+;   outlet  - bottom circular face, X = 0 mm
+;   wall    - cylinder side wall
+;   soil    - porous soil volume
 ;
 ; Run from Fluent working directory at project root:
 ;   D:\Digital Twin
@@ -13,6 +14,13 @@
 ; Enable four UDS equations in the GUI if your Fluent version does not support
 ; journal setup for UDS in your license/build.
 ; UDS-0: EC, UDS-1: N, UDS-2: P, UDS-3: K
+;
+; Hetao soil parameters to set in the GUI:
+;   Cell Zone Conditions > soil > Porous Zone
+;   Porosity: 0.42
+;   Viscous Resistance X/Y/Z: 5.513e13 1/m2
+;   Inertial Resistance X/Y/Z: 0
+;   UDS diffusivity hook: soil_solution_diffusivity
 
 ; Suggested transient controls. Adjust for mesh size and convergence.
 /solve/set/time-step 60
@@ -25,7 +33,7 @@
 ; UDS-2 inlet -> drip_p_uds2_profile
 ; UDS-3 inlet -> drip_k_uds3_profile
 ; UDS diffusivity -> soil_solution_diffusivity
-; UDS sources on soil-zone:
+; UDS sources on soil:
 ;   UDS-0 -> ec_root_sink
 ;   UDS-1 -> n_root_sink
 ;   UDS-2 -> p_root_sink

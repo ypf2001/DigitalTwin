@@ -32,6 +32,10 @@ class _Config:
     def soil(self) -> dict:
         return self._data.get("soil", {})
 
+    def hetao_soil(self) -> dict:
+        """河套灌区土壤参数，用于 Python 土壤仿真与 Fluent 建模对齐。"""
+        return self._data.get("hetao_soil", {})
+
     def mixing_tank(self) -> dict:
         return self._data.get("mixing_tank", {})
 
@@ -87,7 +91,18 @@ class _Config:
 
 
 # ---- 模块级缓存 ----
-_config = None
+_config_cache = {}
+
+
+def _default_config_path() -> str:
+    config_dir = os.path.join(os.path.dirname(__file__), "config")
+    if os.path.isdir(config_dir):
+        return os.path.abspath(config_dir)
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "config.yaml"))
+
+
+def _cache_key(path: str = None) -> str:
+    return _default_config_path() if path is None else os.path.abspath(path)
 
 
 def _load_dir(config_dir: str) -> dict:
@@ -117,29 +132,30 @@ def load_config(path: str = None) -> _Config:
     ----------
     _Config
     """
-    global _config
-    if _config is not None:
-        return _config
+    key = _cache_key(path)
+    if key in _config_cache:
+        return _config_cache[key]
 
     if path is None:
-        config_dir = os.path.join(os.path.dirname(__file__), "config")
+        config_dir = _default_config_path()
         # 新版目录结构优先，回退到单文件
         if os.path.isdir(config_dir):
             data = _load_dir(config_dir)
         else:
-            fp = os.path.join(os.path.dirname(__file__), "config.yaml")
-            with open(fp, "r", encoding="utf-8") as f:
+            with open(config_dir, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f)
     else:
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
-    _config = _Config(data)
-    return _config
+    _config_cache[key] = _Config(data)
+    return _config_cache[key]
 
 
 def reload_config(path: str = None) -> _Config:
     """强制重新加载配置（忽略缓存）。"""
-    global _config
-    _config = None
+    if path is None:
+        _config_cache.clear()
+    else:
+        _config_cache.pop(_cache_key(path), None)
     return load_config(path)

@@ -17,6 +17,10 @@
  * Recommended Fluent setup:
  *   - Pressure-based, transient.
  *   - Soil body as porous zone.
+ *   - Hetao soil initial parameters:
+ *       porosity = 0.42
+ *       viscous resistance = 5.513e13 1/m2
+ *       inertial resistance = 0
  *   - Enable 4 User-Defined Scalars.
  *   - Assign diffusivity with soil_solution_diffusivity.
  *   - Assign scalar sink with ec_root_sink / n_root_sink / p_root_sink / k_root_sink.
@@ -41,7 +45,7 @@ static real soil_porosity = 0.420;
 static real root_depth_m = 0.300;
 static real solute_sink_rate = 1.2e-6;
 static real nutrient_sink_rate = 8.0e-7;
-static real background_ec = 0.20;
+static real background_ec = 0.15;
 
 static real clamp_real(real value, real lo, real hi)
 {
@@ -198,8 +202,11 @@ DEFINE_PROFILE(drip_k_uds3_profile, thread, position)
 
 DEFINE_DIFFUSIVITY(soil_solution_diffusivity, c, t, i)
 {
-    real molecular_d = 1.0e-9;
-    real dispersivity = 0.015;
+    /* Hetao cultivated/saline wasteland literature initial values:
+       molecular_d = 0.7 cm2/d = 8.10185185e-10 m2/s
+       dispersivity = 5 cm = 0.05 m */
+    real molecular_d = 8.101851851851851e-10;
+    real dispersivity = 0.050;
     real velocity_mag;
     real theta_eff = clamp_real(soil_porosity, theta_wp, theta_sat);
     real tortuosity = pow(theta_eff / theta_sat, 1.5);

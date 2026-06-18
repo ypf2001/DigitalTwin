@@ -3,6 +3,6 @@ cloud:
   host: "154.44.26.212"
   port: 61762
   user: "root"
-  password: "mysql_dDPsQR"
+  password: ""  # Prefer DT_CLOUD_PASSWORD in the environment for real deployments.
   database: "digital_twin"
   connect_timeout: 10

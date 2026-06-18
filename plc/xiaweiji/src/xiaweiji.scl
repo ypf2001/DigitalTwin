@@ -812,13 +812,13 @@ BEGIN
    #EC_Error_Last := #EC_Error;
    #pH_Error_Last := #pH_Error;
 
-   // --- EC 超调保护：轻微超调时只做小幅削肥，避免 q_f_cmd 阶跃振荡 ---
-   // 压缩仿真和真实传感器都会有滞后/滤波，目标附近优先保持前馈维持量。
+   // --- EC 超调保护：明显高于目标时必须停肥 ---
+   // 目标附近优先保持前馈维持量；但 EC 已经高出较多时继续给前馈会越调越高。
    IF (NOT #Feedforward_Only) AND (#EC_Filtered > (#Active_EC_SP + 0.12)) THEN
-      #q_f_target := #q_f_trim_min;
+      #q_f_target := 0.0;
       #EC_Integral := 0.0;
    ELSIF (NOT #Feedforward_Only) AND (#EC_Filtered > (#Active_EC_SP + 0.06)) THEN
-      #q_f_target := #q_f_feedforward - 0.50 * #q_f_trim_span;
+      #q_f_target := 0.0;
       #EC_Integral := 0.0;
    ELSIF (NOT #Feedforward_Only) AND (#EC_Filtered >= (#Active_EC_SP - 0.01)) THEN
       #q_f_target := #q_f_feedforward;
@@ -826,9 +826,9 @@ BEGIN
    END_IF;
 
    // pH 的执行方向相反：加酸会降低 pH。
-   // 管道存在滞后，目标附近优先维持前馈，不让酸泵跟着微小误差高频抽动。
+   // pH 已经低于目标时必须停酸；目标附近才允许维持前馈，避免继续下探。
    IF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP - 0.08)) THEN
-      #q_a_target := #q_a_trim_min;
+      #q_a_target := 0.0;
       #pH_Integral := 0.0;
    ELSIF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP - 0.04)) THEN
       #pH_NearFactor := (#pH_Filtered - (#Active_pH_SP - 0.08)) / 0.04;
@@ -837,23 +837,19 @@ BEGIN
       ELSIF #pH_NearFactor > 1.0 THEN
          #pH_NearFactor := 1.0;
       END_IF;
-      #q_a_target := #q_a_trim_min + (#q_a_feedforward - #q_a_trim_min) * #pH_NearFactor;
+      #q_a_target := #q_a_feedforward * #pH_NearFactor;
       #pH_Integral := 0.0;
    ELSIF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP + 0.08)) THEN
       #q_a_target := #q_a_feedforward;
       #pH_Integral := 0.0;
    END_IF;
 
-   // 最终保险：PLC 细调始终锁在前馈窗口内，Python 负责粗目标和配方。
-   IF #q_f_target < #q_f_trim_min THEN
-      #q_f_target := #q_f_trim_min;
-   ELSIF #q_f_target > #q_f_trim_max THEN
+   // 最终保险：上限锁在前馈窗口内，下限允许到 0，用于超调后的停肥/停酸。
+   IF #q_f_target > #q_f_trim_max THEN
       #q_f_target := #q_f_trim_max;
    END_IF;
 
-   IF #q_a_target < #q_a_trim_min THEN
-      #q_a_target := #q_a_trim_min;
-   ELSIF #q_a_target > #q_a_trim_max THEN
+   IF #q_a_target > #q_a_trim_max THEN
       #q_a_target := #q_a_trim_max;
    END_IF;
 

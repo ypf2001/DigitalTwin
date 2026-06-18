@@ -1,0 +1,38 @@
+; Hetao soil Fluent setup journal.
+; Run this from the project root after opening the meshed Fluent case.
+; Zone names expected by this project:
+;   inlet, outlet, wall, soil
+
+/define/user-defined/compiled-functions compile soil_solution_lib yes "fluent/soil_solution_percolation_udf.c" "" ""
+/define/user-defined/compiled-functions load soil_solution_lib
+
+; Set these in GUI because Fluent TUI paths vary by version:
+;   Models:
+;     Energy: off
+;     Viscous: Laminar
+;     Species: off unless you use species instead of UDS
+;     User-Defined Scalars: 4 equations
+;   Cell Zone Conditions > soil > Porous Zone:
+;     Porosity = 0.42
+;     Viscous Resistance X/Y/Z = 5.513e13 1/m2
+;     Inertial Resistance X/Y/Z = 0
+;   Boundary Conditions > inlet:
+;     velocity magnitude UDF = drip_velocity_profile
+;     UDS-0 UDF = drip_ec_uds0_profile
+;     UDS-1 UDF = drip_n_uds1_profile
+;     UDS-2 UDF = drip_p_uds2_profile
+;     UDS-3 UDF = drip_k_uds3_profile
+;   Materials / UDS Diffusivity:
+;     UDF = soil_solution_diffusivity
+;   Cell Zone Conditions > soil > Source Terms:
+;     UDS-0 source = ec_root_sink
+;     UDS-1 source = n_root_sink
+;     UDS-2 source = p_root_sink
+;     UDS-3 source = k_root_sink
+
+; Transient controls for first verification run.
+/solve/set/time-step 60
+/solve/set/max-iterations-per-time-step 20
+
+; Initialize after UDF hooks are assigned.
+; /solve/initialize/hyb-initialization

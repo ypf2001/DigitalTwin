@@ -1,6 +1,6 @@
 env:
   area_ha: 0.1
-  dt_min: 60.0
+  dt_min: 5.0
   ep_len_days: 5.0
   et0_mm_day: 5.0
   obs_noise_std: 0.01
@@ -28,6 +28,8 @@ soil:
   K_sat: 15.3
   beta: 2.0
   root_depth_default: 300
+  dispersivity_cm: 5.0          # 河套灌区耕地/盐荒地初始弥散度，用于水盐运移或 Fluent 物质输运初值
+  molecular_diffusion_cm2_d: 0.7 # 河套灌区耕地/盐荒地分子扩散系数，Fluent 中需换算为 m2/s
 mixing_tank:
   volume: 100.0
   ec_conc: 35.0          # 肥料母液 EC (dS/m)，当前作为高浓度复配肥液的等效参数
