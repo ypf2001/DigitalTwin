@@ -44,6 +44,13 @@ STAGE_TAGS = {
     "maturation": "late",
 }
 
+NPK_TARGETS = {
+    "ini": {"N": 0.75, "P": 0.55, "K": 0.65},
+    "dev": {"N": 0.95, "P": 0.75, "K": 0.90},
+    "mid": {"N": 1.10, "P": 0.85, "K": 1.25},
+    "late": {"N": 0.85, "P": 0.65, "K": 1.05},
+}
+
 
 def _json_default(value: Any):
     if isinstance(value, np.ndarray):
@@ -60,6 +67,49 @@ def _write_csv(path: Path, columns: dict[str, list[float] | list[str]]) -> None:
         writer = csv.writer(f)
         writer.writerow(keys)
         writer.writerows(rows)
+
+
+def _error_metrics(actual: np.ndarray, target: np.ndarray) -> dict[str, float]:
+    if len(actual) == 0:
+        return {"mae": 0.0, "rmse": 0.0, "max_error": 0.0}
+    error = actual - target
+    abs_error = np.abs(error)
+    return {
+        "mae": float(np.mean(abs_error)),
+        "rmse": float(np.sqrt(np.mean(error * error))),
+        "max_error": float(np.max(abs_error)),
+    }
+
+
+def _npk_targets_for_tag(stage_tag: str) -> dict[str, float]:
+    return NPK_TARGETS.get(stage_tag.lower(), NPK_TARGETS["late"]).copy()
+
+
+def _split_offline_npk_flow(q_f: float, targets: dict[str, float]) -> dict[str, float]:
+    total = max(sum(float(targets[key]) for key in ("N", "P", "K")), 1e-6)
+    return {key: max(0.0, float(q_f)) * float(targets[key]) / total for key in ("N", "P", "K")}
+
+
+def _estimate_offline_npk(
+    current: dict[str, float],
+    targets: dict[str, float],
+    flows: dict[str, float],
+    irrigation_mm_h: float,
+    dt_hours: float,
+) -> dict[str, float]:
+    wetting = float(np.clip(irrigation_mm_h / 6.0, 0.0, 1.5))
+    updated: dict[str, float] = {}
+    for key in ("N", "P", "K"):
+        value = float(current.get(key, targets[key]))
+        uptake = 0.0045 * dt_hours * (0.6 + 0.4 * targets[key])
+        leaching = 0.0060 * dt_hours * wetting * max(value - 0.25, 0.0)
+        dosing = 0.0042 * float(flows[key]) * dt_hours
+        buffer_pull = 0.030 * dt_hours * (targets[key] - value)
+        raw_next = value + dosing + buffer_pull - uptake - leaching
+        max_delta = 0.030 + 0.006 * min(dt_hours, 12.0)
+        raw_next = float(np.clip(raw_next, value - max_delta, value + max_delta))
+        updated[key] = float(np.clip(raw_next, 0.0, 2.0))
+    return updated
 
 
 def _load_sac_class():
@@ -126,7 +176,17 @@ def _make_env(area_ha: float, dt_min: float, season_days: float, et0: float, see
     )
 
 
-def _record(series: dict[str, list[Any]], info: dict[str, Any], action: np.ndarray, stage_tag: str, event_idx: int, is_event: bool) -> None:
+def _record(
+    series: dict[str, list[Any]],
+    info: dict[str, Any],
+    action: np.ndarray,
+    stage_tag: str,
+    event_idx: int,
+    is_event: bool,
+    npk_targets: dict[str, float],
+    npk_actual: dict[str, float],
+    npk_flows: dict[str, float],
+) -> None:
     series["time_day"].append(float(info["time_day"]))
     series["theta"].append(float(info["theta"]))
     series["ec_soil"].append(float(info["ec_soil"]))
@@ -139,6 +199,15 @@ def _record(series: dict[str, list[Any]], info: dict[str, Any], action: np.ndarr
     series["ph_set"].append(float(info.get("ph_set", action[1] if len(action) > 1 else 7.0)))
     series["q_f"].append(float(info.get("q_f", 0.0)))
     series["q_a"].append(float(info.get("q_a", 0.0)))
+    series["n_target"].append(float(npk_targets["N"]))
+    series["p_target"].append(float(npk_targets["P"]))
+    series["k_target"].append(float(npk_targets["K"]))
+    series["n_actual"].append(float(npk_actual["N"]))
+    series["p_actual"].append(float(npk_actual["P"]))
+    series["k_actual"].append(float(npk_actual["K"]))
+    series["q_n_cmd"].append(float(npk_flows["N"]))
+    series["q_p_cmd"].append(float(npk_flows["P"]))
+    series["q_k_cmd"].append(float(npk_flows["K"]))
     series["stage_tag"].append(stage_tag)
     series["event_idx"].append(int(event_idx))
     series["event_marker"].append(1.0 if is_event else 0.0)
@@ -176,6 +245,15 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
         "etc_mm_h": [],
         "q_f": [],
         "q_a": [],
+        "n_target": [],
+        "p_target": [],
+        "k_target": [],
+        "n_actual": [],
+        "p_actual": [],
+        "k_actual": [],
+        "q_n_cmd": [],
+        "q_p_cmd": [],
+        "q_k_cmd": [],
         "stage_tag": [],
         "event_idx": [],
         "event_marker": [],
@@ -184,6 +262,7 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
     total_irrigation_mm = 0.0
     total_etc_mm = 0.0
     prev_day = 0.0
+    npk_actual = _npk_targets_for_tag("ini")
 
     for event_idx, event in enumerate(schedule):
         env.set_growth_stage(event.growth_stage)
@@ -194,7 +273,16 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
         for _ in range(dry_steps):
             obs, _reward, _done, info = env.dry_step(rain_mm_h=rain_mm_h)
             total_etc_mm += info["etc_mm_h"] * dt_hours
-            _record(series, info, np.array([0.0, 0.0], dtype=np.float32), tag, event_idx, False)
+            npk_targets = _npk_targets_for_tag(tag)
+            npk_flows = _split_offline_npk_flow(float(info.get("q_f", 0.0)), npk_targets)
+            npk_actual = _estimate_offline_npk(
+                npk_actual,
+                npk_targets,
+                npk_flows,
+                float(info.get("irrigation_mm_h", 0.0)),
+                dt_hours,
+            )
+            _record(series, info, np.array([0.0, 0.0], dtype=np.float32), tag, event_idx, False, npk_targets, npk_actual, npk_flows)
 
         amount_m3ha = event.t2_amount_m3ha if args.irrigation_regime == "T2" else event.t1_amount_m3ha
         event_steps = max(1, int(event_duration_hours(amount_m3ha, args.area_ha) / dt_hours))
@@ -208,7 +296,16 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
             total_irrigation_mm += applied
             event_irrigation_mm += applied
             total_etc_mm += info["etc_mm_h"] * dt_hours
-            _record(series, info, action, tag, event_idx, True)
+            npk_targets = _npk_targets_for_tag(tag)
+            npk_flows = _split_offline_npk_flow(float(info.get("q_f", 0.0)), npk_targets)
+            npk_actual = _estimate_offline_npk(
+                npk_actual,
+                npk_targets,
+                npk_flows,
+                float(info.get("irrigation_mm_h", 0.0)),
+                dt_hours,
+            )
+            _record(series, info, action, tag, event_idx, True, npk_targets, npk_actual, npk_flows)
 
         logger.info(
             "事件 %d/%d day %.0f stage=%s tag=%s irrigation=%.2f mm theta=%.3f root_EC=%.3f",
@@ -233,7 +330,16 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
     for _ in range(tail_steps):
         obs, _reward, _done, info = env.dry_step(rain_mm_h=rain_mm_h)
         total_etc_mm += info["etc_mm_h"] * dt_hours
-        _record(series, info, np.array([0.0, 0.0], dtype=np.float32), tail_tag, len(schedule), False)
+        npk_targets = _npk_targets_for_tag(tail_tag)
+        npk_flows = _split_offline_npk_flow(float(info.get("q_f", 0.0)), npk_targets)
+        npk_actual = _estimate_offline_npk(
+            npk_actual,
+            npk_targets,
+            npk_flows,
+            float(info.get("irrigation_mm_h", 0.0)),
+            dt_hours,
+        )
+        _record(series, info, np.array([0.0, 0.0], dtype=np.float32), tail_tag, len(schedule), False, npk_targets, npk_actual, npk_flows)
 
     root_ec = np.array(series["ec_soil"], dtype=float)
     target_ec = np.array(series["target_ec"], dtype=float)
@@ -242,6 +348,22 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
     ph_drip = np.array(series["ph_drip"], dtype=float)
     ec_set = np.array(series["ec_set"], dtype=float)
     ph_set = np.array(series["ph_set"], dtype=float)
+    n_metrics = _error_metrics(np.array(series["n_actual"], dtype=float), np.array(series["n_target"], dtype=float))
+    p_metrics = _error_metrics(np.array(series["p_actual"], dtype=float), np.array(series["p_target"], dtype=float))
+    k_metrics = _error_metrics(np.array(series["k_actual"], dtype=float), np.array(series["k_target"], dtype=float))
+    npk_metrics = {
+        "npk_metrics_status": "offline_available",
+        "npk_source": "offline_root_zone_estimator",
+        "N_MAE": n_metrics["mae"],
+        "P_MAE": p_metrics["mae"],
+        "K_MAE": k_metrics["mae"],
+        "N_RMSE": n_metrics["rmse"],
+        "P_RMSE": p_metrics["rmse"],
+        "K_RMSE": k_metrics["rmse"],
+        "N_Max_Error": n_metrics["max_error"],
+        "P_Max_Error": p_metrics["max_error"],
+        "K_Max_Error": k_metrics["max_error"],
+    }
     stats = {
         "irrigation_regime": args.irrigation_regime,
         "season_days": args.season_days,
@@ -258,6 +380,11 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
         "ph_set_mean_during_events": float(np.mean(ph_set[event_mask])) if event_mask.any() else 0.0,
         "q_f_mean_during_events": float(np.mean(np.array(series["q_f"], dtype=float)[event_mask])) if event_mask.any() else 0.0,
         "q_a_mean_during_events": float(np.mean(np.array(series["q_a"], dtype=float)[event_mask])) if event_mask.any() else 0.0,
+        "npk_metrics": npk_metrics,
+        "npk_metric_definitions": {
+            "npk_source": "Offline root-zone estimator driven by simulated q_f and stage nutrient targets; not PLC HIL and not real nutrient sensor feedback.",
+            "NPK_errors": "actual minus target over all recorded full-season SAC steps.",
+        },
     }
     return series, stats
 

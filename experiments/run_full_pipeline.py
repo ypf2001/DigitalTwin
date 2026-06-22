@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import logging
 import shutil
@@ -29,6 +30,13 @@ ROOT = Path(__file__).resolve().parents[1]
 RESULTS_ROOT = ROOT / "results"
 logger = logging.getLogger(__name__)
 
+PLC_PH_TARGETS = {
+    "INI": 6.2,
+    "DEV": 6.1,
+    "MID": 5.9,
+    "LATE": 6.1,
+}
+
 
 def _latest_run_dir(experiment_name: str) -> Path:
     """返回指定实验最近生成的时间戳目录。"""
@@ -41,6 +49,182 @@ def _latest_run_dir(experiment_name: str) -> Path:
 
 def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _float_or_default(value: Any, default: float = 0.0) -> float:
+    try:
+        if value in (None, ""):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _mean_abs_error(rows: list[dict[str, str]], actual_key: str, target_key: str, default_target: float = 0.0) -> float:
+    if not rows:
+        return 0.0
+    errors = [
+        abs(_float_or_default(row.get(actual_key)) - _float_or_default(row.get(target_key), default_target))
+        for row in rows
+    ]
+    return sum(errors) / len(errors)
+
+
+def _error_metrics(rows: list[dict[str, str]], actual_key: str, target_key: str) -> tuple[float, float, float]:
+    if not rows:
+        return 0.0, 0.0, 0.0
+    errors = [
+        _float_or_default(row.get(actual_key)) - _float_or_default(row.get(target_key))
+        for row in rows
+    ]
+    abs_errors = [abs(error) for error in errors]
+    mae = sum(abs_errors) / len(abs_errors)
+    rmse = (sum(error * error for error in errors) / len(errors)) ** 0.5
+    max_error = max(abs_errors)
+    return mae, rmse, max_error
+
+
+def _ph_target(row: dict[str, str]) -> float:
+    if "target_ph" in row:
+        return _float_or_default(row.get("target_ph"), 6.0)
+    stage = str(row.get("stage", "")).upper()
+    return PLC_PH_TARGETS.get(stage, _float_or_default(row.get("ph_set"), 6.0))
+
+
+def _compute_plc_npk_metrics_from_csv(run_dir: Path) -> dict[str, float]:
+    csv_path = run_dir / "full_season_plc_timeseries.csv"
+    if not csv_path.exists():
+        return {}
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
+    if not rows:
+        return {}
+
+    ec_errors = [
+        abs(_float_or_default(row.get("ec_soil")) - _float_or_default(row.get("target_ec")))
+        for row in rows
+    ]
+    ph_errors = [
+        abs(_float_or_default(row.get("soil_ph_est"), 7.0) - _ph_target(row))
+        for row in rows
+    ]
+    n_mae, n_rmse, n_max = _error_metrics(rows, "n_actual", "n_target")
+    p_mae, p_rmse, p_max = _error_metrics(rows, "p_actual", "p_target")
+    k_mae, k_rmse, k_max = _error_metrics(rows, "k_actual", "k_target")
+    return {
+        "EC_MAE": sum(ec_errors) / len(ec_errors),
+        "pH_MAE": sum(ph_errors) / len(ph_errors),
+        "N_MAE": n_mae,
+        "P_MAE": p_mae,
+        "K_MAE": k_mae,
+        "N_RMSE": n_rmse,
+        "P_RMSE": p_rmse,
+        "K_RMSE": k_rmse,
+        "N_Max_Error": n_max,
+        "P_Max_Error": p_max,
+        "K_Max_Error": k_max,
+    }
+
+
+def _extract_plc_npk_metrics(summary: dict[str, Any], run_dir: Path) -> tuple[dict[str, float], str]:
+    metric_keys = ["EC_MAE", "pH_MAE", "N_MAE", "P_MAE", "K_MAE"]
+    optional_metric_keys = [
+        "N_RMSE",
+        "P_RMSE",
+        "K_RMSE",
+        "N_Max_Error",
+        "P_Max_Error",
+        "K_Max_Error",
+    ]
+    sources: list[tuple[str, dict[str, Any]]] = [
+        ("summary_top_level", summary),
+        ("summary_metrics", summary.get("metrics", {}) if isinstance(summary.get("metrics"), dict) else {}),
+        ("summary_final", summary.get("final", {}) if isinstance(summary.get("final"), dict) else {}),
+    ]
+    for source_name, source in sources:
+        if all(key in source for key in metric_keys):
+            metrics = {key: _float_or_default(source.get(key)) for key in metric_keys}
+            for key in optional_metric_keys:
+                if key in source:
+                    metrics[key] = _float_or_default(source.get(key))
+            return metrics, source_name
+
+    metrics = _compute_plc_npk_metrics_from_csv(run_dir)
+    if metrics:
+        return metrics, "computed_from_full_season_plc_timeseries_csv"
+    return {}, "not_available"
+
+
+def _extract_offline_npk_metrics(full_season_summary: dict[str, Any]) -> dict[str, Any]:
+    stats = full_season_summary.get("stats", {})
+    metrics = stats.get("npk_metrics", {}) if isinstance(stats, dict) else {}
+    if not isinstance(metrics, dict) or not metrics:
+        return {
+            "npk_metrics_status": "not_available",
+            "npk_source": "offline_root_zone_estimator",
+            "reason": "full_season_sac summary does not contain N/P/K metrics",
+        }
+    return {
+        "npk_metrics_status": metrics.get("npk_metrics_status", "offline_available"),
+        "npk_source": metrics.get("npk_source", "offline_root_zone_estimator"),
+        "metrics": metrics,
+        "note": (
+            "N/P/K values are offline root-zone estimates from the digital twin, "
+            "not PLC HIL and not real nutrient sensor feedback."
+        ),
+    }
+
+
+def _collect_plc_hil_npk_status() -> dict[str, Any]:
+    base = RESULTS_ROOT / "full_season_plc"
+    not_run = {
+        "plc_hil_status": "not_run",
+        "reason": "PLCSIM/TIA Portal environment not available or PLC HIL result not found",
+    }
+    if not base.exists():
+        return not_run
+
+    runs = sorted((p for p in base.iterdir() if p.is_dir()), key=lambda p: p.name)
+    if not runs:
+        return not_run
+
+    run_dir = runs[-1]
+    summary_path = run_dir / "summary.json"
+    if not summary_path.exists():
+        return {
+            **not_run,
+            "result_dir": str(run_dir),
+            "reason": "Latest full_season_plc result has no summary.json",
+        }
+
+    try:
+        summary = _read_json(summary_path)
+    except Exception as exc:
+        return {
+            **not_run,
+            "result_dir": str(run_dir),
+            "reason": f"Failed to read latest PLC summary: {exc}",
+        }
+
+    metrics, metrics_source = _extract_plc_npk_metrics(summary, run_dir)
+    plc_enabled = bool(summary.get("plc_enabled", False))
+    status = "completed" if plc_enabled else "not_run"
+    reason = None if plc_enabled else (
+        "Latest full_season_plc result is offline/simulation-only "
+        "(plc_enabled=false); PLCSIM/TIA Portal environment not available or PLC HIL result not found"
+    )
+    payload: dict[str, Any] = {
+        "plc_hil_status": status,
+        "result_dir": str(run_dir),
+        "summary": str(summary_path),
+        "plc_enabled": plc_enabled,
+        "plc_ok_rate": summary.get("plc_ok_rate"),
+        "metrics_source": metrics_source,
+        "metrics": metrics,
+    }
+    if reason:
+        payload["reason"] = reason
+    return payload
 
 
 def _run_step(name: str, command: list[str]) -> None:
@@ -161,6 +345,16 @@ def _collect_pipeline_images(pipeline_summary: dict[str, Any], image_dir: Path) 
         if copied_path:
             copied[key] = copied_path
 
+    eval_step = steps.get("eval_sac", {})
+    eval_summary = eval_step.get("summary", {})
+    eval_artifacts = eval_summary.get("artifacts", {})
+    eval_png = eval_artifacts.get("png_path") or eval_artifacts.get("png")
+    if eval_png and not Path(eval_png).is_absolute() and eval_step.get("result_dir"):
+        eval_png = Path(eval_step["result_dir"]) / eval_png
+    copied_path = _copy_image(eval_png, image_dir, "09_eval_sac.png")
+    if copied_path:
+        copied["eval_sac"] = copied_path
+
     return copied
 
 
@@ -228,6 +422,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "status": "running",
         "preflight_only": args.preflight_only,
+        "acceptance_smoke": args.acceptance_smoke,
         "steps": {},
     }
 
@@ -244,6 +439,12 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             "result_dir": str(short_event_dir),
             "summary": short_event["short_event_response"],
         }
+        pipeline_summary["steps"]["plc_hil_npk"] = _collect_plc_hil_npk_status()
+        pipeline_summary["steps"]["npk_metrics"] = {
+            "npk_metrics_status": "not_available",
+            "npk_source": "offline_root_zone_estimator",
+            "reason": "Full-season SAC step was not run yet.",
+        }
 
         if args.preflight_only:
             pipeline_summary["status"] = "preflight_passed"
@@ -252,18 +453,43 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             return pipeline_dir
 
         stages_to_train = [args.stage] if args.single_stage else ["INI", "DEV", "MID", "LATE"]
+        training_timesteps = 1000 if args.acceptance_smoke and args.timesteps is None else args.timesteps
+        if args.acceptance_smoke:
+            stages_to_train = ["INI", "DEV", "MID", "LATE"]
         trained_models = _train_stages(
             stages_to_train,
-            args.timesteps,
+            training_timesteps,
             parallel=args.parallel_train,
             max_workers=args.train_workers,
         )
 
         primary_stage = args.stage if args.single_stage else "MID"
         model_path = ROOT / "rl_models" / f"sac_{primary_stage.lower()}_final"
+        model_files_exist = {stage: Path(path).exists() for stage, path in trained_models.items()}
+        if args.acceptance_smoke:
+            training_mode = "four_stage_smoke"
+            strict_acceptance: bool | str = "software_pipeline_only"
+        elif args.single_stage:
+            training_mode = "single_stage_smoke" if training_timesteps is not None else "single_stage_full"
+            strict_acceptance = False
+        else:
+            training_mode = "four_stage_smoke" if training_timesteps is not None else "full"
+            strict_acceptance = "software_pipeline_only" if training_timesteps is not None else True
         pipeline_summary["steps"]["train_sac"] = {
             "stages": stages_to_train,
+            "trained_stages": stages_to_train,
             "models": trained_models,
+            "model_files": trained_models,
+            "model_files_exist_by_stage": model_files_exist,
+            "model_files_exist": all(model_files_exist.values()),
+            "timesteps_per_stage": training_timesteps,
+            "training_mode": training_mode,
+            "strict_acceptance": strict_acceptance,
+            "quality_note": (
+                "Smoke training validates the software pipeline only; it is not evidence of an optimal SAC policy."
+                if training_timesteps is not None else
+                "Full training mode uses the configured SAC timesteps."
+            ),
             "primary_stage_for_control_plot": primary_stage,
             "parallel_train": args.parallel_train,
             "train_workers": args.train_workers,
@@ -294,24 +520,33 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                 str(ROOT / "experiments" / "run_full_season_sac.py"),
                 "--irrigation-regime",
                 "T2",
+                "--dt-min",
+                str(args.simulation_dt_min),
             ] + (["--model", str(model_path)] if args.single_stage else []),
         )
         full_season_dir = _latest_run_dir("full_season_sac")
+        full_season_summary = _read_json(full_season_dir / "summary.json")
         pipeline_summary["steps"]["full_season_sac"] = {
             "result_dir": str(full_season_dir),
-            "summary": _read_json(full_season_dir / "summary.json"),
+            "summary": full_season_summary,
         }
+        pipeline_summary["steps"]["npk_metrics"] = _extract_offline_npk_metrics(full_season_summary)
 
         _run_step(
             "SAC 完整生育期评估",
             [
                 sys.executable,
                 str(ROOT / "eval_sac.py"),
+                "--dt-min",
+                str(args.simulation_dt_min),
             ] + (["--model", str(model_path)] if args.single_stage else []),
         )
+        eval_dir = _latest_run_dir("eval_sac")
         pipeline_summary["steps"]["eval_sac"] = {
             "model": str(model_path) + ".zip" if args.single_stage else None,
             "model_dir": str(ROOT / "rl_models") if not args.single_stage else None,
+            "result_dir": str(eval_dir),
+            "summary": _read_json(eval_dir / "summary.json"),
         }
 
         _run_step(
@@ -355,6 +590,17 @@ def parse_args() -> argparse.Namespace:
         help="只运行母液可控域和短期事件安全检查，不启动 SAC 训练。",
     )
     parser.add_argument(
+        "--acceptance-smoke",
+        action="store_true",
+        help="验收烟测模式：按小步数依次训练 INI/DEV/MID/LATE，只证明软件链路完整。",
+    )
+    parser.add_argument(
+        "--simulation-dt-min",
+        type=float,
+        default=5.0,
+        help="流水线内全生育期仿真和 eval_sac 的步长；默认 5min 可解析 pipe.tau=8min 延迟。",
+    )
+    parser.add_argument(
         "--parallel-train",
         action="store_true",
         help="并行训练多个生育阶段 SAC 模型；默认仍按顺序训练。",
@@ -365,7 +611,10 @@ def parse_args() -> argparse.Namespace:
         default=4,
         help="--parallel-train 时最多同时启动的训练进程数。",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.acceptance_smoke and args.single_stage:
+        parser.error("--acceptance-smoke trains all four stages and cannot be combined with --single-stage.")
+    return args
 
 
 if __name__ == "__main__":

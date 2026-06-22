@@ -133,14 +133,15 @@ def run_policy(
     stopped_by_safety = False
     for step in range(total_steps):
         in_event = continuous_control or event_start_step <= step < event_end_step
+        action_for_record = fixed_action.copy()
         if in_event:
             if model is None:
-                action = fixed_action.copy()
+                action_for_record = fixed_action.copy()
             else:
                 # SAC 训练时使用归一化观测，这里必须先归一化再 predict。
-                action, _ = model.predict(normalize_obs(obs), deterministic=True)
+                action_for_record, _ = model.predict(normalize_obs(obs), deterministic=True)
 
-            obs, _reward, done, info = env.step(action)
+            obs, _reward, done, info = env.step(action_for_record)
             if done and info.get("burn"):
                 # 安全评估模式：记录 burn，但不让整段 5 天评估提前结束。
                 # 后续改为 dry_step，观察系统恢复过程。
@@ -157,8 +158,8 @@ def run_policy(
         series["target_ec"].append(float(info["target_ec"]))
         series["ec_drip"].append(float(info["ec_drip"]))
         series["ph_drip"].append(float(info["ph_drip"]))
-        series["ec_set"].append(float(info.get("ec_set", action[0])))
-        series["ph_set"].append(float(info.get("ph_set", action[1])))
+        series["ec_set"].append(float(info.get("ec_set", action_for_record[0])))
+        series["ph_set"].append(float(info.get("ph_set", action_for_record[1])))
         series["irrigation_mm_h"].append(float(info["irrigation_mm_h"]))
         series["etc_mm_h"].append(float(info["etc_mm_h"]))
         series["q_f"].append(float(info["q_f"]))
