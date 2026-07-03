@@ -1,8 +1,8 @@
 # 云端存储配置 - MySQL 数据库
 cloud:
-  host: "154.44.26.212"
-  port: 61762
-  user: "root"
-  password: ""  # Prefer DT_CLOUD_PASSWORD in the environment for real deployments.
-  database: "digital_twin"
+  host: "mysql6.sqlpub.com"
+  port: 3311
+  user: "yanpengfan"
+  password: "x3dHuIoMbkzTXT7T"  # Prefer DT_CLOUD_PASSWORD in the environment for real deployments.
+  database: "dw11111"
   connect_timeout: 10
