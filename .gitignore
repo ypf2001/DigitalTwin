@@ -1,37 +1,70 @@
-# 虚拟环境
+# Python virtual environments
 venv/
 .venv/
 env/
+.python-version
 
-# IDE 配置
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+.hypothesis/
+.nox/
+.tox/
+
+# Coverage and test outputs
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Packaging / build artifacts
+build/
+dist/
+site/
+.eggs/
+*.egg
+*.egg-info/
+pip-wheel-metadata/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Logs and local runtime files
+*.log
+*.pid
+*.seed
+*.out
+*.err
+
+# IDE / local tooling
 .idea/
 .vscode/
-
-# 缓存和日志
-.weather_cache/
-rl_logs/
-__pycache__/
-*.pyc
-*.log
-
-# 模型和输出
-rl_models/
-pic_output/
-
-# Web 前端
-node_modules/
-dist/
-.vite/
-
-# Web 运行时输出
-web_app/backend/static/images/
-
-# 工具配置
 .claude/
-.ruff_cache/
-.pytest_cache/
+.agents/
+.qwen/
 .junie/
 
-# Experiment outputs
+# Local weather / simulation cache
+.weather_cache/
 results/
+rl_logs/
+rl_models/
+pic_output/
 experiments/images/
+
+# Local document render outputs
+docx_render_check/
+docx_render_check_italic/
+
+# Frontend build outputs
+node_modules/
+.vite/
+
+# Web runtime generated files
+web_app/backend/static/images/
