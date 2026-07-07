@@ -74,6 +74,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config_loader import load_config
+from sac_model_registry import get_stage_model_path
 
 logger = logging.getLogger(__name__)
 
@@ -218,9 +219,13 @@ def _load_models(model_dir: Path, single_model: str | None):
         return models
 
     for stage, meta in STAGES.items():
-        base = model_dir / f"sac_{meta['tag']}_final"
+        base = get_stage_model_path(meta["tag"])
         if not base.with_suffix(".zip").exists():
-            raise FileNotFoundError(f"SAC model not found: {base}.zip")
+            fallback = model_dir / f"sac_{meta['tag']}_final"
+            if fallback.with_suffix(".zip").exists():
+                base = fallback
+            else:
+                raise FileNotFoundError(f"SAC model not found: {base}.zip")
         logger.info("Loading SAC model for %s: %s.zip", stage, base)
         models[stage] = SAC.load(str(base))
     return models
@@ -612,3 +617,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

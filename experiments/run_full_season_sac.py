@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config_loader import load_config
+from sac_model_registry import get_existing_stage_models
 from digital_twin_env import DigitalTwinEnv
 from irrigation_schedule import (
     event_duration_hours,
@@ -133,7 +134,11 @@ class StageModelBank:
             for tag in ("ini", "dev", "mid", "late"):
                 self.model_paths[tag] = base
         else:
+            for tag, model_path in get_existing_stage_models().items():
+                self.model_paths[tag] = Path(model_path)
             for tag in ("ini", "dev", "mid", "late"):
+                if tag in self.model_paths:
+                    continue
                 candidate = model_dir / f"sac_{tag}_final"
                 if candidate.with_suffix(".zip").exists():
                     self.model_paths[tag] = candidate
@@ -554,3 +559,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

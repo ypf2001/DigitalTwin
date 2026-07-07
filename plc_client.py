@@ -323,6 +323,61 @@ class PLCClient:
         """Backward-compatible helper that updates actuals while preserving zero targets."""
         return self.write_fertilizer_feedback(0.0, 0.0, 0.0, n_actual, p_actual, k_actual)
 
+    def write_manual_mode(self,
+                          enabled: bool,
+                          q_f: float = 0.0,
+                          q_a: float = 0.0,
+                          q_n: float = 0.0,
+                          q_p: float = 0.0,
+                          q_k: float = 0.0) -> bool:
+        """Enable local PLC manual mode and write direct flow setpoints.
+
+        Manual mode is intended for bench commissioning. The PLC still applies
+        hard limits and analog output scaling before writing q_*_cmd.
+        """
+        names = [
+            "Manual_Mode",
+            "Manual_q_f_Set", "Manual_q_a_Set",
+            "Manual_q_n_Set", "Manual_q_p_Set", "Manual_q_k_Set",
+        ]
+        missing = [name for name in names if name not in self.addr_map]
+        if missing:
+            logger.error(f"[PLC] manual mode address mapping missing: {missing}")
+            return False
+        try:
+            self._ensure_connected()
+            self._write_real("Manual_q_f_Set", q_f)
+            self._write_real("Manual_q_a_Set", q_a)
+            self._write_real("Manual_q_n_Set", q_n)
+            self._write_real("Manual_q_p_Set", q_p)
+            self._write_real("Manual_q_k_Set", q_k)
+            self._write_bool("Manual_Mode", enabled)
+            if "Auto_Mode" in self.addr_map:
+                self._write_bool("Auto_Mode", not enabled)
+            logger.info(
+                "[PLC] manual mode %s: q_f=%.3f q_a=%.3f q_n=%.3f q_p=%.3f q_k=%.3f",
+                "enabled" if enabled else "disabled",
+                q_f, q_a, q_n, q_p, q_k,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] manual mode write failed: {e}")
+            return False
+
+    def write_emergency_stop(self, enabled: bool = True) -> bool:
+        """Set or clear the PLC emergency stop flag in DB1."""
+        if "Emergency_Stop" not in self.addr_map:
+            logger.error("[PLC] Emergency_Stop address mapping missing")
+            return False
+        try:
+            self._ensure_connected()
+            self._write_bool("Emergency_Stop", enabled)
+            logger.warning("[PLC] Emergency_Stop=%s", enabled)
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] Emergency_Stop write failed: {e}")
+            return False
+
     def _calc_read_range(self, var_names: list) -> tuple[int, int]:
         min_off = float("inf")
         max_end = 0
@@ -416,6 +471,11 @@ class PLCClient:
             "Setpoint_Protection_Active", "Stage_Auto_SP_Enable",
             "Kp_EC_Set", "Ki_EC_Set", "Kd_EC_Set",
             "Kp_pH_Set", "Ki_pH_Set", "Kd_pH_Set",
+            "Manual_Mode", "Auto_Mode", "Emergency_Stop", "Manual_Active", "Auto_Active",
+            "Comm_Normal", "Manual_PumpValve_Enable",
+            "Manual_q_f_Set", "Manual_q_a_Set",
+            "Manual_q_f_Selected", "Manual_q_a_Selected",
+            "Manual_q_n_Set", "Manual_q_p_Set", "Manual_q_k_Set",
             "N_Enable", "N_Ratio", "N_Target", "N_Actual", "Kp_N_Set", "Ki_N_Set", "Kd_N_Set", "N_Max",
             "P_Enable", "P_Ratio", "P_Target", "P_Actual", "Kp_P_Set", "Ki_P_Set", "Kd_P_Set", "P_Max",
             "K_Enable", "K_Ratio", "K_Target", "K_Actual", "Kp_K_Set", "Ki_K_Set", "Kd_K_Set", "K_Max",

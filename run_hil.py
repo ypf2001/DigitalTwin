@@ -15,6 +15,7 @@ import os
 import sys
 import time
 import numpy as np
+from sac_model_registry import get_stage_model_path
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -62,7 +63,7 @@ if __name__ == "__main__":
             sys.exit(1)
 
         if model_path is None:
-            model_path = f"./rl_models/sac_{args.stage.lower()}_final"
+            model_path = str(get_stage_model_path(args.stage))
         if not os.path.exists(model_path + ".zip"):
             logger.error(f"模型不存在: {model_path}.zip")
             sys.exit(1)
@@ -147,3 +148,4 @@ if __name__ == "__main__":
         logger.info(f"PLC 通讯正常率: {plc_ok_count}/{step+1} "
                     f"({100*plc_ok_count/(step+1):.1f}%)")
         logger.info("=" * 60)
+

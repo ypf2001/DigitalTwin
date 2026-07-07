@@ -48,6 +48,7 @@ except Exception:
 from digital_twin_env import DigitalTwinEnv, GrowthStage
 from irrigation_schedule import get_irrigation_schedule, event_duration_hours, run_season_simulation
 from config_loader import load_config
+from sac_model_registry import get_existing_stage_models
 from plot_style import (
     apply_academic_style, style_axis, set_ylim_tight,
     EC_ACTUAL, EC_TARGET, THETA, QF, QA, ET_COLOR, IRRIGATION,
@@ -99,7 +100,10 @@ class SACSeasonRunner:
             self._auto_discover()
 
     def _auto_discover(self):
+        self.models.update(get_existing_stage_models())
         for tag in ["ini", "dev", "mid", "late"]:
+            if tag in self.models:
+                continue
             path = os.path.join(self.model_dir, f"sac_{tag}_final")
             if os.path.exists(path + ".zip"):
                 self.models[tag] = path
@@ -459,3 +463,4 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     run_eval(args)
+

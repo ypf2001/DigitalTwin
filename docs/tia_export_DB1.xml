@@ -1,0 +1,724 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V21" />
+  <DocumentInfo>
+    <Created>2026-07-07T07:59:20.9312427Z</Created>
+    <ExportSetting>WithReadOnly</ExportSetting>
+    <InstalledProducts>
+      <Product>
+        <DisplayName>Totally Integrated Automation Portal</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <Product>
+        <DisplayName>SINAMICS Startdrive Advanced</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>SINAMICS Startdrive G110M, G120, G120C, G120D, G120P, G115D</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <OptionPackage>
+        <DisplayName>SINAMICS Startdrive G130, G150, S120, S150, G200, G220, S200, S210, S220, Innomotics MVD</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>STEP 7 Professional</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>STEP 7 Safety</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <OptionPackage>
+        <DisplayName>Tech WebApplication</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>WinCC Basic/Comfort/Advanced</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <Product>
+        <DisplayName>WinCC Professional</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <Product>
+        <DisplayName>WinCC Unified</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+    </InstalledProducts>
+  </DocumentInfo>
+  <SW.Blocks.GlobalDB ID="0">
+    <AttributeList>
+      <CodeModifiedDate ReadOnly="true">2026-07-07T07:50:54.3463936Z</CodeModifiedDate>
+      <CompileDate ReadOnly="true">2026-07-07T07:50:54.3509118Z</CompileDate>
+      <CreationDate ReadOnly="true">2026-07-07T07:50:54.2714435Z</CreationDate>
+      <DBAccessibleFromOPCUA>false</DBAccessibleFromOPCUA>
+      <DownloadDate ReadOnly="true">2026-07-07T07:57:30.9172103Z</DownloadDate>
+      <Interface>
+        <Sections xmlns="http://www.siemens.com/automation/Openness/SW/Interface/v5">
+          <Section Name="Static">
+            <Member Name="EC_Set_SP" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">0</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">DBD0，SAC 输出的目标 EC</MultiLanguageText>
+              </Comment>
+              <StartValue>1.5</StartValue>
+            </Member>
+            <Member Name="pH_Set_SP" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">32</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">DBD4，SAC 输出的目标 pH</MultiLanguageText>
+              </Comment>
+              <StartValue>6.0</StartValue>
+            </Member>
+            <Member Name="EC_Actual" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">64</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">DBD8，Python/传感器反馈的出口 EC</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="pH_Actual" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">96</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">DBD12，Python/传感器反馈的出口 pH</MultiLanguageText>
+              </Comment>
+              <StartValue>7.0</StartValue>
+            </Member>
+            <Member Name="SAC_Enable" Datatype="Bool">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">128</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">DBX16.0，远程/SAC 控制使能</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Reserved_17" Datatype="Byte">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">136</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">DBB17，占位，保证 Remote_Heartbeat 位于 DBW18</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Remote_Heartbeat" Datatype="Int">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">144</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Remote_Comms_OK" Datatype="Bool">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">160</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">DBX20.0，PLC 判断 Python 通讯是否正常</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Reserved_21" Datatype="Byte">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">168</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">DBB21，占位，保证 Watchdog_Timer 位于 DBW22</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Watchdog_Timer" Datatype="Int">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">176</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="q_f_cmd" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">192</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">DBD24，PLC 输出肥料母液流量 L/min</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="q_a_cmd" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">224</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">DBD28，PLC 输出酸液流量 L/min</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Valve_F_Actual" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">256</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">DBD32，肥液执行量反馈</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Valve_A_Actual" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">288</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">DBD36，酸液执行量反馈</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="AQ_Valve_F_Raw" Datatype="Int">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">320</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="AQ_Valve_A_Raw" Datatype="Int">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">336</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="System_Alarm_Light" Datatype="Bool">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">352</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">以下为 PLC 内部状态，不建议 Python 直接读写。</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Last_Heartbeat" Datatype="Int">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">368</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Watchdog_Count" Datatype="Int">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">384</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="q_f_raw" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">400</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="q_a_raw" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">432</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="q_f_limited" Datatype="Bool">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">464</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="q_a_limited" Datatype="Bool">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">465</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">兼容旧 A 方案/旧 OB1 网络的变量。放在 Python 固定读写区之后， 不影响 EC_Set_SP、q_f_cmd 等前 45 字节地址。</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Valve_F_Opt_SP" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">480</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Valve_A_Opt_SP" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">512</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Ramp_Target_F" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">544</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Ramp_Target_A" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">576</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Ramp_Step" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">608</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Remote_Comms_Was_OK" Datatype="Bool">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">640</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Actual_Valve_F" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">656</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Actual_Valve_A" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">688</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="tWatchdog" Datatype="TON_TIME" Version="1.0">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">720</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Growth_Stage" Datatype="Int">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">848</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">0=INI, 1=DEV, 2=MID, 3=LATE</MultiLanguageText>
+              </Comment>
+              <StartValue>2</StartValue>
+            </Member>
+            <Member Name="Stage_EC_SP" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">864</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">当前生长阶段固定 EC 保护值</MultiLanguageText>
+              </Comment>
+              <StartValue>1.5</StartValue>
+            </Member>
+            <Member Name="Stage_pH_SP" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">896</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">当前生长阶段固定 pH 保护值</MultiLanguageText>
+              </Comment>
+              <StartValue>5.9</StartValue>
+            </Member>
+            <Member Name="Active_EC_SP" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">928</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">PLC 实际采用的 EC 目标</MultiLanguageText>
+              </Comment>
+              <StartValue>1.5</StartValue>
+            </Member>
+            <Member Name="Active_pH_SP" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">960</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">PLC 实际采用的 pH 目标</MultiLanguageText>
+              </Comment>
+              <StartValue>5.9</StartValue>
+            </Member>
+            <Member Name="Setpoint_Protection_Active" Datatype="Bool">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">992</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">SAC 目标越界时置 TRUE</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Stage_Auto_SP_Enable" Datatype="Bool">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">993</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">TRUE=PLC 根据 Growth_Stage 自动写 EC_Set_SP/pH_Set_SP PID 在线调参区。Python 粗调或 TIA 监控表可直接写这些值。</MultiLanguageText>
+              </Comment>
+              <StartValue>TRUE</StartValue>
+            </Member>
+            <Member Name="Kp_EC_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1008</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">EC 比例增益</MultiLanguageText>
+              </Comment>
+              <StartValue>1.2</StartValue>
+            </Member>
+            <Member Name="Ki_EC_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1040</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">EC 积分增益</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Kd_EC_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1072</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">EC 微分增益</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Kp_pH_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1104</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">pH 比例增益</MultiLanguageText>
+              </Comment>
+              <StartValue>1.2</StartValue>
+            </Member>
+            <Member Name="Ki_pH_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1136</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">pH 积分增益</MultiLanguageText>
+              </Comment>
+              <StartValue>0.01</StartValue>
+            </Member>
+            <Member Name="Kd_pH_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1168</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">pH 微分增益 多肥液通道在线配置区。Enable 使用 Real(&gt;=0.5 启用)，便于 Snap7 按 DBD 写入。</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="N_Enable" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1200</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">氮肥通道启用</MultiLanguageText>
+              </Comment>
+              <StartValue>1.0</StartValue>
+            </Member>
+            <Member Name="N_Ratio" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1232</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">总肥液 q_f_cmd 分配比例</MultiLanguageText>
+              </Comment>
+              <StartValue>0.3333</StartValue>
+            </Member>
+            <Member Name="N_Target" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1264</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">可选氮目标；无在线 N 传感器时保持 0</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="N_Actual" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1296</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">可选氮反馈；无在线 N 传感器时保持 0</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Kp_N_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1328</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Ki_N_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1360</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Kd_N_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1392</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="N_Max" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1424</IntegerAttribute>
+              </AttributeList>
+              <StartValue>4.0</StartValue>
+            </Member>
+            <Member Name="q_n_cmd" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1456</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">氮肥计量泵输出 L/min</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="AQ_Valve_N_Raw" Datatype="Int">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1488</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="N_Reserved" Datatype="Int">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1504</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="P_Enable" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1520</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">磷肥通道启用</MultiLanguageText>
+              </Comment>
+              <StartValue>1.0</StartValue>
+            </Member>
+            <Member Name="P_Ratio" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1552</IntegerAttribute>
+              </AttributeList>
+              <StartValue>0.3333</StartValue>
+            </Member>
+            <Member Name="P_Target" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1584</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="P_Actual" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1616</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Kp_P_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1648</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Ki_P_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1680</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Kd_P_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1712</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="P_Max" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1744</IntegerAttribute>
+              </AttributeList>
+              <StartValue>4.0</StartValue>
+            </Member>
+            <Member Name="q_p_cmd" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1776</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">磷肥计量泵输出 L/min</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="AQ_Valve_P_Raw" Datatype="Int">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1808</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="P_Reserved" Datatype="Int">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1824</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="K_Enable" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1840</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">钾肥通道启用</MultiLanguageText>
+              </Comment>
+              <StartValue>1.0</StartValue>
+            </Member>
+            <Member Name="K_Ratio" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1872</IntegerAttribute>
+              </AttributeList>
+              <StartValue>0.3334</StartValue>
+            </Member>
+            <Member Name="K_Target" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1904</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="K_Actual" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1936</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Kp_K_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">1968</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Ki_K_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2000</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="Kd_K_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2032</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="K_Max" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2064</IntegerAttribute>
+              </AttributeList>
+              <StartValue>4.0</StartValue>
+            </Member>
+            <Member Name="q_k_cmd" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2096</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">钾肥计量泵输出 L/min</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="AQ_Valve_K_Raw" Datatype="Int">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2128</IntegerAttribute>
+              </AttributeList>
+            </Member>
+            <Member Name="K_Reserved" Datatype="Int">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2144</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">PLC 细调窗口：PID 只允许在前馈流量基础上做有限百分比修正。 推荐范围 0.05~0.15；0.10 表示 EC 肥液输出允许 ±10% 修正。</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="EC_Trim_Band" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2160</IntegerAttribute>
+              </AttributeList>
+              <StartValue>0.1</StartValue>
+            </Member>
+            <Member Name="pH_Trim_Band" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2192</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">试验台本地模式区。放在现有 Python 固定地址区之后，避免改变既有 offset。</MultiLanguageText>
+              </Comment>
+              <StartValue>0.08</StartValue>
+            </Member>
+            <Member Name="Manual_Mode" Datatype="Bool">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2224</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">TRUE=手动调试模式，绕过 EC/pH 自动闭环</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Auto_Mode" Datatype="Bool">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2225</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">TRUE=预留本地自动模式，当前自动仍由 SAC_Enable 驱动</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Emergency_Stop" Datatype="Bool">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2226</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">TRUE=急停，所有执行量立即归零</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Manual_Active" Datatype="Bool">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2227</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">PLC 当前处于手动输出</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Auto_Active" Datatype="Bool">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2228</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">PLC 当前处于自动闭环输出</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Reserved_279" Datatype="Byte">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2232</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">占位，使 Manual_q_* 从 DBD280 开始</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Manual_q_f_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2240</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">手动总肥液流量 L/min，限幅 0~10</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Manual_q_a_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2272</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">手动酸液流量 L/min，限幅 0~4</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Manual_q_n_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2304</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">手动氮肥通道 L/min，限幅 0~N_Max</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Manual_q_p_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2336</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">手动磷肥通道 L/min，限幅 0~P_Max</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="Manual_q_k_Set" Datatype="Real">
+              <AttributeList>
+                <IntegerAttribute Name="Offset" Informative="true" SystemDefined="true">2368</IntegerAttribute>
+              </AttributeList>
+              <Comment>
+                <MultiLanguageText Lang="zh-CN">手动钾肥通道 L/min，限幅 0~K_Max</MultiLanguageText>
+              </Comment>
+            </Member>
+          </Section>
+        </Sections>
+      </Interface>
+      <InterfaceModifiedDate ReadOnly="true">2026-07-07T07:50:54.3418563Z</InterfaceModifiedDate>
+      <IsConsistent ReadOnly="true">true</IsConsistent>
+      <LoadMemoryLength ReadOnly="true">7817</LoadMemoryLength>
+      <MemoryLayout>Standard</MemoryLayout>
+      <ModifiedDate ReadOnly="true">2026-07-07T07:50:54.3463936Z</ModifiedDate>
+      <Name>DB1</Name>
+      <Namespace />
+      <Number>1</Number>
+      <ParameterModified ReadOnly="true">2026-07-07T07:50:54.3418563Z</ParameterModified>
+      <ProgrammingLanguage>DB</ProgrammingLanguage>
+      <StructureModified ReadOnly="true">2026-07-07T07:50:54.3418563Z</StructureModified>
+      <WorkMemoryLength ReadOnly="true">304</WorkMemoryLength>
+    </AttributeList>
+    <ObjectList>
+      <MultilingualText ID="1" CompositionName="Comment">
+        <ObjectList>
+          <MultilingualTextItem ID="2" CompositionName="Items">
+            <AttributeList>
+              <Culture>zh-CN</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+      <MultilingualText ID="3" CompositionName="Title">
+        <ObjectList>
+          <MultilingualTextItem ID="4" CompositionName="Items">
+            <AttributeList>
+              <Culture>zh-CN</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+    </ObjectList>
+  </SW.Blocks.GlobalDB>
+</Document>

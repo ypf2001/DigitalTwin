@@ -46,6 +46,22 @@ if ($GroupInfo -notmatch [regex]::Escape($CurrentUser)) {
 python "$Root\examples\import_scl_to_project.py" `
   --project "$Project" `
   --source "$Source" `
-  --source-name "xiaweiji" `
-  --compile `
-  --go-online-after
+  --source-name "xiaweiji"
+
+$ModeInterlockLad = Join-Path $Root "lad_templates\FC_ModeInterlock_LAD.xml"
+if (Test-Path -LiteralPath $ModeInterlockLad) {
+  Write-Host "Importing LAD mode interlock: $ModeInterlockLad"
+  python "$Root\examples\import_lad_xml.py" `
+    --project "$Project" `
+    --plc "PLC_1" `
+    --xml "$ModeInterlockLad" `
+    --compile
+} else {
+  Write-Warning "LAD mode interlock XML not found: $ModeInterlockLad"
+  python "$Root\examples\import_scl_to_project.py" `
+    --project "$Project" `
+    --source "$Source" `
+    --source-name "xiaweiji" `
+    --compile `
+    --go-online-after
+}

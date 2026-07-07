@@ -327,6 +327,70 @@ plc:
       type: real
       bytes: 4
 
+    Manual_Mode:
+      offset: 278
+      bit: 0
+      type: bool
+      bytes: 1
+    Auto_Mode:
+      offset: 278
+      bit: 1
+      type: bool
+      bytes: 1
+    Emergency_Stop:
+      offset: 278
+      bit: 2
+      type: bool
+      bytes: 1
+    Manual_Active:
+      offset: 278
+      bit: 3
+      type: bool
+      bytes: 1
+    Auto_Active:
+      offset: 278
+      bit: 4
+      type: bool
+      bytes: 1
+    Manual_q_f_Set:
+      offset: 280
+      type: real
+      bytes: 4
+    Manual_q_a_Set:
+      offset: 284
+      type: real
+      bytes: 4
+    Manual_q_n_Set:
+      offset: 288
+      type: real
+      bytes: 4
+    Manual_q_p_Set:
+      offset: 292
+      type: real
+      bytes: 4
+    Manual_q_k_Set:
+      offset: 296
+      type: real
+      bytes: 4
+    Comm_Normal:
+      offset: 300
+      bit: 0
+      type: bool
+      bytes: 1
+    Manual_PumpValve_Enable:
+      offset: 300
+      bit: 1
+      type: bool
+      bytes: 1
+    Manual_q_f_Selected:
+      offset: 304
+      type: real
+      bytes: 4
+    Manual_q_a_Selected:
+      offset: 308
+      type: real
+      bytes: 4
+
     # PLC/PLCSIM 写回 Python 的执行结果与状态
     Remote_Comms_OK:
       offset: 20

@@ -17,6 +17,7 @@ import subprocess
 import sys
 from datetime import datetime
 from config_loader import load_config
+from sac_model_registry import get_stage_model_path
 from weather_client import get_et0_rain
 from plot_style import (
     apply_academic_style, style_axis, set_ylim_tight,
@@ -123,7 +124,7 @@ def run_simulation(model_type: str = "none", mode: str = "1",
         obs, _ = env.reset()
 
         from stable_baselines3 import SAC as RLModel
-        model_path = "rl_models/sac_mid_final"
+        model_path = str(get_stage_model_path("mid"))
 
         if os.path.exists(model_path + ".zip"):
             model = RLModel.load(model_path)
@@ -604,3 +605,4 @@ if __name__ == '__main__':
             input("\n按 Enter 键返回菜单...")
         except KeyboardInterrupt:
             logger.info("\n再见！")
+

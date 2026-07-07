@@ -1,0 +1,85 @@
+{
+  "checked_at": "2026-07-06",
+  "project_path": "D:\\dw_plc\\xiaweiji\\xiaweiji.ap21",
+  "project_name": "xiaweiji",
+  "plc_software": "PLC_1",
+  "openness_status": "attached_to_open_project",
+  "compile": {
+    "state": "Success",
+    "errors": 0,
+    "warnings": 0,
+    "messages": [
+      {
+        "state": "Success",
+        "description": "Compiling finished (errors: 0; warnings: 0)"
+      }
+    ]
+  },
+  "blocks": [
+    {
+      "name": "Main",
+      "type": "OB",
+      "number": 1,
+      "language": "LAD"
+    },
+    {
+      "name": "FB_CommsWatchdog_LAD",
+      "type": "FB",
+      "number": 3,
+      "language": "LAD"
+    },
+    {
+      "name": "RateLimiter",
+      "type": "FB",
+      "number": 1,
+      "language": "SCL"
+    },
+    {
+      "name": "inst_RL_A",
+      "type": "InstanceDB",
+      "number": 3,
+      "language": "DB"
+    },
+    {
+      "name": "inst_RL_F",
+      "type": "InstanceDB",
+      "number": 2,
+      "language": "DB"
+    },
+    {
+      "name": "DB1",
+      "type": "GlobalDB",
+      "number": 1,
+      "language": "DB"
+    },
+    {
+      "name": "FB_FertigationControl",
+      "type": "FB",
+      "number": 2,
+      "language": "SCL"
+    },
+    {
+      "name": "inst_FertigationControl",
+      "type": "InstanceDB",
+      "number": 4,
+      "language": "DB"
+    },
+    {
+      "name": "FC_CallFertigationControl",
+      "type": "FC",
+      "number": 1,
+      "language": "SCL"
+    }
+  ],
+  "external_sources": [
+    "12.scl",
+    "xiaweiji_20260609_162145",
+    "xiaweiji"
+  ],
+  "scl_source": {
+    "primary": "D:\\dw_plc\\xiaweiji\\src\\xiaweiji.scl",
+    "digital_twin_mirror": "D:\\Digital Twin\\plc\\xiaweiji\\src\\xiaweiji.scl",
+    "sha256": "2D671C111A9924D8484AC5EB50C0C4D15480C8EB6E24BA09CE1D7485CECA5A41",
+    "mirror_matches_primary": true
+  }
+}

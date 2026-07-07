@@ -28,6 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config_loader import load_config
+from sac_model_registry import get_stage_model_path
 from crop_model import GrowthStage
 from digital_twin_env import DigitalTwinEnv
 from irrigation_schedule import normalize_obs
@@ -397,7 +398,7 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description="Run fixed-policy vs SAC offline simulation.")
     parser.add_argument("--stage", default="MID", choices=list(STAGE_MAP.keys()))
-    parser.add_argument("--model", default=str(ROOT / "rl_models" / "sac_mid_final"))
+    parser.add_argument("--model", default=str(get_stage_model_path("mid")))
     parser.add_argument("--duration-days", type=float, default=float(env_cfg.get("ep_len_days", 5.0)))
     parser.add_argument("--event-start-hour", type=float, default=8.0)
     parser.add_argument("--event-hours", type=float, default=2.0)

@@ -209,6 +209,27 @@ NON_RETAIN
       // 推荐范围 0.05~0.15；0.10 表示 EC 肥液输出允许 ±10% 修正。
       EC_Trim_Band : Real;
       pH_Trim_Band : Real;
+
+      // 试验台本地模式区。放在现有 Python 固定地址区之后，避免改变既有 offset。
+      Manual_Mode : Bool;       // TRUE=手动调试模式，绕过 EC/pH 自动闭环
+      Auto_Mode : Bool;         // TRUE=预留本地自动模式，当前自动仍由 SAC_Enable 驱动
+      Emergency_Stop : Bool;    // TRUE=急停，所有执行量立即归零
+      Manual_Active : Bool;     // PLC 当前处于手动输出
+      Auto_Active : Bool;       // PLC 当前处于自动闭环输出
+      Reserved_279 : Byte;      // 占位，使 Manual_q_* 从 DBD280 开始
+      Manual_q_f_Set : Real;    // 手动总肥液流量 L/min，限幅 0~10
+      Manual_q_a_Set : Real;    // 手动酸液流量 L/min，限幅 0~4
+      Manual_q_n_Set : Real;    // 手动氮肥通道 L/min，限幅 0~N_Max
+      Manual_q_p_Set : Real;    // 手动磷肥通道 L/min，限幅 0~P_Max
+      Manual_q_k_Set : Real;    // 手动钾肥通道 L/min，限幅 0~K_Max
+
+      // LAD 离散联锁与手动输出选择区。从 DBX300/DBD304 继续追加，不改变既有地址。
+      Comm_Normal : Bool;              // LAD 判断通信可用：Remote_Comms_OK 且未急停
+      Manual_PumpValve_Enable : Bool;  // LAD 手动泵阀使能：Manual_Active 且通信正常
+      Reserved_300 : Byte;             // 占位，使手动选择输出从 DBD304 开始
+      Reserved_301 : Word;             // 对齐占位
+      Manual_q_f_Selected : Real;      // LAD 选择后的手动肥液流量设定
+      Manual_q_a_Selected : Real;      // LAD 选择后的手动酸液流量设定
    END_STRUCT;
 
 
@@ -282,6 +303,22 @@ BEGIN
    K_Reserved := 0;
    EC_Trim_Band := 0.10;
    pH_Trim_Band := 0.08;
+   Manual_Mode := false;
+   Auto_Mode := true;
+   Emergency_Stop := false;
+   Manual_Active := false;
+   Auto_Active := false;
+   Manual_q_f_Set := 0.0;
+   Manual_q_a_Set := 0.0;
+   Manual_q_n_Set := 0.0;
+   Manual_q_p_Set := 0.0;
+   Manual_q_k_Set := 0.0;
+   Comm_Normal := false;
+   Manual_PumpValve_Enable := false;
+   Reserved_300 := 0;
+   Reserved_301 := 0;
+   Manual_q_f_Selected := 0.0;
+   Manual_q_a_Selected := 0.0;
 
 END_DATA_BLOCK
 
@@ -1018,10 +1055,158 @@ END_DATA_BLOCK
 FUNCTION "FC_CallFertigationControl" : Void
 { S7_Optimized_Access := 'TRUE' }
 VERSION : 0.1
+   VAR_TEMP
+      Manual_q_f_target : Real;
+      Manual_q_a_target : Real;
+      Manual_q_n_target : Real;
+      Manual_q_p_target : Real;
+      Manual_q_k_target : Real;
+   END_VAR
 
 BEGIN
    // 在 OB1 中调用本 FC，即可完成：
    // DB1 输入区 -> FB_FertigationControl -> DB1 输出区。
+   // 优先级：急停 > 手动模式 > 自动闭环。
+   // 开关量模式联锁、报警灯和 q_f/q_a 手动选择由 LAD 块完成。
+   // 连续量限幅、斜坡、模拟量换算和自动控制算法保留在 SCL。
+
+   "FC_ModeInterlock_LAD"();
+
+   IF "DB1".Emergency_Stop THEN
+      "DB1".q_f_cmd := 0.0;
+      "DB1".q_a_cmd := 0.0;
+      "DB1".q_n_cmd := 0.0;
+      "DB1".q_p_cmd := 0.0;
+      "DB1".q_k_cmd := 0.0;
+      "DB1".Valve_F_Actual := 0.0;
+      "DB1".Valve_A_Actual := 0.0;
+      "DB1".AQ_Valve_F_Raw := 0;
+      "DB1".AQ_Valve_A_Raw := 0;
+      "DB1".AQ_Valve_N_Raw := 0;
+      "DB1".AQ_Valve_P_Raw := 0;
+      "DB1".AQ_Valve_K_Raw := 0;
+      "DB1".Actual_Valve_F := 0.0;
+      "DB1".Actual_Valve_A := 0.0;
+      "DB1".Valve_F_Opt_SP := 0.0;
+      "DB1".Valve_A_Opt_SP := 0.0;
+      "DB1".Ramp_Target_F := 0.0;
+      "DB1".Ramp_Target_A := 0.0;
+      RETURN;
+   END_IF;
+
+   IF "DB1".Manual_PumpValve_Enable THEN
+      #Manual_q_f_target := "DB1".Manual_q_f_Selected;
+      IF #Manual_q_f_target < 0.0 THEN
+         #Manual_q_f_target := 0.0;
+      ELSIF #Manual_q_f_target > 10.0 THEN
+         #Manual_q_f_target := 10.0;
+      END_IF;
+
+      #Manual_q_a_target := "DB1".Manual_q_a_Selected;
+      IF #Manual_q_a_target < 0.0 THEN
+         #Manual_q_a_target := 0.0;
+      ELSIF #Manual_q_a_target > 4.0 THEN
+         #Manual_q_a_target := 4.0;
+      END_IF;
+
+      #Manual_q_n_target := "DB1".Manual_q_n_Set;
+      IF #Manual_q_n_target < 0.0 THEN
+         #Manual_q_n_target := 0.0;
+      ELSIF #Manual_q_n_target > "DB1".N_Max THEN
+         #Manual_q_n_target := "DB1".N_Max;
+      END_IF;
+
+      #Manual_q_p_target := "DB1".Manual_q_p_Set;
+      IF #Manual_q_p_target < 0.0 THEN
+         #Manual_q_p_target := 0.0;
+      ELSIF #Manual_q_p_target > "DB1".P_Max THEN
+         #Manual_q_p_target := "DB1".P_Max;
+      END_IF;
+
+      #Manual_q_k_target := "DB1".Manual_q_k_Set;
+      IF #Manual_q_k_target < 0.0 THEN
+         #Manual_q_k_target := 0.0;
+      ELSIF #Manual_q_k_target > "DB1".K_Max THEN
+         #Manual_q_k_target := "DB1".K_Max;
+      END_IF;
+
+      "inst_RL_F"(
+         target := #Manual_q_f_target,
+         maxRateUp := 1.5,
+         maxRateDown := 2.0,
+         cycleTime := 0.1,
+         enable := TRUE,
+         reset := FALSE,
+         output => "DB1".q_f_cmd,
+         isLimited => "DB1".q_f_limited
+      );
+
+      "inst_RL_A"(
+         target := #Manual_q_a_target,
+         maxRateUp := 0.40,
+         maxRateDown := 0.45,
+         cycleTime := 0.1,
+         enable := TRUE,
+         reset := FALSE,
+         output => "DB1".q_a_cmd,
+         isLimited => "DB1".q_a_limited
+      );
+
+      "DB1".q_n_cmd := #Manual_q_n_target;
+      "DB1".q_p_cmd := #Manual_q_p_target;
+      "DB1".q_k_cmd := #Manual_q_k_target;
+      "DB1".q_f_raw := "DB1".q_f_cmd;
+      "DB1".q_a_raw := "DB1".q_a_cmd;
+      "DB1".Valve_F_Actual := "DB1".q_f_cmd;
+      "DB1".Valve_A_Actual := "DB1".q_a_cmd;
+      "DB1".AQ_Valve_F_Raw := REAL_TO_INT("DB1".q_f_cmd / 10.0 * 27648.0);
+      "DB1".AQ_Valve_A_Raw := REAL_TO_INT("DB1".q_a_cmd / 4.0 * 27648.0);
+      IF "DB1".N_Max > 0.0 THEN
+         "DB1".AQ_Valve_N_Raw := REAL_TO_INT("DB1".q_n_cmd / "DB1".N_Max * 27648.0);
+      ELSE
+         "DB1".AQ_Valve_N_Raw := 0;
+      END_IF;
+      IF "DB1".P_Max > 0.0 THEN
+         "DB1".AQ_Valve_P_Raw := REAL_TO_INT("DB1".q_p_cmd / "DB1".P_Max * 27648.0);
+      ELSE
+         "DB1".AQ_Valve_P_Raw := 0;
+      END_IF;
+      IF "DB1".K_Max > 0.0 THEN
+         "DB1".AQ_Valve_K_Raw := REAL_TO_INT("DB1".q_k_cmd / "DB1".K_Max * 27648.0);
+      ELSE
+         "DB1".AQ_Valve_K_Raw := 0;
+      END_IF;
+      "DB1".Actual_Valve_F := "DB1".Valve_F_Actual;
+      "DB1".Actual_Valve_A := "DB1".Valve_A_Actual;
+      "DB1".Valve_F_Opt_SP := "DB1".q_f_cmd;
+      "DB1".Valve_A_Opt_SP := "DB1".q_a_cmd;
+      "DB1".Ramp_Target_F := "DB1".q_f_cmd;
+      "DB1".Ramp_Target_A := "DB1".q_a_cmd;
+      RETURN;
+   END_IF;
+
+   IF NOT "DB1".Auto_Active THEN
+      "DB1".q_f_cmd := 0.0;
+      "DB1".q_a_cmd := 0.0;
+      "DB1".q_n_cmd := 0.0;
+      "DB1".q_p_cmd := 0.0;
+      "DB1".q_k_cmd := 0.0;
+      "DB1".Valve_F_Actual := 0.0;
+      "DB1".Valve_A_Actual := 0.0;
+      "DB1".AQ_Valve_F_Raw := 0;
+      "DB1".AQ_Valve_A_Raw := 0;
+      "DB1".AQ_Valve_N_Raw := 0;
+      "DB1".AQ_Valve_P_Raw := 0;
+      "DB1".AQ_Valve_K_Raw := 0;
+      "DB1".Actual_Valve_F := 0.0;
+      "DB1".Actual_Valve_A := 0.0;
+      "DB1".Valve_F_Opt_SP := 0.0;
+      "DB1".Valve_A_Opt_SP := 0.0;
+      "DB1".Ramp_Target_F := 0.0;
+      "DB1".Ramp_Target_A := 0.0;
+      RETURN;
+   END_IF;
+
    IF "DB1".Stage_Auto_SP_Enable AND NOT "DB1".SAC_Enable THEN
       IF "DB1".Growth_Stage = 0 THEN
          "DB1".EC_Set_SP := 0.8;
@@ -1108,8 +1293,7 @@ BEGIN
       q_k_cmd => "DB1".q_k_cmd,
       AQ_Valve_N_Raw => "DB1".AQ_Valve_N_Raw,
       AQ_Valve_P_Raw => "DB1".AQ_Valve_P_Raw,
-      AQ_Valve_K_Raw => "DB1".AQ_Valve_K_Raw,
-      System_Alarm_Light => "DB1".System_Alarm_Light
+      AQ_Valve_K_Raw => "DB1".AQ_Valve_K_Raw
    );
 
    // 同步部分内部状态到 DB1，方便在线监控。

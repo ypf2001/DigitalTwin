@@ -16,6 +16,7 @@ import numpy as np
 import yaml
 
 from config_loader import load_config, reload_config
+from sac_model_registry import get_stage_model_path
 
 STAGE_MAP = {"ini": "INI", "dev": "DEV", "mid": "MID", "late": "LATE"}
 
@@ -257,7 +258,7 @@ def run_simulation(mode: str, stage_key: str, use_weather: bool):
         env = DigitalTwinGymEnv(growth_stage="MID", area_ha=0.1, dt_min=60.0, ep_len_days=5.0, et0_mm_day=et0_val)
         obs, _ = env.reset()
         from stable_baselines3 import SAC
-        mp = os.path.join(_get_project_root(), "rl_models", "sac_mid_final")
+        mp = str(get_stage_model_path(stage_key))
         if os.path.exists(mp + ".zip"):
             model = SAC.load(mp)
         else:
@@ -546,17 +547,19 @@ def get_model_info(query_cloud: bool = False):
     models_dir = _get_rl_models_dir()
     os.makedirs(models_dir, exist_ok=True)
     models = []
-    for fname in sorted(os.listdir(models_dir)):
-        meta = _parse_model_name(fname)
-        if not meta:
-            continue
-        path = os.path.join(models_dir, fname)
-        st = os.stat(path)
-        meta.update({
-            "size_mb": round(st.st_size / (1024 * 1024), 2),
-            "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)),
-        })
-        models.append(meta)
+    for dirpath, _dirnames, filenames in os.walk(models_dir):
+        for fname in sorted(filenames):
+            meta = _parse_model_name(fname)
+            if not meta:
+                continue
+            path = os.path.join(dirpath, fname)
+            st = os.stat(path)
+            meta.update({
+                "size_mb": round(st.st_size / (1024 * 1024), 2),
+                "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)),
+                "relative_path": os.path.relpath(path, models_dir).replace(os.sep, "/"),
+            })
+            models.append(meta)
     return {"models": models, "models_dir": models_dir}
 
 
@@ -621,3 +624,4 @@ def clear_training_progress():
         except Exception:
             pass
     return {"success": True}
+
