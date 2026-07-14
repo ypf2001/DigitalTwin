@@ -117,18 +117,25 @@ class PLCGymEnv(gym.Env):
         obs, _ = self._sim_env.reset(seed=seed, options=options)
         base = self._sim_env.unwrapped_env
         base.soil.ec_soil = 0.78
+        # reset() populated the observation history before the PLC/HIL-specific
+        # EC override. Rebuild that history so the returned first observation
+        # and the PLC feedback both start from the same physical state.
+        base._ec_soil_history.clear()
+        for _ in range(base.history_len):
+            base._ec_soil_history.append(float(base.soil.ec_soil))
+        obs = self._sim_env._normalize_obs(base._get_obs())
         self._root_ec_est = float(base.soil.ec_soil)
         self._soil_ph_est = 6.25
         self._npk_actual = self._npk_targets_for_stage("INI").copy()
         self._reset_feedback_filter(ec_actual=self._root_ec_est, ph_actual=self._soil_ph_est)
 
         if self.plc_enabled:
-            self._safe_write_setpoints(
+            self._sync_plc_inputs(
                 ec_set=0.8,
                 ph_set=7.0,
                 ec_actual=self._root_ec_est,
                 ph_actual=self._soil_ph_est,
-                sac_enable=False,
+                automatic_enable=False,
             )
             time.sleep(self.plc.cycle_s)
             plc_state = self.plc.read_state()
@@ -166,14 +173,9 @@ class PLCGymEnv(gym.Env):
         # EC target tracking is evaluated on root-zone soil EC, so feed the PLC
         # the same controlled variable instead of the pipe outlet EC.
         ec_actual = float(self._root_ec_est)
-        # In compressed full-season simulation, raw root-zone EC can jump much
-        # faster than a real sensor/soil volume. Keep the PLC feedback close to
-        # the controlled setpoint so the PLC trims around feedforward instead of
-        # repeatedly entering the hard fertilizer-cut protection branch.
-        ec_actual = min(ec_actual, ec_set + 0.025)
         ph_actual = float(self._soil_ph_est)
         ec_actual, ph_actual = self._filter_feedback(ec_actual, ph_actual)
-        self._safe_write_setpoints(ec_set, ph_set, ec_actual, ph_actual, sac_enable=True)
+        self._sync_plc_inputs(ec_set, ph_set, ec_actual, ph_actual)
         npk_targets_for_plc = self._npk_targets_for_stage(base.current_stage)
         self.plc.write_fertilizer_feedback(
             npk_targets_for_plc["N"],
@@ -182,6 +184,7 @@ class PLCGymEnv(gym.Env):
             self._npk_actual["N"],
             self._npk_actual["P"],
             self._npk_actual["K"],
+            feedback_valid=True,
         )
 
         # 2. 等待 PLC/PLCSIM 扫描周期和 PID 执行
@@ -411,7 +414,12 @@ class PLCGymEnv(gym.Env):
             uptake = 0.0045 * dt_hours * (0.6 + 0.4 * targets[key])
             leaching = 0.0060 * dt_hours * wetting * max(value - 0.25, 0.0)
             dosing = 0.0042 * flows[key] * dt_hours
-            buffer_pull = 0.030 * dt_hours * (targets[key] - value)
+            # The compressed HIL model advances several physical hours per PLC
+            # scan. Use a stronger root-zone buffering term so the normalized
+            # stage recipe represents a maintainable concentration instead of
+            # letting uptake/leaching create a permanent common-mode deficit
+            # that cannot be corrected inside the fixed EC fertilizer budget.
+            buffer_pull = 0.070 * dt_hours * (targets[key] - value)
             raw_next = value + dosing + buffer_pull - uptake - leaching
             max_delta = 0.030 + 0.006 * min(dt_hours, 12.0)
             raw_next = float(np.clip(raw_next, value - max_delta, value + max_delta))
@@ -423,7 +431,10 @@ class PLCGymEnv(gym.Env):
 
     def close(self):
         if self.plc_enabled:
-            self._safe_write_setpoints(0.8, 7.0, 0.0, 7.0, sac_enable=False)
+            self._sync_plc_inputs(0.8, 7.0, 0.0, 7.0, automatic_enable=False)
+            # Restore real-device defaults even after an interrupted compressed test.
+            self.plc.write_fertilizer_feedback(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, feedback_valid=False)
+            self.plc.write_compressed_hil_mode(False)
             self.plc.disconnect()
         self._sim_env.close()
 
@@ -455,6 +466,45 @@ class PLCGymEnv(gym.Env):
         except Exception as e:
             logger.error(f"[HIL] PLC 目标值写入异常: {e}")
             return False
+
+    def _safe_write_feedback(self,
+                             ec_actual: float,
+                             ph_actual: float,
+                             sac_enable: bool) -> bool:
+        if not self.plc_enabled:
+            return True
+        try:
+            return self.plc.write_feedback(ec_actual, ph_actual, sac_enable=sac_enable)
+        except Exception as e:
+            logger.error(f"[HIL] PLC feedback write failed: {e}")
+            return False
+
+    def _sync_plc_inputs(self,
+                         ec_set: float,
+                         ph_set: float,
+                         ec_actual: float,
+                         ph_actual: float,
+                         automatic_enable: bool = True) -> bool:
+        """Synchronize one cycle without fighting PLC local manual mode."""
+        mode_state = self.plc.read_control_mode()
+        if mode_state is not None:
+            self._last_plc_state.update(mode_state)
+
+        if bool(self._last_plc_state.get("Manual_Active", False)):
+            logger.info("[HIL] local manual active: automatic targets paused")
+            return self._safe_write_feedback(
+                ec_actual=ec_actual,
+                ph_actual=ph_actual,
+                sac_enable=False,
+            )
+
+        return self._safe_write_setpoints(
+            ec_set=ec_set,
+            ph_set=ph_set,
+            ec_actual=ec_actual,
+            ph_actual=ph_actual,
+            sac_enable=automatic_enable,
+        )
 
     def _reset_feedback_filter(self, ec_actual: float, ph_actual: float):
         """Initialize the EC/pH feedback filter at the start of an HIL episode."""

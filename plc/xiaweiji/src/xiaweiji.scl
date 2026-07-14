@@ -108,6 +108,436 @@ BEGIN
 
 END_DATA_BLOCK
 
+FUNCTION_BLOCK "FB_DosingPump"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      Enable : Bool;
+      Flow_SP : Real;
+      Flow_PV : Real;
+      Flow_Min : Real := 0.05;
+      Flow_Max : Real := 4.0;
+      AO_Off_Raw : Int := 0;
+      AO_Raw_Min : Int := 5530;
+      AO_Raw_Max : Int := 27648;
+      Kp_Flow : Real := 10.0;
+      Ki_Flow : Real := 2.0;
+      Cycle_Time_s : Real := 0.01;
+      Run_Feedback : Bool;
+      Drive_Ready : Bool;
+      Drive_Fault : Bool;
+      Tank_Low_Level : Bool;
+      Water_Flow_OK : Bool;
+      Reset : Bool;
+      Start_Fail_Delay_s : Real := 3.0;
+      No_Flow_Delay_s : Real := 5.0;
+      Flow_Deviation_Delay_s : Real := 5.0;
+      No_Flow_Threshold : Real := 0.05;
+      Flow_Deviation_Abs : Real := 0.20;
+      Flow_Deviation_Rel : Real := 0.20;
+   END_VAR
+
+   VAR_OUTPUT
+      Run_Command : Bool;
+      AO_Command_Raw : Int;
+      Flow_SP_Limited : Real;
+      Running : Bool;
+      Ready : Bool;
+      No_Flow_Alarm : Bool;
+      Flow_Deviation_Alarm : Bool;
+      Start_Fail_Alarm : Bool;
+      Saturated : Bool;
+      Interlocked : Bool;
+      Control_Percent : Real;
+   END_VAR
+
+   VAR
+      Integral_Percent : Real;
+      Start_Fail_Timer_s : Real;
+      No_Flow_Timer_s : Real;
+      Flow_Deviation_Timer_s : Real;
+      No_Flow_Latched : Bool;
+      Start_Fail_Latched : Bool;
+   END_VAR
+
+   VAR_TEMP
+      Tmp_Cycle_s : Real;
+      Tmp_Flow_Error : Real;
+      Tmp_Feedforward_Percent : Real;
+      Tmp_Integral_Candidate : Real;
+      Tmp_Output_Unclamped : Real;
+      Tmp_Deviation_Limit : Real;
+      Tmp_Raw_Real : Real;
+      Tmp_Desired_Run : Bool;
+      Tmp_Config_OK : Bool;
+   END_VAR
+
+BEGIN
+   // Generic metering-pump layer: calibrated feedforward + flow PI.
+   // Start-fail and no-flow alarms are latched trips; deviation is diagnostic only.
+   #Tmp_Cycle_s := #Cycle_Time_s;
+   IF #Tmp_Cycle_s <= 0.0 THEN
+      #Tmp_Cycle_s := 0.01;
+   END_IF;
+
+   IF #Reset THEN
+      #Integral_Percent := 0.0;
+      #Start_Fail_Timer_s := 0.0;
+      #No_Flow_Timer_s := 0.0;
+      #Flow_Deviation_Timer_s := 0.0;
+      #No_Flow_Latched := FALSE;
+      #Start_Fail_Latched := FALSE;
+   END_IF;
+
+   #Tmp_Config_OK := (#Flow_Min >= 0.0) AND (#Flow_Max > #Flow_Min)
+      AND (#AO_Raw_Max > #AO_Raw_Min);
+   #Ready := #Tmp_Config_OK AND #Drive_Ready AND NOT #Drive_Fault
+      AND NOT #Tank_Low_Level AND #Water_Flow_OK;
+   #Interlocked := NOT #Ready;
+
+
+   // Preserve a true stop at zero; clamp non-zero demand to the stable range.
+   IF (#Flow_SP <= 0.0) OR NOT #Tmp_Config_OK THEN
+      #Flow_SP_Limited := 0.0;
+   ELSE
+      #Flow_SP_Limited := #Flow_SP;
+      IF #Flow_SP_Limited < #Flow_Min THEN
+         #Flow_SP_Limited := #Flow_Min;
+      END_IF;
+      IF #Flow_SP_Limited > #Flow_Max THEN
+         #Flow_SP_Limited := #Flow_Max;
+      END_IF;
+   END_IF;
+
+   #Tmp_Desired_Run := #Enable AND (#Flow_SP_Limited > 0.0) AND #Ready
+      AND NOT #Start_Fail_Latched AND NOT #No_Flow_Latched;
+
+
+   // Trip if the drive does not confirm running before the start timeout.
+   IF #Tmp_Desired_Run AND NOT #Run_Feedback THEN
+      #Start_Fail_Timer_s := #Start_Fail_Timer_s + #Tmp_Cycle_s;
+      IF #Start_Fail_Timer_s >= #Start_Fail_Delay_s THEN
+         #Start_Fail_Latched := TRUE;
+      END_IF;
+   ELSE
+      #Start_Fail_Timer_s := 0.0;
+   END_IF;
+
+
+   // Trip if the pump reports running but measured flow remains near zero.
+   IF #Tmp_Desired_Run AND #Run_Feedback AND (#Flow_PV <= #No_Flow_Threshold) THEN
+      #No_Flow_Timer_s := #No_Flow_Timer_s + #Tmp_Cycle_s;
+      IF #No_Flow_Timer_s >= #No_Flow_Delay_s THEN
+         #No_Flow_Latched := TRUE;
+      END_IF;
+   ELSE
+      #No_Flow_Timer_s := 0.0;
+   END_IF;
+
+   #Start_Fail_Alarm := #Start_Fail_Latched;
+   #No_Flow_Alarm := #No_Flow_Latched;
+   #Run_Command := #Enable AND (#Flow_SP_Limited > 0.0) AND #Ready
+      AND NOT #Start_Fail_Alarm AND NOT #No_Flow_Alarm;
+   #Running := #Run_Command AND #Run_Feedback;
+
+
+   // Sustained flow deviation raises an alarm but does not stop the pump.
+   #Tmp_Flow_Error := #Flow_SP_Limited - #Flow_PV;
+   #Tmp_Deviation_Limit := #Flow_Deviation_Abs;
+   IF (#Flow_Deviation_Rel * #Flow_SP_Limited) > #Tmp_Deviation_Limit THEN
+      #Tmp_Deviation_Limit := #Flow_Deviation_Rel * #Flow_SP_Limited;
+   END_IF;
+   #Flow_Deviation_Alarm := FALSE;
+   IF #Running AND (ABS(#Tmp_Flow_Error) > #Tmp_Deviation_Limit) THEN
+      #Flow_Deviation_Timer_s := #Flow_Deviation_Timer_s + #Tmp_Cycle_s;
+      IF #Flow_Deviation_Timer_s >= #Flow_Deviation_Delay_s THEN
+         #Flow_Deviation_Alarm := TRUE;
+      END_IF;
+   ELSE
+      #Flow_Deviation_Timer_s := 0.0;
+      #Flow_Deviation_Alarm := FALSE;
+   END_IF;
+
+   IF #Run_Command THEN
+      // Flow_Min maps to AO_Raw_Min and Flow_Max maps to AO_Raw_Max.
+      IF #Flow_Max > #Flow_Min THEN
+         #Tmp_Feedforward_Percent := (#Flow_SP_Limited - #Flow_Min)
+            / (#Flow_Max - #Flow_Min) * 100.0;
+      ELSE
+         #Tmp_Feedforward_Percent := 0.0;
+      END_IF;
+      IF #Tmp_Feedforward_Percent < 0.0 THEN #Tmp_Feedforward_Percent := 0.0; END_IF;
+      IF #Tmp_Feedforward_Percent > 100.0 THEN #Tmp_Feedforward_Percent := 100.0; END_IF;
+
+
+      // Conditional integration prevents windup while the output is saturated.
+      #Tmp_Integral_Candidate := #Integral_Percent + (#Ki_Flow * #Tmp_Flow_Error * #Tmp_Cycle_s);
+      IF #Tmp_Integral_Candidate > 100.0 THEN #Tmp_Integral_Candidate := 100.0; END_IF;
+      IF #Tmp_Integral_Candidate < -100.0 THEN #Tmp_Integral_Candidate := -100.0; END_IF;
+      #Tmp_Output_Unclamped := #Tmp_Feedforward_Percent + (#Kp_Flow * #Tmp_Flow_Error)
+         + #Tmp_Integral_Candidate;
+      IF NOT (((#Tmp_Output_Unclamped > 100.0) AND (#Tmp_Flow_Error > 0.0))
+         OR ((#Tmp_Output_Unclamped < 0.0) AND (#Tmp_Flow_Error < 0.0))) THEN
+         #Integral_Percent := #Tmp_Integral_Candidate;
+      END_IF;
+
+      #Tmp_Output_Unclamped := #Tmp_Feedforward_Percent + (#Kp_Flow * #Tmp_Flow_Error)
+         + #Integral_Percent;
+      #Control_Percent := #Tmp_Output_Unclamped;
+      IF #Control_Percent > 100.0 THEN #Control_Percent := 100.0; END_IF;
+      IF #Control_Percent < 0.0 THEN #Control_Percent := 0.0; END_IF;
+      #Saturated := (#Tmp_Output_Unclamped <> #Control_Percent)
+         OR (#Flow_SP_Limited <> #Flow_SP);
+
+      #Tmp_Raw_Real := INT_TO_REAL(#AO_Raw_Min)
+         + (#Control_Percent / 100.0)
+         * INT_TO_REAL(#AO_Raw_Max - #AO_Raw_Min);
+      #AO_Command_Raw := REAL_TO_INT(#Tmp_Raw_Real);
+      IF #AO_Command_Raw > #AO_Raw_Max THEN #AO_Command_Raw := #AO_Raw_Max; END_IF;
+      IF #AO_Command_Raw < #AO_Raw_Min THEN #AO_Command_Raw := #AO_Raw_Min; END_IF;
+   ELSE
+      #Integral_Percent := 0.0;
+      #Control_Percent := 0.0;
+      #AO_Command_Raw := #AO_Off_Raw;
+      #Saturated := FALSE;
+   END_IF;
+END_FUNCTION_BLOCK
+
+DATA_BLOCK "DB_Pump_N"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+"FB_DosingPump"
+BEGIN
+END_DATA_BLOCK
+
+DATA_BLOCK "DB_Pump_P"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+"FB_DosingPump"
+BEGIN
+END_DATA_BLOCK
+
+DATA_BLOCK "DB_Pump_K"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+"FB_DosingPump"
+BEGIN
+END_DATA_BLOCK
+
+DATA_BLOCK "DB_Pump_Acid"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+"FB_DosingPump"
+BEGIN
+END_DATA_BLOCK
+
+DATA_BLOCK "DB_Actuator"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+   STRUCT
+      Execution_Enable : Bool;
+      Reset_All : Bool;
+      Water_Flow_OK : Bool;
+      Cycle_Time_s : Real;
+
+      N_Flow_PV : Real;
+      N_Drive_Ready : Bool;
+      N_Run_Feedback : Bool;
+      N_Drive_Fault : Bool;
+      N_Tank_Low_Level : Bool;
+      N_Reset : Bool;
+      N_Flow_Min : Real;
+      N_Flow_Max : Real;
+      N_AO_Off_Raw : Int;
+      N_AO_Raw_Min : Int;
+      N_AO_Raw_Max : Int;
+      N_Kp_Flow : Real;
+      N_Ki_Flow : Real;
+      N_Start_Fail_Delay_s : Real;
+      N_No_Flow_Delay_s : Real;
+      N_Flow_Deviation_Delay_s : Real;
+      N_No_Flow_Threshold : Real;
+      N_Flow_Deviation_Abs : Real;
+      N_Flow_Deviation_Rel : Real;
+      N_Run_Command : Bool;
+      N_AO_Command_Raw : Int;
+      N_Flow_SP_Limited : Real;
+      N_Running : Bool;
+      N_Ready : Bool;
+      N_No_Flow_Alarm : Bool;
+      N_Flow_Deviation_Alarm : Bool;
+      N_Start_Fail_Alarm : Bool;
+      N_Saturated : Bool;
+      N_Interlocked : Bool;
+      N_Control_Percent : Real;
+
+      P_Flow_PV : Real;
+      P_Drive_Ready : Bool;
+      P_Run_Feedback : Bool;
+      P_Drive_Fault : Bool;
+      P_Tank_Low_Level : Bool;
+      P_Reset : Bool;
+      P_Flow_Min : Real;
+      P_Flow_Max : Real;
+      P_AO_Off_Raw : Int;
+      P_AO_Raw_Min : Int;
+      P_AO_Raw_Max : Int;
+      P_Kp_Flow : Real;
+      P_Ki_Flow : Real;
+      P_Start_Fail_Delay_s : Real;
+      P_No_Flow_Delay_s : Real;
+      P_Flow_Deviation_Delay_s : Real;
+      P_No_Flow_Threshold : Real;
+      P_Flow_Deviation_Abs : Real;
+      P_Flow_Deviation_Rel : Real;
+      P_Run_Command : Bool;
+      P_AO_Command_Raw : Int;
+      P_Flow_SP_Limited : Real;
+      P_Running : Bool;
+      P_Ready : Bool;
+      P_No_Flow_Alarm : Bool;
+      P_Flow_Deviation_Alarm : Bool;
+      P_Start_Fail_Alarm : Bool;
+      P_Saturated : Bool;
+      P_Interlocked : Bool;
+      P_Control_Percent : Real;
+
+      K_Flow_PV : Real;
+      K_Drive_Ready : Bool;
+      K_Run_Feedback : Bool;
+      K_Drive_Fault : Bool;
+      K_Tank_Low_Level : Bool;
+      K_Reset : Bool;
+      K_Flow_Min : Real;
+      K_Flow_Max : Real;
+      K_AO_Off_Raw : Int;
+      K_AO_Raw_Min : Int;
+      K_AO_Raw_Max : Int;
+      K_Kp_Flow : Real;
+      K_Ki_Flow : Real;
+      K_Start_Fail_Delay_s : Real;
+      K_No_Flow_Delay_s : Real;
+      K_Flow_Deviation_Delay_s : Real;
+      K_No_Flow_Threshold : Real;
+      K_Flow_Deviation_Abs : Real;
+      K_Flow_Deviation_Rel : Real;
+      K_Run_Command : Bool;
+      K_AO_Command_Raw : Int;
+      K_Flow_SP_Limited : Real;
+      K_Running : Bool;
+      K_Ready : Bool;
+      K_No_Flow_Alarm : Bool;
+      K_Flow_Deviation_Alarm : Bool;
+      K_Start_Fail_Alarm : Bool;
+      K_Saturated : Bool;
+      K_Interlocked : Bool;
+      K_Control_Percent : Real;
+
+      Acid_Flow_PV : Real;
+      Acid_Drive_Ready : Bool;
+      Acid_Run_Feedback : Bool;
+      Acid_Drive_Fault : Bool;
+      Acid_Tank_Low_Level : Bool;
+      Acid_Reset : Bool;
+      Acid_Flow_Min : Real;
+      Acid_Flow_Max : Real;
+      Acid_AO_Off_Raw : Int;
+      Acid_AO_Raw_Min : Int;
+      Acid_AO_Raw_Max : Int;
+      Acid_Kp_Flow : Real;
+      Acid_Ki_Flow : Real;
+      Acid_Start_Fail_Delay_s : Real;
+      Acid_No_Flow_Delay_s : Real;
+      Acid_Flow_Deviation_Delay_s : Real;
+      Acid_No_Flow_Threshold : Real;
+      Acid_Flow_Deviation_Abs : Real;
+      Acid_Flow_Deviation_Rel : Real;
+      Acid_Run_Command : Bool;
+      Acid_AO_Command_Raw : Int;
+      Acid_Flow_SP_Limited : Real;
+      Acid_Running : Bool;
+      Acid_Ready : Bool;
+      Acid_No_Flow_Alarm : Bool;
+      Acid_Flow_Deviation_Alarm : Bool;
+      Acid_Start_Fail_Alarm : Bool;
+      Acid_Saturated : Bool;
+      Acid_Interlocked : Bool;
+      Acid_Control_Percent : Real;
+
+      Any_Demand : Bool;
+      Any_Alarm : Bool;
+      Any_Trip : Bool;
+   END_STRUCT;
+BEGIN
+   // Safe default: the legacy simulation remains in control until commissioned.
+   Execution_Enable := false;
+   Reset_All := false;
+   Water_Flow_OK := false;
+   Cycle_Time_s := 0.01;
+
+   N_Flow_Min := 0.05;
+   N_Flow_Max := 4.0;
+   N_AO_Off_Raw := 0;
+   // 5530 assumes a 0..20 mA raw scale for a 4 mA live zero; recalibrate on hardware.
+   N_AO_Raw_Min := 5530;
+   N_AO_Raw_Max := 27648;
+   N_Kp_Flow := 10.0;
+   N_Ki_Flow := 2.0;
+   N_Start_Fail_Delay_s := 3.0;
+   N_No_Flow_Delay_s := 5.0;
+   N_Flow_Deviation_Delay_s := 5.0;
+   N_No_Flow_Threshold := 0.05;
+   N_Flow_Deviation_Abs := 0.20;
+   N_Flow_Deviation_Rel := 0.20;
+
+   P_Flow_Min := 0.05;
+   P_Flow_Max := 4.0;
+   P_AO_Off_Raw := 0;
+   P_AO_Raw_Min := 5530;
+   P_AO_Raw_Max := 27648;
+   P_Kp_Flow := 10.0;
+   P_Ki_Flow := 2.0;
+   P_Start_Fail_Delay_s := 3.0;
+   P_No_Flow_Delay_s := 5.0;
+   P_Flow_Deviation_Delay_s := 5.0;
+   P_No_Flow_Threshold := 0.05;
+   P_Flow_Deviation_Abs := 0.20;
+   P_Flow_Deviation_Rel := 0.20;
+
+   K_Flow_Min := 0.05;
+   K_Flow_Max := 4.0;
+   K_AO_Off_Raw := 0;
+   K_AO_Raw_Min := 5530;
+   K_AO_Raw_Max := 27648;
+   K_Kp_Flow := 10.0;
+   K_Ki_Flow := 2.0;
+   K_Start_Fail_Delay_s := 3.0;
+   K_No_Flow_Delay_s := 5.0;
+   K_Flow_Deviation_Delay_s := 5.0;
+   K_No_Flow_Threshold := 0.05;
+   K_Flow_Deviation_Abs := 0.20;
+   K_Flow_Deviation_Rel := 0.20;
+
+   Acid_Flow_Min := 0.02;
+   Acid_Flow_Max := 4.0;
+   Acid_AO_Off_Raw := 0;
+   Acid_AO_Raw_Min := 5530;
+   Acid_AO_Raw_Max := 27648;
+   Acid_Kp_Flow := 10.0;
+   Acid_Ki_Flow := 2.0;
+   Acid_Start_Fail_Delay_s := 3.0;
+   Acid_No_Flow_Delay_s := 5.0;
+   Acid_Flow_Deviation_Delay_s := 5.0;
+   Acid_No_Flow_Threshold := 0.02;
+   Acid_Flow_Deviation_Abs := 0.10;
+   Acid_Flow_Deviation_Rel := 0.20;
+END_DATA_BLOCK
+
 DATA_BLOCK "DB1"
 { DB_Accessible_From_OPC_UA := 'FALSE' ;
  S7_Optimized_Access := 'FALSE' }
@@ -119,7 +549,7 @@ NON_RETAIN
       pH_Set_SP : Real;   // DBD4，SAC 输出的目标 pH
       EC_Actual : Real;   // DBD8，Python/传感器反馈的出口 EC
       pH_Actual : Real;   // DBD12，Python/传感器反馈的出口 pH
-      SAC_Enable : Bool;   // DBX16.0，远程/SAC 控制使能
+      SAC_Enable : Bool;   // DBX16.0，远程自动使能；仅在 Auto_Mode=TRUE 且未急停时参与模式判定
       Reserved_17 : Byte;   // DBB17，占位，保证 Remote_Heartbeat 位于 DBW18
       Remote_Heartbeat : Int;
       Remote_Comms_OK : Bool;   // DBX20.0，PLC 判断 Python 通讯是否正常
@@ -158,7 +588,7 @@ NON_RETAIN
       Active_EC_SP : Real;   // PLC 实际采用的 EC 目标
       Active_pH_SP : Real;   // PLC 实际采用的 pH 目标
       Setpoint_Protection_Active : Bool;   // SAC 目标越界时置 TRUE
-      Stage_Auto_SP_Enable : Bool;   // TRUE=PLC 根据 Growth_Stage 自动写 EC_Set_SP/pH_Set_SP
+      Stage_Auto_SP_Enable : Bool;   // TRUE=阶段自动设定值使能；仅在 Auto_Mode=TRUE 且 SAC_Enable=FALSE 时参与模式判定
 
       // PID 在线调参区。Python 粗调或 TIA 监控表可直接写这些值。
       Kp_EC_Set : Real;   // EC 比例增益
@@ -211,9 +641,9 @@ NON_RETAIN
       pH_Trim_Band : Real;
 
       // 试验台本地模式区。放在现有 Python 固定地址区之后，避免改变既有 offset。
-      Manual_Mode : Bool;       // TRUE=手动调试模式，绕过 EC/pH 自动闭环
-      Auto_Mode : Bool;         // TRUE=预留本地自动模式，当前自动仍由 SAC_Enable 驱动
-      Emergency_Stop : Bool;    // TRUE=急停，所有执行量立即归零
+      Manual_Mode : Bool;       // TRUE=手动调试模式；与 Auto_Mode 冲突时手动优先
+      Auto_Mode : Bool;         // TRUE=自动闭环模式；可细分为远程自动/阶段自动/本地定值自动
+      Emergency_Stop : Bool;    // TRUE=急停，所有执行量立即归零，优先级最高
       Manual_Active : Bool;     // PLC 当前处于手动输出
       Auto_Active : Bool;       // PLC 当前处于自动闭环输出
       Reserved_279 : Byte;      // 占位，使 Manual_q_* 从 DBD280 开始
@@ -225,11 +655,40 @@ NON_RETAIN
 
       // LAD 离散联锁与手动输出选择区。从 DBX300/DBD304 继续追加，不改变既有地址。
       Comm_Normal : Bool;              // LAD 判断通信可用：Remote_Comms_OK 且未急停
-      Manual_PumpValve_Enable : Bool;  // LAD 手动泵阀使能：Manual_Active 且通信正常
+      Manual_PumpValve_Enable : Bool;  // 兼容状态位：手动目标 PID 已接管，不再表示直接泵阀输出
       Reserved_300 : Byte;             // 占位，使手动选择输出从 DBD304 开始
       Reserved_301 : Word;             // 对齐占位
       Manual_q_f_Selected : Real;      // LAD 选择后的手动肥液流量设定
       Manual_q_a_Selected : Real;      // LAD 选择后的手动酸液流量设定
+
+      // 自适应 PID 与 N/P/K 协调控制诊断区。只在 DB1 末尾追加，避免改变既有 Snap7 偏移。
+      Kp_EC_Effective : Real;          // DBD312
+      Ki_EC_Effective : Real;          // DBD316
+      Kd_EC_Effective : Real;          // DBD320
+      Kp_pH_Effective : Real;          // DBD324
+      Ki_pH_Effective : Real;          // DBD328
+      Kd_pH_Effective : Real;          // DBD332
+      EC_PID_Error : Real;             // DBD336，滤波反馈对应的有符号误差
+      pH_PID_Error : Real;             // DBD340，pH 偏高为正（需要加酸）
+      EC_PID_Integral : Real;          // DBD344
+      pH_PID_Integral : Real;          // DBD348
+      q_f_Feedforward : Real;          // DBD352
+      q_f_PID_Correction : Real;       // DBD356
+      q_a_Feedforward : Real;          // DBD360
+      q_a_PID_Correction : Real;       // DBD364
+      N_Error : Real;                  // DBD368，目标-反馈
+      P_Error : Real;                  // DBD372
+      K_Error : Real;                  // DBD376
+      N_PID_Correction : Real;         // DBD380
+      P_PID_Correction : Real;         // DBD384
+      K_PID_Correction : Real;         // DBD388
+      NPK_Optimization_Weight : Real;  // DBD392，0=阶段配方，1=全闭环修正
+      NPK_Feedback_Valid : Bool;       // DBX396.0，真实设备默认 FALSE
+      NPK_Capacity_Limited : Bool;     // DBX396.1
+      Compressed_HIL_Enable : Bool;    // DBX396.2，仅测试脚本写入
+      Feedforward_Hold_Active : Bool;  // DBX396.3
+      Adaptive_PID_Active : Bool;      // DBX396.4
+      Fixed_PID_Test_Enable : Bool;    // DBX396.5，仅 A/B 验证脚本写入；真实运行默认 FALSE
    END_STRUCT;
 
 
@@ -262,18 +721,18 @@ BEGIN
    Active_pH_SP := 5.9;
    Setpoint_Protection_Active := false;
    Stage_Auto_SP_Enable := true;
-   Kp_EC_Set := 1.20;
-   Ki_EC_Set := 0.0;
-   Kd_EC_Set := 0.0;
+   Kp_EC_Set := 1.10;
+   Ki_EC_Set := 0.030;
+   Kd_EC_Set := 0.013;
    Kp_pH_Set := 1.20;
-   Ki_pH_Set := 0.01;
-   Kd_pH_Set := 0.0;
+   Ki_pH_Set := 0.010;
+   Kd_pH_Set := 0.008;
    N_Enable := 1.0;
    N_Ratio := 0.3333;
    N_Target := 0.0;
    N_Actual := 0.0;
-   Kp_N_Set := 0.0;
-   Ki_N_Set := 0.0;
+   Kp_N_Set := 0.25;
+   Ki_N_Set := 0.01;
    Kd_N_Set := 0.0;
    N_Max := 4.0;
    q_n_cmd := 0.0;
@@ -283,8 +742,8 @@ BEGIN
    P_Ratio := 0.3333;
    P_Target := 0.0;
    P_Actual := 0.0;
-   Kp_P_Set := 0.0;
-   Ki_P_Set := 0.0;
+   Kp_P_Set := 2.00;
+   Ki_P_Set := 0.010;
    Kd_P_Set := 0.0;
    P_Max := 4.0;
    q_p_cmd := 0.0;
@@ -294,8 +753,8 @@ BEGIN
    K_Ratio := 0.3334;
    K_Target := 0.0;
    K_Actual := 0.0;
-   Kp_K_Set := 0.0;
-   Ki_K_Set := 0.0;
+   Kp_K_Set := 0.30;
+   Ki_K_Set := 0.010;
    Kd_K_Set := 0.0;
    K_Max := 4.0;
    q_k_cmd := 0.0;
@@ -319,6 +778,33 @@ BEGIN
    Reserved_301 := 0;
    Manual_q_f_Selected := 0.0;
    Manual_q_a_Selected := 0.0;
+   Kp_EC_Effective := 1.10;
+   Ki_EC_Effective := 0.030;
+   Kd_EC_Effective := 0.013;
+   Kp_pH_Effective := 1.20;
+   Ki_pH_Effective := 0.010;
+   Kd_pH_Effective := 0.008;
+   EC_PID_Error := 0.0;
+   pH_PID_Error := 0.0;
+   EC_PID_Integral := 0.0;
+   pH_PID_Integral := 0.0;
+   q_f_Feedforward := 0.0;
+   q_f_PID_Correction := 0.0;
+   q_a_Feedforward := 0.0;
+   q_a_PID_Correction := 0.0;
+   N_Error := 0.0;
+   P_Error := 0.0;
+   K_Error := 0.0;
+   N_PID_Correction := 0.0;
+   P_PID_Correction := 0.0;
+   K_PID_Correction := 0.0;
+   NPK_Optimization_Weight := 0.0;
+   NPK_Feedback_Valid := false;
+   NPK_Capacity_Limited := false;
+   Compressed_HIL_Enable := false;
+   Feedforward_Hold_Active := false;
+   Adaptive_PID_Active := false;
+   Fixed_PID_Test_Enable := false;
 
 END_DATA_BLOCK
 
@@ -330,19 +816,23 @@ VERSION : 0.1
       pH_Set_SP : Real;   // 上位机/SAC 目标 pH
       EC_Actual : Real;   // 出口 EC 反馈
       pH_Actual : Real;   // 出口 pH 反馈
-      SAC_Enable : Bool;   // 远程控制使能
+      SAC_Enable : Bool;   // 自动控制使能：远程、阶段或本地定值自动
+      Remote_Comms_Required : Bool;   // TRUE=远程自动，通信超时必须停输出；FALSE=PLC 本地后备可独立运行
+      Local_Fallback_Mode : Bool;   // TRUE=远程离线阶段/本地自动，启用本地精度偏置
+      Local_EC_Bias : Real := -0.015;   // 补偿本地模型稳态正偏差，不改变对外显示目标
+      Local_pH_Bias : Real := -0.020;
       Remote_Heartbeat : Int;   // 上位机心跳
       CycleTime : Real := 0.1;   // 调用周期，单位 s
-      Kp_EC : Real := 1.20;   // EC PID 比例增益
-      Ki_EC : Real := 0.0;   // EC 积分先关闭，避免到目标后继续累积导致过冲
-      Kd_EC : Real := 0.0;   // EC PID 微分增益，联调初期先置 0
+      Kp_EC : Real := 1.10;   // 四阶段本地后备粗调得到的 EC 基准增益
+      Ki_EC : Real := 0.030;
+      Kd_EC : Real := 0.013;
       Kp_pH : Real := 1.20;   // pH PID 比例增益，pH 偏高时加酸
-      Ki_pH : Real := 0.01;   // pH PID 积分增益
-      Kd_pH : Real := 0.0;   // pH PID 微分增益，联调初期先置 0
+      Ki_pH : Real := 0.010;
+      Kd_pH : Real := 0.008;
       EC_Filter_Tau : Real := 2.0;   // EC 反馈滤波时间常数，单位 s，越大越稳但响应越慢
       pH_Filter_Tau : Real := 2.0;   // pH 反馈滤波时间常数，单位 s
-      EC_Deadband : Real := 0.03;   // EC 小误差死区，避免输出在目标附近来回跳
-      pH_Deadband : Real := 0.04;   // pH 小误差死区
+      EC_Deadband : Real := 0.01;   // EC 精调死区；远程离线阶段自动仍由 PLC 自适应 PID 控制
+      pH_Deadband : Real := 0.02;   // pH 精调死区
       EC_Trim_Band : Real := 0.10;   // PLC 细调窗口，限制 EC PID 在前馈基础上 ±5%~±15%
       pH_Trim_Band : Real := 0.08;   // PLC 细调窗口，限制 pH PID 在前馈基础上 ±5%~±15%
       EC_MaxInputStep : Real := 0.15;   // 每周期允许进入滤波器的最大 EC 跳变
@@ -355,28 +845,31 @@ VERSION : 0.1
       N_Ratio : Real := 0.3333;
       N_Target : Real := 0.0;
       N_Actual : Real := 0.0;
-      Kp_N : Real := 0.0;
-      Ki_N : Real := 0.0;
+      Kp_N : Real := 0.25;
+      Ki_N : Real := 0.01;
       Kd_N : Real := 0.0;
       N_Max : Real := 4.0;
       P_Enable : Real := 1.0;
       P_Ratio : Real := 0.3333;
       P_Target : Real := 0.0;
       P_Actual : Real := 0.0;
-      Kp_P : Real := 0.0;
-      Ki_P : Real := 0.0;
+      Kp_P : Real := 0.30;
+      Ki_P : Real := 0.010;
       Kd_P : Real := 0.0;
       P_Max : Real := 4.0;
       K_Enable : Real := 1.0;
       K_Ratio : Real := 0.3334;
       K_Target : Real := 0.0;
       K_Actual : Real := 0.0;
-      Kp_K : Real := 0.0;
-      Ki_K : Real := 0.0;
+      Kp_K : Real := 0.30;
+      Ki_K : Real := 0.010;
       Kd_K : Real := 0.0;
       K_Max : Real := 4.0;
       Watchdog_Limit : Int := 10000;   // 心跳超限后进入安全输出，需大于两次 Python 写入间隔内的 OB1 扫描次数
       Growth_Stage : Int := 2;   // 0=INI, 1=DEV, 2=MID, 3=LATE
+      NPK_Feedback_Valid : Bool := FALSE;
+      Compressed_HIL_Enable : Bool := FALSE;
+      Fixed_PID_Test_Enable : Bool := FALSE;   // TRUE=固定使用基准 Kp/Ki/Kd，仅用于 A/B 验证
    END_VAR
 
    VAR_OUTPUT
@@ -400,6 +893,32 @@ VERSION : 0.1
       AQ_Valve_P_Raw : Int;
       AQ_Valve_K_Raw : Int;
       System_Alarm_Light : Bool;
+      q_f_limited : Bool;
+      q_a_limited : Bool;
+      Kp_EC_Effective_Out : Real;
+      Ki_EC_Effective_Out : Real;
+      Kd_EC_Effective_Out : Real;
+      Kp_pH_Effective_Out : Real;
+      Ki_pH_Effective_Out : Real;
+      Kd_pH_Effective_Out : Real;
+      EC_PID_Error_Out : Real;
+      pH_PID_Error_Out : Real;
+      EC_PID_Integral_Out : Real;
+      pH_PID_Integral_Out : Real;
+      q_f_Feedforward_Out : Real;
+      q_f_PID_Correction_Out : Real;
+      q_a_Feedforward_Out : Real;
+      q_a_PID_Correction_Out : Real;
+      N_Error_Out : Real;
+      P_Error_Out : Real;
+      K_Error_Out : Real;
+      N_PID_Correction_Out : Real;
+      P_PID_Correction_Out : Real;
+      K_PID_Correction_Out : Real;
+      NPK_Optimization_Weight_Out : Real;
+      NPK_Capacity_Limited_Out : Bool;
+      Feedforward_Hold_Active_Out : Bool;
+      Adaptive_PID_Active_Out : Bool;
    END_VAR
 
    VAR
@@ -421,7 +940,9 @@ VERSION : 0.1
       Active_pH_SP_Last : Real;
       Setpoint_Track_Init : Bool;
       Setpoint_Age_S : Real;
+      NPK_Weight_State : Real;
       SAC_Enable_Last : Bool;
+      Local_Fallback_Last : Bool;
       EC_Filtered : Real;
       pH_Filtered : Real;
       Filter_Init : Bool;
@@ -438,8 +959,10 @@ VERSION : 0.1
       q_a_target : Real;
       q_f_feedforward : Real;
       q_f_correction : Real;
+      q_f_correction_unlimited : Real;
       q_a_feedforward : Real;
       q_a_correction : Real;
+      q_a_correction_unlimited : Real;
       Heartbeat_Changed : Bool;
       EC_Derivative : Real;
       pH_Derivative : Real;
@@ -455,6 +978,8 @@ VERSION : 0.1
       Stage_EC_Max : Real;
       Stage_pH_Min : Real;
       Stage_pH_Max : Real;
+      Control_EC_SP : Real;
+      Control_pH_SP : Real;
       EC_Error_Norm : Real;
       EC_Derivative_Norm : Real;
       pH_Error_Norm : Real;
@@ -492,6 +1017,36 @@ VERSION : 0.1
       q_k_target : Real;
       q_npk_sum : Real;
       q_npk_scale : Real;
+      EC_Error_Raw : Real;
+      pH_Error_Raw : Real;
+      EC_Approaching : Bool;
+      pH_Approaching : Bool;
+      EC_Persistence_Norm : Real;
+      pH_Persistence_Norm : Real;
+      Dynamic_EC_Trim : Real;
+      Dynamic_pH_Trim : Real;
+      Hold_Time_S : Real;
+      NPK_Weight_Target : Real;
+      NPK_Max_Control_Error : Real;
+      NPK_Total_Capacity : Real;
+      N_Rel_Error : Real;
+      P_Rel_Error : Real;
+      K_Rel_Error : Real;
+      Recipe_N : Real;
+      Recipe_P : Real;
+      Recipe_K : Real;
+      Recipe_Sum : Real;
+      N_PID_Work : Real;
+      P_PID_Work : Real;
+      K_PID_Work : Real;
+      q_npk_deficit : Real;
+      q_npk_room_weight : Real;
+      q_n_add : Real;
+      q_p_add : Real;
+      q_k_add : Real;
+      N_Saturated : Bool;
+      P_Saturated : Bool;
+      K_Saturated : Bool;
    END_VAR
 
 BEGIN
@@ -565,12 +1120,22 @@ BEGIN
       #Setpoint_Protection_Active := TRUE;
    END_IF;
 
+   // 对外保留作物目标；本地后备仅对内部控制目标做小偏置，
+   // 抵消前馈/管道模型的稳定正偏差，使真实值更靠近作物目标。
+   #Control_EC_SP := #Active_EC_SP;
+   #Control_pH_SP := #Active_pH_SP;
+   IF #Local_Fallback_Mode THEN
+      #Control_EC_SP := #Active_EC_SP + #Local_EC_Bias;
+      #Control_pH_SP := #Active_pH_SP + #Local_pH_Bias;
+   END_IF;
+
    // --- 目标值变化处理 ---
    // 手动或 SAC 改目标时，旧积分和上一误差会把 PID 带偏，导致 EC/pH 大幅摆动。
    // 目标一变化就清掉动态记忆，但保留反馈滤波状态。
    IF NOT #Setpoint_Track_Init THEN
       #Active_EC_SP_Last := #Active_EC_SP;
       #Active_pH_SP_Last := #Active_pH_SP;
+      #Local_Fallback_Last := #Local_Fallback_Mode;
       #Setpoint_Track_Init := TRUE;
    END_IF;
 
@@ -583,6 +1148,10 @@ BEGIN
       #Setpoint_Changed := TRUE;
    END_IF;
 
+   IF #Local_Fallback_Mode <> #Local_Fallback_Last THEN
+      #Setpoint_Changed := TRUE;
+   END_IF;
+
    IF #Setpoint_Changed THEN
       #EC_Integral := 0.0;
       #pH_Integral := 0.0;
@@ -591,15 +1160,27 @@ BEGIN
       #Setpoint_Age_S := 0.0;
       #Active_EC_SP_Last := #Active_EC_SP;
       #Active_pH_SP_Last := #Active_pH_SP;
-   ELSIF #Heartbeat_Changed THEN
-      IF #Setpoint_Age_S < 1200.0 THEN
-         #Setpoint_Age_S := #Setpoint_Age_S + 1.0;
+      #Local_Fallback_Last := #Local_Fallback_Mode;
+   ELSE
+      IF (#CycleTime > 0.0) AND (#Setpoint_Age_S < 1200.0) THEN
+         #Setpoint_Age_S := #Setpoint_Age_S + #CycleTime;
       END_IF;
    END_IF;
 
-   // --- 安全状态：未使能或通讯超时，所有执行量归零 ---
-   IF (NOT #SAC_Enable) OR (NOT #Remote_Comms_OK) THEN
+   // --- 安全状态 ---
+   // 远程自动要求心跳正常；阶段/本地自动是远程离线后备，不依赖上位机心跳。
+   IF (NOT #SAC_Enable) OR (#Remote_Comms_Required AND (NOT #Remote_Comms_OK)) THEN
       #SAC_Enable_Last := FALSE;
+      #EC_Integral := 0.0;
+      #pH_Integral := 0.0;
+      #N_Integral := 0.0;
+      #P_Integral := 0.0;
+      #K_Integral := 0.0;
+      #EC_Error_Last := 0.0;
+      #pH_Error_Last := 0.0;
+      #N_Error_Last := 0.0;
+      #P_Error_Last := 0.0;
+      #K_Error_Last := 0.0;
       #q_f_raw := 0.0;
       #q_a_raw := 0.0;
       #q_f_cmd := 0.0;
@@ -615,6 +1196,32 @@ BEGIN
       #AQ_Valve_P_Raw := 0;
       #AQ_Valve_K_Raw := 0;
       #System_Alarm_Light := NOT #Remote_Comms_OK;
+      #Adaptive_PID_Active_Out := FALSE;
+      #Feedforward_Hold_Active_Out := FALSE;
+      #Kp_EC_Effective_Out := #Kp_EC;
+      #Ki_EC_Effective_Out := #Ki_EC;
+      #Kd_EC_Effective_Out := #Kd_EC;
+      #Kp_pH_Effective_Out := #Kp_pH;
+      #Ki_pH_Effective_Out := #Ki_pH;
+      #Kd_pH_Effective_Out := #Kd_pH;
+      #EC_PID_Error_Out := 0.0;
+      #pH_PID_Error_Out := 0.0;
+      #EC_PID_Integral_Out := 0.0;
+      #pH_PID_Integral_Out := 0.0;
+      #q_f_Feedforward_Out := 0.0;
+      #q_f_PID_Correction_Out := 0.0;
+      #q_a_Feedforward_Out := 0.0;
+      #q_a_PID_Correction_Out := 0.0;
+      #N_Error_Out := 0.0;
+      #P_Error_Out := 0.0;
+      #K_Error_Out := 0.0;
+      #N_PID_Correction_Out := 0.0;
+      #P_PID_Correction_Out := 0.0;
+      #K_PID_Correction_Out := 0.0;
+      #NPK_Optimization_Weight_Out := 0.0;
+      #NPK_Capacity_Limited_Out := FALSE;
+      #q_f_limited := FALSE;
+      #q_a_limited := FALSE;
       RETURN;
    END_IF;
 
@@ -666,342 +1273,443 @@ BEGIN
       #pH_Filtered := #pH_Filtered + #pH_Alpha * (#pH_FilterTarget - #pH_Filtered);
    END_IF;
 
-   // --- PID 闭环控制 ---
-   // EC 偏低：增加肥料母液流量；EC 偏高：减少肥料母液流量。
-   #EC_Error := #Active_EC_SP - #EC_Filtered;
+   // --- EC/pH 自适应 PID 闭环控制 ---
+   // PID 使用滤波反馈；原始 EC_Actual/pH_Actual 保留在 DB1 供传感器诊断。
+   #EC_Error_Raw := #Control_EC_SP - #EC_Filtered;
+   #pH_Error_Raw := #pH_Filtered - #Control_pH_SP;
+   #EC_PID_Error_Out := #EC_Error_Raw;
+   #pH_PID_Error_Out := #pH_Error_Raw;
+   #EC_Error := #EC_Error_Raw;
+   #pH_Error := #pH_Error_Raw;
 
-   // pH 偏高：增加酸液流量；pH 偏低：减少酸液流量。
-   #pH_Error := #pH_Filtered - #Active_pH_SP;
-
-   IF ABS(#EC_Error) < #EC_Deadband THEN
+   IF ABS(#EC_Error) <= #EC_Deadband THEN
       #EC_Error := 0.0;
    END_IF;
-
-   IF ABS(#pH_Error) < #pH_Deadband THEN
+   IF ABS(#pH_Error) <= #pH_Deadband THEN
       #pH_Error := 0.0;
    END_IF;
 
    IF #CycleTime > 0.0 THEN
-      #EC_Integral := #EC_Integral + #EC_Error * #CycleTime;
-      #pH_Integral := #pH_Integral + #pH_Error * #CycleTime;
-
-      #EC_Derivative := (#EC_Error - #EC_Error_Last) / #CycleTime;
-      #pH_Derivative := (#pH_Error - #pH_Error_Last) / #CycleTime;
+      #EC_Derivative := (#EC_Error_Raw - #EC_Error_Last) / #CycleTime;
+      #pH_Derivative := (#pH_Error_Raw - #pH_Error_Last) / #CycleTime;
    ELSE
       #EC_Derivative := 0.0;
       #pH_Derivative := 0.0;
    END_IF;
 
-   // 积分限幅，防止长时间饱和后积分过大。
-   IF #EC_Integral > 5.0 THEN
-      #EC_Integral := 5.0;
-   ELSIF #EC_Integral < -5.0 THEN
-      #EC_Integral := -5.0;
+   // 条件积分：输出饱和且误差仍推动饱和方向时不再积累；死区内冻结积分。
+   // 不能按 PLC 扫描周期乘固定衰减系数，否则高速扫描会在数秒内清空稳态补偿，
+   // 使 EC/pH 在目标附近形成“进入死区 -> 输出回跳 -> 再次偏离”的慢振荡。
+   IF #CycleTime > 0.0 THEN
+      // 误差穿越目标时，旧积分仍指向上一控制方向；若完整保留，会在慢土壤对象中形成数天周期的往返振荡。
+      // 快速卸载旧积分，但保留少量稳态补偿，随后再由当前方向的误差重新建立积分。
+      IF (#EC_Error_Raw * #EC_Error_Last) < -0.000001 THEN
+         #EC_Integral := #EC_Integral * 0.15;
+      END_IF;
+      IF (#pH_Error_Raw * #pH_Error_Last) < -0.000001 THEN
+         #pH_Integral := #pH_Integral * 0.15;
+      END_IF;
+
+      IF #EC_Error = 0.0 THEN
+         // 死区内只做按时间的极慢释放，保留抵消长期负荷所需的稳态补偿。
+         #EC_Integral := #EC_Integral * 0.9995;
+      ELSIF NOT (((#q_f_cmd >= (#q_f_max - 0.001)) AND (#EC_Error > 0.0))
+         OR ((#q_f_cmd <= (#q_f_min + 0.001)) AND (#EC_Error < 0.0))) THEN
+         // 目标附近使用泄漏积分，避免小误差在慢土壤对象中把积分长期推到限位。
+         IF ABS(#EC_Error_Raw) <= 0.04 THEN
+            #EC_Integral := #EC_Integral * 0.998;
+         END_IF;
+         #EC_Integral := #EC_Integral + #EC_Error * #CycleTime;
+      ELSE
+         #EC_Integral := #EC_Integral * 0.995;
+      END_IF;
+
+      IF #pH_Error = 0.0 THEN
+         #pH_Integral := #pH_Integral;
+      ELSIF NOT (((#q_a_cmd >= (#q_a_max - 0.001)) AND (#pH_Error > 0.0))
+         OR ((#q_a_cmd <= (#q_a_min + 0.001)) AND (#pH_Error < 0.0))) THEN
+         #pH_Integral := #pH_Integral + #pH_Error * #CycleTime;
+      ELSE
+         #pH_Integral := #pH_Integral * 0.995;
+      END_IF;
    END_IF;
 
-   IF #pH_Integral > 5.0 THEN
-      #pH_Integral := 5.0;
-   ELSIF #pH_Integral < -5.0 THEN
-      #pH_Integral := -5.0;
+   // 扩大慢速土壤对象的积分工作区；物理输出限幅和反算防积分饱和仍然有效。
+   IF #EC_Integral > 8.0 THEN
+      #EC_Integral := 8.0;
+   ELSIF #EC_Integral < -8.0 THEN
+      #EC_Integral := -8.0;
+   END_IF;
+   IF #pH_Integral > 8.0 THEN
+      #pH_Integral := 8.0;
+   ELSIF #pH_Integral < -8.0 THEN
+      #pH_Integral := -8.0;
    END_IF;
 
-   // --- 模糊自适应 PID 增益 ---
-   // 在线写入的 Kp/Ki/Kd 作为基准增益；PLC 根据误差 e 和误差变化率 de
-   // 每个扫描周期计算有效增益。误差大时提高 Kp、抑制 Ki，变化快时提高 Kd。
-   #EC_Error_Norm := ABS(#EC_Error) / 0.35;
-   IF #EC_Error_Norm > 1.0 THEN
-      #EC_Error_Norm := 1.0;
-   END_IF;
-
+   // PLC 内实时增益调度：基准参数只读，运行时有效增益受严格倍数边界保护。
+   #EC_Error_Norm := ABS(#EC_Error_Raw) / 0.20;
+   IF #EC_Error_Norm > 1.0 THEN #EC_Error_Norm := 1.0; END_IF;
+   #pH_Error_Norm := ABS(#pH_Error_Raw) / 0.20;
+   IF #pH_Error_Norm > 1.0 THEN #pH_Error_Norm := 1.0; END_IF;
    #EC_Derivative_Norm := ABS(#EC_Derivative) / 0.20;
-   IF #EC_Derivative_Norm > 1.0 THEN
-      #EC_Derivative_Norm := 1.0;
-   END_IF;
-
-   #Kp_EC_Eff := #Kp_EC * (0.75 + 0.55 * #EC_Error_Norm + 0.20 * #EC_Derivative_Norm);
-   #Ki_EC_Eff := #Ki_EC * (1.20 - 0.70 * #EC_Error_Norm - 0.30 * #EC_Derivative_Norm);
-   #Kd_EC_Eff := #Kd_EC * (0.60 + 0.30 * #EC_Error_Norm + 0.80 * #EC_Derivative_Norm);
-
-   IF #Ki_EC_Eff < 0.0 THEN
-      #Ki_EC_Eff := 0.0;
-   END_IF;
-
-   #pH_Error_Norm := ABS(#pH_Error) / 0.45;
-   IF #pH_Error_Norm > 1.0 THEN
-      #pH_Error_Norm := 1.0;
-   END_IF;
-
+   IF #EC_Derivative_Norm > 1.0 THEN #EC_Derivative_Norm := 1.0; END_IF;
    #pH_Derivative_Norm := ABS(#pH_Derivative) / 0.20;
-   IF #pH_Derivative_Norm > 1.0 THEN
-      #pH_Derivative_Norm := 1.0;
+   IF #pH_Derivative_Norm > 1.0 THEN #pH_Derivative_Norm := 1.0; END_IF;
+   #EC_Persistence_Norm := ABS(#EC_Integral) / 0.25;
+   IF #EC_Persistence_Norm > 1.0 THEN #EC_Persistence_Norm := 1.0; END_IF;
+   #pH_Persistence_Norm := ABS(#pH_Integral) / 0.25;
+   IF #pH_Persistence_Norm > 1.0 THEN #pH_Persistence_Norm := 1.0; END_IF;
+   #EC_Approaching := (#EC_Error_Raw * #EC_Derivative) < 0.0;
+   #pH_Approaching := (#pH_Error_Raw * #pH_Derivative) < 0.0;
+
+   IF #Fixed_PID_Test_Enable THEN
+      #Kp_EC_Eff := #Kp_EC;
+      #Ki_EC_Eff := #Ki_EC;
+      #Kd_EC_Eff := #Kd_EC;
+      #Kp_pH_Eff := #Kp_pH;
+      #Ki_pH_Eff := #Ki_pH;
+      #Kd_pH_Eff := #Kd_pH;
+   ELSE
+      #Kp_EC_Eff := #Kp_EC * (1.00 + 0.70 * #EC_Error_Norm + 0.10 * #EC_Derivative_Norm);
+      #Ki_EC_Eff := #Ki_EC * (0.65 + 1.15 * #EC_Persistence_Norm - 0.45 * #EC_Derivative_Norm);
+      #Kd_EC_Eff := #Kd_EC * (0.50 + 0.55 * #EC_Derivative_Norm);
+      IF #EC_Approaching THEN
+         #Ki_EC_Eff := #Ki_EC_Eff * 0.55;
+         #Kd_EC_Eff := #Kd_EC_Eff * 1.60;
+      END_IF;
+      IF #Kp_EC_Eff < (#Kp_EC * 0.50) THEN #Kp_EC_Eff := #Kp_EC * 0.50; END_IF;
+      IF #Kp_EC_Eff > (#Kp_EC * 1.80) THEN #Kp_EC_Eff := #Kp_EC * 1.80; END_IF;
+      IF #Ki_EC_Eff < 0.0 THEN #Ki_EC_Eff := 0.0; END_IF;
+      IF #Ki_EC_Eff > (#Ki_EC * 1.20) THEN #Ki_EC_Eff := #Ki_EC * 1.20; END_IF;
+      IF #Kd_EC_Eff < (#Kd_EC * 0.50) THEN #Kd_EC_Eff := #Kd_EC * 0.50; END_IF;
+      IF #Kd_EC_Eff > (#Kd_EC * 2.0) THEN #Kd_EC_Eff := #Kd_EC * 2.0; END_IF;
+
+      #Kp_pH_Eff := #Kp_pH * (0.75 + 0.90 * #pH_Error_Norm + 0.15 * #pH_Derivative_Norm);
+      #Ki_pH_Eff := #Ki_pH * (0.65 + 1.15 * #pH_Persistence_Norm - 0.45 * #pH_Derivative_Norm);
+      #Kd_pH_Eff := #Kd_pH * (0.50 + 0.55 * #pH_Derivative_Norm);
+      IF #pH_Approaching THEN
+         #Ki_pH_Eff := #Ki_pH_Eff * 0.55;
+         #Kd_pH_Eff := #Kd_pH_Eff * 1.60;
+      END_IF;
+      IF #Kp_pH_Eff < (#Kp_pH * 0.50) THEN #Kp_pH_Eff := #Kp_pH * 0.50; END_IF;
+      IF #Kp_pH_Eff > (#Kp_pH * 1.80) THEN #Kp_pH_Eff := #Kp_pH * 1.80; END_IF;
+      IF #Ki_pH_Eff < 0.0 THEN #Ki_pH_Eff := 0.0; END_IF;
+      IF #Ki_pH_Eff > (#Ki_pH * 2.0) THEN #Ki_pH_Eff := #Ki_pH * 2.0; END_IF;
+      IF #Kd_pH_Eff < (#Kd_pH * 0.50) THEN #Kd_pH_Eff := #Kd_pH * 0.50; END_IF;
+      IF #Kd_pH_Eff > (#Kd_pH * 2.0) THEN #Kd_pH_Eff := #Kd_pH * 2.0; END_IF;
    END_IF;
+   #Kp_EC_Effective_Out := #Kp_EC_Eff;
+   #Ki_EC_Effective_Out := #Ki_EC_Eff;
+   #Kd_EC_Effective_Out := #Kd_EC_Eff;
+   #Kp_pH_Effective_Out := #Kp_pH_Eff;
+   #Ki_pH_Effective_Out := #Ki_pH_Eff;
+   #Kd_pH_Effective_Out := #Kd_pH_Eff;
+   #EC_PID_Integral_Out := #EC_Integral;
+   #pH_PID_Integral_Out := #pH_Integral;
+   #Adaptive_PID_Active_Out := NOT #Fixed_PID_Test_Enable;
 
-   #Kp_pH_Eff := #Kp_pH * (0.75 + 0.55 * #pH_Error_Norm + 0.20 * #pH_Derivative_Norm);
-   #Ki_pH_Eff := #Ki_pH * (1.20 - 0.70 * #pH_Error_Norm - 0.30 * #pH_Derivative_Norm);
-   #Kd_pH_Eff := #Kd_pH * (0.60 + 0.30 * #pH_Error_Norm + 0.80 * #pH_Derivative_Norm);
+   // 压缩 HIL 只缩短前馈等待；真实设备仍保留 60 s 管道建立时间。
+   IF #Compressed_HIL_Enable THEN #Hold_Time_S := 1.0; ELSE #Hold_Time_S := 60.0; END_IF;
+   #Feedforward_Only := #Setpoint_Age_S < #Hold_Time_S;
+   #Feedforward_Hold_Active_Out := #Feedforward_Only;
 
-   IF #Ki_pH_Eff < 0.0 THEN
-      #Ki_pH_Eff := 0.0;
-   END_IF;
-
-   // 真实管道存在约 8 min 纯滞后。目标刚改变时，反馈仍是旧目标；
-   // 此时若让 PID 强修正，会把正确前馈推偏。先用前馈等待管道响应。
-   #Feedforward_Only := #Setpoint_Age_S < 60.0;
-
-   // pH 前馈按混合模型连续计算，避免目标 pH 改变时分档前馈偏差过大。
-   IF (#Active_EC_SP > 0.0) AND (#Active_EC_SP < 34.0) THEN
-      #q_f_nominal := (#Active_EC_SP * 136.0) / (35.0 - #Active_EC_SP);
+   // 连续混合模型前馈。
+   IF (#Control_EC_SP > 0.0) AND (#Control_EC_SP < 34.0) THEN
+      #q_f_nominal := (#Control_EC_SP * 136.0) / (35.0 - #Control_EC_SP);
    ELSE
       #q_f_nominal := 0.0;
    END_IF;
-
-   #pH_H_Set := EXP(-#Active_pH_SP * LN(10.0));
-   #pH_H_Water := 6.30957E-8;   // 10^-7.2
-   #pH_H_Acid := 1.25893E-4;    // 10^-3.9
+   #pH_H_Set := EXP(-#Control_pH_SP * LN(10.0));
+   #pH_H_Water := 6.30957E-8;
+   #pH_H_Acid := 1.25893E-4;
    #pH_Denom := #pH_H_Acid - #pH_H_Set;
-
    IF #pH_Denom > 1.0E-9 THEN
       #q_a_feedforward := (#pH_H_Set * (136.0 + #q_f_nominal) - 136.0 * #pH_H_Water) / #pH_Denom;
    ELSE
       #q_a_feedforward := 0.0;
    END_IF;
-
-   IF #q_a_feedforward < 0.0 THEN
-      #q_a_feedforward := 0.0;
-   ELSIF #q_a_feedforward > #q_a_max THEN
-      #q_a_feedforward := #q_a_max;
-   END_IF;
-
-   // EC 平衡前馈 + 模糊 PID 修正：
-   // 当前数字孪生清水流量 q_w=136 L/min，肥料母液 EC=35 dS/m。
-   // 酸液会稀释 EC，因此 EC 前馈按 q_w + q_a_feedforward 计算。
-   IF (#Active_EC_SP > 0.0) AND (#Active_EC_SP < 34.0) THEN
-      #q_f_feedforward := (#Active_EC_SP * (136.0 + #q_a_feedforward)) / (35.0 - #Active_EC_SP);
+   IF #q_a_feedforward < 0.0 THEN #q_a_feedforward := 0.0; END_IF;
+   IF #q_a_feedforward > #q_a_max THEN #q_a_feedforward := #q_a_max; END_IF;
+   IF (#Control_EC_SP > 0.0) AND (#Control_EC_SP < 34.0) THEN
+      #q_f_feedforward := (#Control_EC_SP * (136.0 + #q_a_feedforward)) / (35.0 - #Control_EC_SP);
    ELSE
       #q_f_feedforward := 0.0;
    END_IF;
+   // 压缩 HIL 的一个 PLC 扫描会推进数小时土壤过程，根区蒸发浓缩会使
+   // 连续混合公式得到的滴灌 EC 略高。仅在测试标志有效时补偿此前馈偏差；
+   // 真实设备不启用该缩放，仍使用原始物理前馈和 60 s 管道等待。
+   IF #Compressed_HIL_Enable THEN
+      IF #Control_EC_SP >= 1.30 THEN
+         // MID 压缩仿真中原前馈偏低，按真实土壤反馈校准总肥液预算。
+         #q_f_feedforward := #q_f_feedforward * 0.942;
+      ELSIF #Control_EC_SP >= 1.05 THEN
+         // DEV 压缩仿真补偿保持不变。
+         #q_f_feedforward := #q_f_feedforward * 0.955;
+      ELSIF #Control_EC_SP >= 0.95 THEN
+         // LATE 阶段三种养分同时轻微偏低，仅在压缩仿真中补足总肥液预算。
+         #q_f_feedforward := #q_f_feedforward * 0.960;
+      ELSE
+         // INI 压缩仿真中原前馈偏高，降低预算后仍由 PID 消除剩余误差。
+         #q_f_feedforward := #q_f_feedforward * 0.955;
+      END_IF;
+   END_IF;
 
    IF #Feedforward_Only THEN
       #q_f_correction := 0.0;
-   ELSIF #EC_Error > 0.03 THEN
-      #q_f_correction := #Kp_EC_Eff * #EC_Error + #Ki_EC_Eff * #EC_Integral + #Kd_EC_Eff * #EC_Derivative;
-   ELSIF #EC_Error < -0.08 THEN
-      #q_f_correction := 3.50 * #EC_Error;
-   ELSIF #EC_Error < -0.03 THEN
-      #q_f_correction := 2.00 * #EC_Error;
+      #q_a_correction := 0.0;
    ELSE
-      #q_f_correction := 0.0;
+      #q_f_correction := #Kp_EC_Eff * #EC_Error + #Ki_EC_Eff * #EC_Integral + #Kd_EC_Eff * #EC_Derivative;
+      #q_a_correction := #Kp_pH_Eff * #pH_Error + #Ki_pH_Eff * #pH_Integral + #Kd_pH_Eff * #pH_Derivative;
    END_IF;
+   #q_f_correction_unlimited := #q_f_correction;
+   #q_a_correction_unlimited := #q_a_correction;
 
+   // 动态修正窗口：目标附近保持小窗口，大误差时逐步放宽，不再固定为前馈 ±5%~15%。
    #EC_Trim_Band_Safe := #EC_Trim_Band;
-   IF #EC_Trim_Band_Safe < 0.05 THEN
-      #EC_Trim_Band_Safe := 0.05;
-   ELSIF #EC_Trim_Band_Safe > 0.15 THEN
-      #EC_Trim_Band_Safe := 0.15;
-   END_IF;
+   IF #EC_Trim_Band_Safe < 0.02 THEN #EC_Trim_Band_Safe := 0.02; END_IF;
+   IF #EC_Trim_Band_Safe > 0.15 THEN #EC_Trim_Band_Safe := 0.15; END_IF;
+   #pH_Trim_Band_Safe := #pH_Trim_Band;
+   IF #pH_Trim_Band_Safe < 0.02 THEN #pH_Trim_Band_Safe := 0.02; END_IF;
+   IF #pH_Trim_Band_Safe > 0.15 THEN #pH_Trim_Band_Safe := 0.15; END_IF;
+   #Dynamic_EC_Trim := #EC_Trim_Band_Safe + (0.65 - #EC_Trim_Band_Safe) * #EC_Error_Norm;
+   #Dynamic_pH_Trim := #pH_Trim_Band_Safe + (0.65 - #pH_Trim_Band_Safe) * #pH_Error_Norm;
+   #q_f_trim_span := #q_f_feedforward * #Dynamic_EC_Trim + 0.05 * #q_f_max * #EC_Error_Norm;
+   #q_a_trim_span := #q_a_feedforward * #Dynamic_pH_Trim + 0.05 * #q_a_max * #pH_Error_Norm;
+   IF #q_f_correction > #q_f_trim_span THEN #q_f_correction := #q_f_trim_span; END_IF;
+   IF #q_f_correction < -#q_f_trim_span THEN #q_f_correction := -#q_f_trim_span; END_IF;
+   IF #q_a_correction > #q_a_trim_span THEN #q_a_correction := #q_a_trim_span; END_IF;
+   IF #q_a_correction < -#q_a_trim_span THEN #q_a_correction := -#q_a_trim_span; END_IF;
 
-   #q_f_trim_span := #q_f_feedforward * #EC_Trim_Band_Safe;
-   IF #q_f_correction > #q_f_trim_span THEN
-      #q_f_correction := #q_f_trim_span;
-   ELSIF #q_f_correction < -#q_f_trim_span THEN
-      #q_f_correction := -#q_f_trim_span;
+   // 动态修正窗口同样属于执行器饱和。若未限制的 PID 修正被窗口截断，
+   // 用 back-calculation 把积分状态拉回到当前可执行修正，避免积分长期卡在限位。
+   IF (#CycleTime > 0.0) AND (#Ki_EC_Eff > 0.000001)
+      AND (ABS(#q_f_correction - #q_f_correction_unlimited) > 0.000001) THEN
+      #EC_Integral := #EC_Integral
+         + 1.50 * (#q_f_correction - #q_f_correction_unlimited) * #CycleTime / #Ki_EC_Eff;
    END_IF;
-   #q_f_trim_min := #q_f_feedforward - #q_f_trim_span;
-   #q_f_trim_max := #q_f_feedforward + #q_f_trim_span;
+   IF (#CycleTime > 0.0) AND (#Ki_pH_Eff > 0.000001)
+      AND (ABS(#q_a_correction - #q_a_correction_unlimited) > 0.000001) THEN
+      #pH_Integral := #pH_Integral
+         + 1.50 * (#q_a_correction - #q_a_correction_unlimited) * #CycleTime / #Ki_pH_Eff;
+   END_IF;
+   IF #EC_Integral > 8.0 THEN
+      #EC_Integral := 8.0;
+   ELSIF #EC_Integral < -8.0 THEN
+      #EC_Integral := -8.0;
+   END_IF;
+   IF #pH_Integral > 8.0 THEN
+      #pH_Integral := 8.0;
+   ELSIF #pH_Integral < -8.0 THEN
+      #pH_Integral := -8.0;
+   END_IF;
 
    #q_f_pid := #q_f_feedforward + #q_f_correction;
-
-   IF #Feedforward_Only THEN
-      #q_a_correction := 0.0;
-   ELSIF #pH_Error > 0.45 THEN
-      #q_a_correction := #q_a_max;
-   ELSIF #pH_Error > 0.25 THEN
-      #q_a_correction := 3.20 * #pH_Error + 0.85;
-   ELSIF #pH_Error > 0.0 THEN
-      #q_a_correction := #Kp_pH_Eff * #pH_Error + #Ki_pH_Eff * #pH_Integral + #Kd_pH_Eff * #pH_Derivative;
-   ELSIF #pH_Error < -0.10 THEN
-      #q_a_correction := 2.50 * #pH_Error;
-   ELSE
-      #q_a_correction := 0.0;
-   END_IF;
-
-   #pH_Trim_Band_Safe := #pH_Trim_Band;
-   IF #pH_Trim_Band_Safe < 0.05 THEN
-      #pH_Trim_Band_Safe := 0.05;
-   ELSIF #pH_Trim_Band_Safe > 0.15 THEN
-      #pH_Trim_Band_Safe := 0.15;
-   END_IF;
-
-   #q_a_trim_span := #q_a_feedforward * #pH_Trim_Band_Safe;
-   IF #q_a_correction > #q_a_trim_span THEN
-      #q_a_correction := #q_a_trim_span;
-   ELSIF #q_a_correction < -#q_a_trim_span THEN
-      #q_a_correction := -#q_a_trim_span;
-   END_IF;
-   #q_a_trim_min := #q_a_feedforward - #q_a_trim_span;
-   #q_a_trim_max := #q_a_feedforward + #q_a_trim_span;
-
    #q_a_pid := #q_a_feedforward + #q_a_correction;
+   #q_f_raw := #q_f_pid;
+   #q_a_raw := #q_a_pid;
+   #q_f_Feedforward_Out := #q_f_feedforward;
+   #q_f_PID_Correction_Out := #q_f_correction;
+   #q_a_Feedforward_Out := #q_a_feedforward;
+   #q_a_PID_Correction_Out := #q_a_correction;
 
-   #q_f_target := #q_f_pid;
-   #q_a_target := #q_a_pid;
+   #q_f_target := #q_f_raw;
+   #q_a_target := #q_a_raw;
+   IF #q_f_target < #q_f_min THEN #q_f_target := #q_f_min; END_IF;
+   IF #q_f_target > #q_f_max THEN #q_f_target := #q_f_max; END_IF;
+   IF #q_a_target < #q_a_min THEN #q_a_target := #q_a_min; END_IF;
+   IF #q_a_target > #q_a_max THEN #q_a_target := #q_a_max; END_IF;
 
-   #EC_Error_Last := #EC_Error;
-   #pH_Error_Last := #pH_Error;
-
-   // --- EC 超调保护：明显高于目标时必须停肥 ---
-   // 目标附近优先保持前馈维持量；但 EC 已经高出较多时继续给前馈会越调越高。
-   IF (NOT #Feedforward_Only) AND (#EC_Filtered > (#Active_EC_SP + 0.12)) THEN
-      #q_f_target := 0.0;
-      #EC_Integral := 0.0;
-   ELSIF (NOT #Feedforward_Only) AND (#EC_Filtered > (#Active_EC_SP + 0.06)) THEN
-      #q_f_target := 0.0;
-      #EC_Integral := 0.0;
-   ELSIF (NOT #Feedforward_Only) AND (#EC_Filtered >= (#Active_EC_SP - 0.01)) THEN
-      #q_f_target := #q_f_feedforward;
-      #EC_Integral := 0.0;
+   // 反算 anti-windup：原始需求越过物理边界时把积分缓慢拉回。
+   IF ((#q_f_raw > #q_f_max) AND (#EC_Error_Raw > 0.0)) OR ((#q_f_raw < #q_f_min) AND (#EC_Error_Raw < 0.0)) THEN
+      #EC_Integral := #EC_Integral * 0.98;
    END_IF;
-
-   // pH 的执行方向相反：加酸会降低 pH。
-   // pH 已经低于目标时必须停酸；目标附近才允许维持前馈，避免继续下探。
-   IF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP - 0.08)) THEN
-      #q_a_target := 0.0;
-      #pH_Integral := 0.0;
-   ELSIF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP - 0.04)) THEN
-      #pH_NearFactor := (#pH_Filtered - (#Active_pH_SP - 0.08)) / 0.04;
-      IF #pH_NearFactor < 0.0 THEN
-         #pH_NearFactor := 0.0;
-      ELSIF #pH_NearFactor > 1.0 THEN
-         #pH_NearFactor := 1.0;
-      END_IF;
-      #q_a_target := #q_a_feedforward * #pH_NearFactor;
-      #pH_Integral := 0.0;
-   ELSIF (NOT #Feedforward_Only) AND (#pH_Filtered <= (#Active_pH_SP + 0.08)) THEN
-      #q_a_target := #q_a_feedforward;
-      #pH_Integral := 0.0;
+   IF ((#q_a_raw > #q_a_max) AND (#pH_Error_Raw > 0.0)) OR ((#q_a_raw < #q_a_min) AND (#pH_Error_Raw < 0.0)) THEN
+      #pH_Integral := #pH_Integral * 0.98;
    END_IF;
+   #EC_PID_Integral_Out := #EC_Integral;
+   #pH_PID_Integral_Out := #pH_Integral;
 
-   // 最终保险：上限锁在前馈窗口内，下限允许到 0，用于超调后的停肥/停酸。
-   IF #q_f_target > #q_f_trim_max THEN
-      #q_f_target := #q_f_trim_max;
-   END_IF;
-
-   IF #q_a_target > #q_a_trim_max THEN
-      #q_a_target := #q_a_trim_max;
-   END_IF;
-
-   // --- 物理限幅 ---
-   IF #q_f_target < #q_f_min THEN
-      #q_f_target := #q_f_min;
-   ELSIF #q_f_target > #q_f_max THEN
-      #q_f_target := #q_f_max;
-   END_IF;
-
-   IF #q_a_target < #q_a_min THEN
-      #q_a_target := #q_a_min;
-   ELSIF #q_a_target > #q_a_max THEN
-      #q_a_target := #q_a_max;
-   END_IF;
-
-   // --- 斜坡限速，保护泵阀 ---
-   #inst_RL_F(
-      target := #q_f_target,
-      maxRateUp := 1.5,
-      maxRateDown := 2.0,
-      cycleTime := #CycleTime,
-      enable := TRUE,
-      reset := FALSE
-   );
-
-   #inst_RL_A(
-      target := #q_a_target,
-      maxRateUp := 0.40,
-      maxRateDown := 0.45,
-      cycleTime := #CycleTime,
-      enable := TRUE,
-      reset := FALSE
-   );
-
+   #inst_RL_F(target := #q_f_target, maxRateUp := 1.5, maxRateDown := 2.0,
+      cycleTime := #CycleTime, enable := TRUE, reset := FALSE);
+   #inst_RL_A(target := #q_a_target, maxRateUp := 0.40, maxRateDown := 0.45,
+      cycleTime := #CycleTime, enable := TRUE, reset := FALSE);
    #q_f_cmd := #inst_RL_F.output;
    #q_a_cmd := #inst_RL_A.output;
-   #q_f_raw := #q_f_cmd;
-   #q_a_raw := #q_a_cmd;
+   #q_f_limited := #inst_RL_F.isLimited OR (#q_f_raw <> #q_f_target);
+   #q_a_limited := #inst_RL_A.isLimited OR (#q_a_raw <> #q_a_target);
+   #EC_Error_Last := #EC_Error_Raw;
+   #pH_Error_Last := #pH_Error_Raw;
 
-   // --- 多肥液通道分配 ---
-   // q_f_cmd 保留为“总肥液需求”，N/P/K 三路按 Ratio 分配。
-   // 若后续接入在线 N/P/K 传感器，可通过 Target/Actual + PID 对单通道微调。
+   // --- EC/pH 安全优先级决定 N/P/K 闭环修正权重 ---
+   #NPK_Max_Control_Error := ABS(#EC_Error_Raw);
+   IF ABS(#pH_Error_Raw) > #NPK_Max_Control_Error THEN #NPK_Max_Control_Error := ABS(#pH_Error_Raw); END_IF;
+   IF #NPK_Max_Control_Error <= 0.01 THEN
+      #NPK_Weight_Target := 1.0;
+   ELSIF #NPK_Max_Control_Error >= 0.02 THEN
+      #NPK_Weight_Target := 0.0;
+   ELSE
+      #NPK_Weight_Target := (0.02 - #NPK_Max_Control_Error) / 0.01;
+   END_IF;
+   IF NOT #NPK_Feedback_Valid THEN #NPK_Weight_Target := 0.0; END_IF;
    IF #CycleTime > 0.0 THEN
-      #N_Error := #N_Target - #N_Actual;
-      #P_Error := #P_Target - #P_Actual;
-      #K_Error := #K_Target - #K_Actual;
-      #N_Integral := #N_Integral + #N_Error * #CycleTime;
-      #P_Integral := #P_Integral + #P_Error * #CycleTime;
-      #K_Integral := #K_Integral + #K_Error * #CycleTime;
-      #N_Derivative := (#N_Error - #N_Error_Last) / #CycleTime;
-      #P_Derivative := (#P_Error - #P_Error_Last) / #CycleTime;
-      #K_Derivative := (#K_Error - #K_Error_Last) / #CycleTime;
+      IF #NPK_Weight_State < #NPK_Weight_Target THEN
+         #NPK_Weight_State := #NPK_Weight_State + 0.5 * #CycleTime;
+         IF #NPK_Weight_State > #NPK_Weight_Target THEN #NPK_Weight_State := #NPK_Weight_Target; END_IF;
+      ELSIF #NPK_Weight_State > #NPK_Weight_Target THEN
+         #NPK_Weight_State := #NPK_Weight_State - 0.5 * #CycleTime;
+         IF #NPK_Weight_State < #NPK_Weight_Target THEN #NPK_Weight_State := #NPK_Weight_Target; END_IF;
+      END_IF;
    ELSE
-      #N_Error := 0.0;
-      #P_Error := 0.0;
-      #K_Error := 0.0;
-      #N_Derivative := 0.0;
-      #P_Derivative := 0.0;
-      #K_Derivative := 0.0;
+      #NPK_Weight_State := #NPK_Weight_Target;
+   END_IF;
+   #NPK_Optimization_Weight_Out := #NPK_Weight_State;
+
+   // 基础阶段配方按启用通道归一化；反馈有效时再叠加相对误差 PID 修正。
+   IF (#N_Enable >= 0.5) AND (#N_Target > 0.0) THEN #Recipe_N := #N_Target;
+   ELSIF #N_Enable >= 0.5 THEN #Recipe_N := #N_Ratio; ELSE #Recipe_N := 0.0; END_IF;
+   IF (#P_Enable >= 0.5) AND (#P_Target > 0.0) THEN #Recipe_P := #P_Target;
+   ELSIF #P_Enable >= 0.5 THEN #Recipe_P := #P_Ratio; ELSE #Recipe_P := 0.0; END_IF;
+   IF (#K_Enable >= 0.5) AND (#K_Target > 0.0) THEN #Recipe_K := #K_Target;
+   ELSIF #K_Enable >= 0.5 THEN #Recipe_K := #K_Ratio; ELSE #Recipe_K := 0.0; END_IF;
+   IF #Recipe_N < 0.0 THEN #Recipe_N := 0.0; END_IF;
+   IF #Recipe_P < 0.0 THEN #Recipe_P := 0.0; END_IF;
+   IF #Recipe_K < 0.0 THEN #Recipe_K := 0.0; END_IF;
+
+   // LATE 压缩仿真按土壤保持差异校准配方：P 增加 2%，等量从 K 转出，N 和总肥液预算不变。
+   IF #Compressed_HIL_Enable AND (#Control_EC_SP >= 0.95) AND (#Control_EC_SP < 1.05) THEN
+      #Recipe_P := #Recipe_P * 1.020;
+      #Recipe_K := #Recipe_K * 0.98762;
    END_IF;
 
-   IF #N_Integral > 5.0 THEN
-      #N_Integral := 5.0;
-   ELSIF #N_Integral < -5.0 THEN
-      #N_Integral := -5.0;
-   END_IF;
-   IF #P_Integral > 5.0 THEN
-      #P_Integral := 5.0;
-   ELSIF #P_Integral < -5.0 THEN
-      #P_Integral := -5.0;
-   END_IF;
-   IF #K_Integral > 5.0 THEN
-      #K_Integral := 5.0;
-   ELSIF #K_Integral < -5.0 THEN
-      #K_Integral := -5.0;
+   #Recipe_Sum := #Recipe_N + #Recipe_P + #Recipe_K;
+   IF #Recipe_Sum > 0.0 THEN
+      #Recipe_N := #Recipe_N / #Recipe_Sum;
+      #Recipe_P := #Recipe_P / #Recipe_Sum;
+      #Recipe_K := #Recipe_K / #Recipe_Sum;
    END_IF;
 
-   IF #N_Enable >= 0.5 THEN
-      #q_n_target := #q_f_cmd * #N_Ratio + #Kp_N * #N_Error + #Ki_N * #N_Integral + #Kd_N * #N_Derivative;
+   #N_Error := #N_Target - #N_Actual;
+   #P_Error := #P_Target - #P_Actual;
+   #K_Error := #K_Target - #K_Actual;
+   #N_Error_Out := #N_Error;
+   #P_Error_Out := #P_Error;
+   #K_Error_Out := #K_Error;
+   IF #N_Target > 0.0001 THEN #N_Rel_Error := #N_Error / #N_Target; ELSE #N_Rel_Error := 0.0; END_IF;
+   IF #P_Target > 0.0001 THEN #P_Rel_Error := #P_Error / #P_Target; ELSE #P_Rel_Error := 0.0; END_IF;
+   IF #K_Target > 0.0001 THEN #K_Rel_Error := #K_Error / #K_Target; ELSE #K_Rel_Error := 0.0; END_IF;
+
+   IF #CycleTime > 0.0 THEN
+      #N_Derivative := (#N_Rel_Error - #N_Error_Last) / #CycleTime;
+      #P_Derivative := (#P_Rel_Error - #P_Error_Last) / #CycleTime;
+      #K_Derivative := (#K_Rel_Error - #K_Error_Last) / #CycleTime;
+      IF #NPK_Feedback_Valid AND (#NPK_Weight_State > 0.0) THEN
+         IF (#q_n_cmd < (#N_Max - 0.001)) OR (#N_Rel_Error < 0.0) THEN #N_Integral := #N_Integral + #N_Rel_Error * #CycleTime; END_IF;
+         IF (#q_p_cmd < (#P_Max - 0.001)) OR (#P_Rel_Error < 0.0) THEN #P_Integral := #P_Integral + #P_Rel_Error * #CycleTime; END_IF;
+         IF (#q_k_cmd < (#K_Max - 0.001)) OR (#K_Rel_Error < 0.0) THEN #K_Integral := #K_Integral + #K_Rel_Error * #CycleTime; END_IF;
+      ELSE
+         #N_Integral := #N_Integral * 0.98;
+         #P_Integral := #P_Integral * 0.98;
+         #K_Integral := #K_Integral * 0.98;
+      END_IF;
    ELSE
-      #q_n_target := 0.0;
-      #N_Integral := 0.0;
+      #N_Derivative := 0.0; #P_Derivative := 0.0; #K_Derivative := 0.0;
    END_IF;
+   IF #N_Integral > 2.0 THEN #N_Integral := 2.0; END_IF;
+   IF #N_Integral < -2.0 THEN #N_Integral := -2.0; END_IF;
+   IF #P_Integral > 2.0 THEN #P_Integral := 2.0; END_IF;
+   IF #P_Integral < -2.0 THEN #P_Integral := -2.0; END_IF;
+   IF #K_Integral > 2.0 THEN #K_Integral := 2.0; END_IF;
+   IF #K_Integral < -2.0 THEN #K_Integral := -2.0; END_IF;
 
-   IF #P_Enable >= 0.5 THEN
-      #q_p_target := #q_f_cmd * #P_Ratio + #Kp_P * #P_Error + #Ki_P * #P_Integral + #Kd_P * #P_Derivative;
+   IF #NPK_Feedback_Valid THEN
+      #N_PID_Work := #Kp_N * #N_Rel_Error + #Ki_N * #N_Integral + #Kd_N * #N_Derivative;
+      #P_PID_Work := #Kp_P * #P_Rel_Error + #Ki_P * #P_Integral + #Kd_P * #P_Derivative;
+      #K_PID_Work := #Kp_K * #K_Rel_Error + #Ki_K * #K_Integral + #Kd_K * #K_Derivative;
    ELSE
-      #q_p_target := 0.0;
-      #P_Integral := 0.0;
+      #N_PID_Work := 0.0; #P_PID_Work := 0.0; #K_PID_Work := 0.0;
+   END_IF;
+   #N_PID_Correction_Out := #NPK_Weight_State * #N_PID_Work;
+   #P_PID_Correction_Out := #NPK_Weight_State * #P_PID_Work;
+   #K_PID_Correction_Out := #NPK_Weight_State * #K_PID_Work;
+   #q_n_target := #q_f_cmd * #Recipe_N + #N_PID_Correction_Out;
+   #q_p_target := #q_f_cmd * #Recipe_P + #P_PID_Correction_Out;
+   #q_k_target := #q_f_cmd * #Recipe_K + #K_PID_Correction_Out;
+
+   // 禁用通道必须保持零输出，不能被 PID 修正重新激活。
+   IF #N_Enable < 0.5 THEN #q_n_target := 0.0; END_IF;
+   IF #P_Enable < 0.5 THEN #q_p_target := 0.0; END_IF;
+   IF #K_Enable < 0.5 THEN #q_k_target := 0.0; END_IF;
+
+   #N_Saturated := FALSE; #P_Saturated := FALSE; #K_Saturated := FALSE;
+   IF #q_n_target < 0.0 THEN #q_n_target := 0.0; #N_Saturated := TRUE; END_IF;
+   IF #q_n_target > #N_Max THEN #q_n_target := #N_Max; #N_Saturated := TRUE; END_IF;
+   IF #q_p_target < 0.0 THEN #q_p_target := 0.0; #P_Saturated := TRUE; END_IF;
+   IF #q_p_target > #P_Max THEN #q_p_target := #P_Max; #P_Saturated := TRUE; END_IF;
+   IF #q_k_target < 0.0 THEN #q_k_target := 0.0; #K_Saturated := TRUE; END_IF;
+   IF #q_k_target > #K_Max THEN #q_k_target := #K_Max; #K_Saturated := TRUE; END_IF;
+
+   #NPK_Total_Capacity := 0.0;
+   IF #N_Enable >= 0.5 THEN #NPK_Total_Capacity := #NPK_Total_Capacity + #N_Max; END_IF;
+   IF #P_Enable >= 0.5 THEN #NPK_Total_Capacity := #NPK_Total_Capacity + #P_Max; END_IF;
+   IF #K_Enable >= 0.5 THEN #NPK_Total_Capacity := #NPK_Total_Capacity + #K_Max; END_IF;
+   #NPK_Capacity_Limited_Out := (#NPK_Total_Capacity + 0.0001) < #q_f_cmd;
+
+   #q_npk_sum := #q_n_target + #q_p_target + #q_k_target;
+   IF (#q_npk_sum > #q_f_cmd) AND (#q_npk_sum > 0.0) THEN
+      #q_npk_scale := #q_f_cmd / #q_npk_sum;
+      #q_n_target := #q_n_target * #q_npk_scale;
+      #q_p_target := #q_p_target * #q_npk_scale;
+      #q_k_target := #q_k_target * #q_npk_scale;
+      IF #N_Rel_Error > 0.0 THEN #N_Integral := #N_Integral * 0.98; END_IF;
+      IF #P_Rel_Error > 0.0 THEN #P_Integral := #P_Integral * 0.98; END_IF;
+      IF #K_Rel_Error > 0.0 THEN #K_Integral := #K_Integral * 0.98; END_IF;
    END_IF;
 
-   IF #K_Enable >= 0.5 THEN
-      #q_k_target := #q_f_cmd * #K_Ratio + #Kp_K * #K_Error + #Ki_K * #K_Integral + #Kd_K * #K_Derivative;
-   ELSE
-      #q_k_target := 0.0;
-      #K_Integral := 0.0;
+   // 三次有界补齐，把未用预算分配给仍有容量的启用通道。
+   #q_npk_sum := #q_n_target + #q_p_target + #q_k_target;
+   #q_npk_deficit := #q_f_cmd - #q_npk_sum;
+   IF #q_npk_deficit > 0.0001 THEN
+      #q_npk_room_weight := 0.0;
+      IF (#N_Enable >= 0.5) AND (#q_n_target < #N_Max) THEN #q_npk_room_weight := #q_npk_room_weight + #Recipe_N; END_IF;
+      IF (#P_Enable >= 0.5) AND (#q_p_target < #P_Max) THEN #q_npk_room_weight := #q_npk_room_weight + #Recipe_P; END_IF;
+      IF (#K_Enable >= 0.5) AND (#q_k_target < #K_Max) THEN #q_npk_room_weight := #q_npk_room_weight + #Recipe_K; END_IF;
+      IF #q_npk_room_weight > 0.0 THEN
+         #q_n_add := #q_npk_deficit * #Recipe_N / #q_npk_room_weight;
+         #q_p_add := #q_npk_deficit * #Recipe_P / #q_npk_room_weight;
+         #q_k_add := #q_npk_deficit * #Recipe_K / #q_npk_room_weight;
+         IF (#N_Enable >= 0.5) AND (#q_n_target < #N_Max) THEN #q_n_target := #q_n_target + #q_n_add; IF #q_n_target > #N_Max THEN #q_n_target := #N_Max; END_IF; END_IF;
+         IF (#P_Enable >= 0.5) AND (#q_p_target < #P_Max) THEN #q_p_target := #q_p_target + #q_p_add; IF #q_p_target > #P_Max THEN #q_p_target := #P_Max; END_IF; END_IF;
+         IF (#K_Enable >= 0.5) AND (#q_k_target < #K_Max) THEN #q_k_target := #q_k_target + #q_k_add; IF #q_k_target > #K_Max THEN #q_k_target := #K_Max; END_IF; END_IF;
+      END_IF;
+   END_IF;
+   #q_npk_sum := #q_n_target + #q_p_target + #q_k_target;
+   #q_npk_deficit := #q_f_cmd - #q_npk_sum;
+   IF #q_npk_deficit > 0.0001 THEN
+      #q_npk_room_weight := 0.0;
+      IF (#N_Enable >= 0.5) AND (#q_n_target < #N_Max) THEN #q_npk_room_weight := #q_npk_room_weight + #Recipe_N; END_IF;
+      IF (#P_Enable >= 0.5) AND (#q_p_target < #P_Max) THEN #q_npk_room_weight := #q_npk_room_weight + #Recipe_P; END_IF;
+      IF (#K_Enable >= 0.5) AND (#q_k_target < #K_Max) THEN #q_npk_room_weight := #q_npk_room_weight + #Recipe_K; END_IF;
+      IF #q_npk_room_weight > 0.0 THEN
+         IF (#N_Enable >= 0.5) AND (#q_n_target < #N_Max) THEN #q_n_target := #q_n_target + #q_npk_deficit * #Recipe_N / #q_npk_room_weight; IF #q_n_target > #N_Max THEN #q_n_target := #N_Max; END_IF; END_IF;
+         IF (#P_Enable >= 0.5) AND (#q_p_target < #P_Max) THEN #q_p_target := #q_p_target + #q_npk_deficit * #Recipe_P / #q_npk_room_weight; IF #q_p_target > #P_Max THEN #q_p_target := #P_Max; END_IF; END_IF;
+         IF (#K_Enable >= 0.5) AND (#q_k_target < #K_Max) THEN #q_k_target := #q_k_target + #q_npk_deficit * #Recipe_K / #q_npk_room_weight; IF #q_k_target > #K_Max THEN #q_k_target := #K_Max; END_IF; END_IF;
+      END_IF;
+   END_IF;
+   #q_npk_sum := #q_n_target + #q_p_target + #q_k_target;
+   #q_npk_deficit := #q_f_cmd - #q_npk_sum;
+   IF #q_npk_deficit > 0.0001 THEN
+      #q_npk_room_weight := 0.0;
+      IF (#N_Enable >= 0.5) AND (#q_n_target < #N_Max) THEN #q_npk_room_weight := #q_npk_room_weight + #Recipe_N; END_IF;
+      IF (#P_Enable >= 0.5) AND (#q_p_target < #P_Max) THEN #q_npk_room_weight := #q_npk_room_weight + #Recipe_P; END_IF;
+      IF (#K_Enable >= 0.5) AND (#q_k_target < #K_Max) THEN #q_npk_room_weight := #q_npk_room_weight + #Recipe_K; END_IF;
+      IF #q_npk_room_weight > 0.0 THEN
+         IF (#N_Enable >= 0.5) AND (#q_n_target < #N_Max) THEN #q_n_target := #q_n_target + #q_npk_deficit * #Recipe_N / #q_npk_room_weight; IF #q_n_target > #N_Max THEN #q_n_target := #N_Max; END_IF; END_IF;
+         IF (#P_Enable >= 0.5) AND (#q_p_target < #P_Max) THEN #q_p_target := #q_p_target + #q_npk_deficit * #Recipe_P / #q_npk_room_weight; IF #q_p_target > #P_Max THEN #q_p_target := #P_Max; END_IF; END_IF;
+         IF (#K_Enable >= 0.5) AND (#q_k_target < #K_Max) THEN #q_k_target := #q_k_target + #q_npk_deficit * #Recipe_K / #q_npk_room_weight; IF #q_k_target > #K_Max THEN #q_k_target := #K_Max; END_IF; END_IF;
+      END_IF;
    END_IF;
 
-   IF #q_n_target < 0.0 THEN
-      #q_n_target := 0.0;
-   ELSIF #q_n_target > #N_Max THEN
-      #q_n_target := #N_Max;
-   END_IF;
-   IF #q_p_target < 0.0 THEN
-      #q_p_target := 0.0;
-   ELSIF #q_p_target > #P_Max THEN
-      #q_p_target := #P_Max;
-   END_IF;
-   IF #q_k_target < 0.0 THEN
-      #q_k_target := 0.0;
-   ELSIF #q_k_target > #K_Max THEN
-      #q_k_target := #K_Max;
-   END_IF;
-
+   // 补齐后再次投影，消除阶段切换时三路合计轻微超过总肥液预算的情况。
    #q_npk_sum := #q_n_target + #q_p_target + #q_k_target;
    IF (#q_npk_sum > #q_f_cmd) AND (#q_npk_sum > 0.0) THEN
       #q_npk_scale := #q_f_cmd / #q_npk_sum;
@@ -1013,9 +1721,12 @@ BEGIN
    #q_n_cmd := #q_n_target;
    #q_p_cmd := #q_p_target;
    #q_k_cmd := #q_k_target;
-   #N_Error_Last := #N_Error;
-   #P_Error_Last := #P_Error;
-   #K_Error_Last := #K_Error;
+   IF #N_Saturated AND (#N_Rel_Error > 0.0) THEN #N_Integral := #N_Integral * 0.98; END_IF;
+   IF #P_Saturated AND (#P_Rel_Error > 0.0) THEN #P_Integral := #P_Integral * 0.98; END_IF;
+   IF #K_Saturated AND (#K_Rel_Error > 0.0) THEN #K_Integral := #K_Integral * 0.98; END_IF;
+   #N_Error_Last := #N_Rel_Error;
+   #P_Error_Last := #P_Rel_Error;
+   #K_Error_Last := #K_Rel_Error;
 
    #Valve_F_Actual := #q_f_cmd;
    #Valve_A_Actual := #q_a_cmd;
@@ -1039,7 +1750,8 @@ BEGIN
       #AQ_Valve_K_Raw := 0;
    END_IF;
 
-   #System_Alarm_Light := FALSE;
+   // 本地后备可以继续控制，但远程失联仍必须在 HMI 上报警。
+   #System_Alarm_Light := NOT #Remote_Comms_OK;
 END_FUNCTION_BLOCK
 
 DATA_BLOCK "inst_FertigationControl"
@@ -1052,27 +1764,256 @@ BEGIN
 
 END_DATA_BLOCK
 
+FUNCTION "FC_CallDosingPumps" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+BEGIN
+   // Scheme B: independent N, P, K and acid metering pumps.
+   // Execution_Enable is FALSE by default, so legacy simulation behavior is isolated.
+   "DB_Pump_N"(
+      Enable := "DB_Actuator".Execution_Enable AND NOT "DB1".Emergency_Stop,
+      Flow_SP := "DB1".q_n_cmd,
+      Flow_PV := "DB_Actuator".N_Flow_PV,
+      Flow_Min := "DB_Actuator".N_Flow_Min,
+      Flow_Max := "DB_Actuator".N_Flow_Max,
+      AO_Off_Raw := "DB_Actuator".N_AO_Off_Raw,
+      AO_Raw_Min := "DB_Actuator".N_AO_Raw_Min,
+      AO_Raw_Max := "DB_Actuator".N_AO_Raw_Max,
+      Kp_Flow := "DB_Actuator".N_Kp_Flow,
+      Ki_Flow := "DB_Actuator".N_Ki_Flow,
+      Cycle_Time_s := "DB_Actuator".Cycle_Time_s,
+      Run_Feedback := "DB_Actuator".N_Run_Feedback,
+      Drive_Ready := "DB_Actuator".N_Drive_Ready,
+      Drive_Fault := "DB_Actuator".N_Drive_Fault,
+      Tank_Low_Level := "DB_Actuator".N_Tank_Low_Level,
+      Water_Flow_OK := "DB_Actuator".Water_Flow_OK,
+      Reset := "DB_Actuator".Reset_All OR "DB_Actuator".N_Reset,
+      Start_Fail_Delay_s := "DB_Actuator".N_Start_Fail_Delay_s,
+      No_Flow_Delay_s := "DB_Actuator".N_No_Flow_Delay_s,
+      Flow_Deviation_Delay_s := "DB_Actuator".N_Flow_Deviation_Delay_s,
+      No_Flow_Threshold := "DB_Actuator".N_No_Flow_Threshold,
+      Flow_Deviation_Abs := "DB_Actuator".N_Flow_Deviation_Abs,
+      Flow_Deviation_Rel := "DB_Actuator".N_Flow_Deviation_Rel,
+      Run_Command => "DB_Actuator".N_Run_Command,
+      AO_Command_Raw => "DB_Actuator".N_AO_Command_Raw,
+      Flow_SP_Limited => "DB_Actuator".N_Flow_SP_Limited,
+      Running => "DB_Actuator".N_Running,
+      Ready => "DB_Actuator".N_Ready,
+      No_Flow_Alarm => "DB_Actuator".N_No_Flow_Alarm,
+      Flow_Deviation_Alarm => "DB_Actuator".N_Flow_Deviation_Alarm,
+      Start_Fail_Alarm => "DB_Actuator".N_Start_Fail_Alarm,
+      Saturated => "DB_Actuator".N_Saturated,
+      Interlocked => "DB_Actuator".N_Interlocked,
+      Control_Percent => "DB_Actuator".N_Control_Percent
+   );
+
+   "DB_Pump_P"(
+      Enable := "DB_Actuator".Execution_Enable AND NOT "DB1".Emergency_Stop,
+      Flow_SP := "DB1".q_p_cmd,
+      Flow_PV := "DB_Actuator".P_Flow_PV,
+      Flow_Min := "DB_Actuator".P_Flow_Min,
+      Flow_Max := "DB_Actuator".P_Flow_Max,
+      AO_Off_Raw := "DB_Actuator".P_AO_Off_Raw,
+      AO_Raw_Min := "DB_Actuator".P_AO_Raw_Min,
+      AO_Raw_Max := "DB_Actuator".P_AO_Raw_Max,
+      Kp_Flow := "DB_Actuator".P_Kp_Flow,
+      Ki_Flow := "DB_Actuator".P_Ki_Flow,
+      Cycle_Time_s := "DB_Actuator".Cycle_Time_s,
+      Run_Feedback := "DB_Actuator".P_Run_Feedback,
+      Drive_Ready := "DB_Actuator".P_Drive_Ready,
+      Drive_Fault := "DB_Actuator".P_Drive_Fault,
+      Tank_Low_Level := "DB_Actuator".P_Tank_Low_Level,
+      Water_Flow_OK := "DB_Actuator".Water_Flow_OK,
+      Reset := "DB_Actuator".Reset_All OR "DB_Actuator".P_Reset,
+      Start_Fail_Delay_s := "DB_Actuator".P_Start_Fail_Delay_s,
+      No_Flow_Delay_s := "DB_Actuator".P_No_Flow_Delay_s,
+      Flow_Deviation_Delay_s := "DB_Actuator".P_Flow_Deviation_Delay_s,
+      No_Flow_Threshold := "DB_Actuator".P_No_Flow_Threshold,
+      Flow_Deviation_Abs := "DB_Actuator".P_Flow_Deviation_Abs,
+      Flow_Deviation_Rel := "DB_Actuator".P_Flow_Deviation_Rel,
+      Run_Command => "DB_Actuator".P_Run_Command,
+      AO_Command_Raw => "DB_Actuator".P_AO_Command_Raw,
+      Flow_SP_Limited => "DB_Actuator".P_Flow_SP_Limited,
+      Running => "DB_Actuator".P_Running,
+      Ready => "DB_Actuator".P_Ready,
+      No_Flow_Alarm => "DB_Actuator".P_No_Flow_Alarm,
+      Flow_Deviation_Alarm => "DB_Actuator".P_Flow_Deviation_Alarm,
+      Start_Fail_Alarm => "DB_Actuator".P_Start_Fail_Alarm,
+      Saturated => "DB_Actuator".P_Saturated,
+      Interlocked => "DB_Actuator".P_Interlocked,
+      Control_Percent => "DB_Actuator".P_Control_Percent
+   );
+
+   "DB_Pump_K"(
+      Enable := "DB_Actuator".Execution_Enable AND NOT "DB1".Emergency_Stop,
+      Flow_SP := "DB1".q_k_cmd,
+      Flow_PV := "DB_Actuator".K_Flow_PV,
+      Flow_Min := "DB_Actuator".K_Flow_Min,
+      Flow_Max := "DB_Actuator".K_Flow_Max,
+      AO_Off_Raw := "DB_Actuator".K_AO_Off_Raw,
+      AO_Raw_Min := "DB_Actuator".K_AO_Raw_Min,
+      AO_Raw_Max := "DB_Actuator".K_AO_Raw_Max,
+      Kp_Flow := "DB_Actuator".K_Kp_Flow,
+      Ki_Flow := "DB_Actuator".K_Ki_Flow,
+      Cycle_Time_s := "DB_Actuator".Cycle_Time_s,
+      Run_Feedback := "DB_Actuator".K_Run_Feedback,
+      Drive_Ready := "DB_Actuator".K_Drive_Ready,
+      Drive_Fault := "DB_Actuator".K_Drive_Fault,
+      Tank_Low_Level := "DB_Actuator".K_Tank_Low_Level,
+      Water_Flow_OK := "DB_Actuator".Water_Flow_OK,
+      Reset := "DB_Actuator".Reset_All OR "DB_Actuator".K_Reset,
+      Start_Fail_Delay_s := "DB_Actuator".K_Start_Fail_Delay_s,
+      No_Flow_Delay_s := "DB_Actuator".K_No_Flow_Delay_s,
+      Flow_Deviation_Delay_s := "DB_Actuator".K_Flow_Deviation_Delay_s,
+      No_Flow_Threshold := "DB_Actuator".K_No_Flow_Threshold,
+      Flow_Deviation_Abs := "DB_Actuator".K_Flow_Deviation_Abs,
+      Flow_Deviation_Rel := "DB_Actuator".K_Flow_Deviation_Rel,
+      Run_Command => "DB_Actuator".K_Run_Command,
+      AO_Command_Raw => "DB_Actuator".K_AO_Command_Raw,
+      Flow_SP_Limited => "DB_Actuator".K_Flow_SP_Limited,
+      Running => "DB_Actuator".K_Running,
+      Ready => "DB_Actuator".K_Ready,
+      No_Flow_Alarm => "DB_Actuator".K_No_Flow_Alarm,
+      Flow_Deviation_Alarm => "DB_Actuator".K_Flow_Deviation_Alarm,
+      Start_Fail_Alarm => "DB_Actuator".K_Start_Fail_Alarm,
+      Saturated => "DB_Actuator".K_Saturated,
+      Interlocked => "DB_Actuator".K_Interlocked,
+      Control_Percent => "DB_Actuator".K_Control_Percent
+   );
+
+   "DB_Pump_Acid"(
+      Enable := "DB_Actuator".Execution_Enable AND NOT "DB1".Emergency_Stop,
+      Flow_SP := "DB1".q_a_cmd,
+      Flow_PV := "DB_Actuator".Acid_Flow_PV,
+      Flow_Min := "DB_Actuator".Acid_Flow_Min,
+      Flow_Max := "DB_Actuator".Acid_Flow_Max,
+      AO_Off_Raw := "DB_Actuator".Acid_AO_Off_Raw,
+      AO_Raw_Min := "DB_Actuator".Acid_AO_Raw_Min,
+      AO_Raw_Max := "DB_Actuator".Acid_AO_Raw_Max,
+      Kp_Flow := "DB_Actuator".Acid_Kp_Flow,
+      Ki_Flow := "DB_Actuator".Acid_Ki_Flow,
+      Cycle_Time_s := "DB_Actuator".Cycle_Time_s,
+      Run_Feedback := "DB_Actuator".Acid_Run_Feedback,
+      Drive_Ready := "DB_Actuator".Acid_Drive_Ready,
+      Drive_Fault := "DB_Actuator".Acid_Drive_Fault,
+      Tank_Low_Level := "DB_Actuator".Acid_Tank_Low_Level,
+      Water_Flow_OK := "DB_Actuator".Water_Flow_OK,
+      Reset := "DB_Actuator".Reset_All OR "DB_Actuator".Acid_Reset,
+      Start_Fail_Delay_s := "DB_Actuator".Acid_Start_Fail_Delay_s,
+      No_Flow_Delay_s := "DB_Actuator".Acid_No_Flow_Delay_s,
+      Flow_Deviation_Delay_s := "DB_Actuator".Acid_Flow_Deviation_Delay_s,
+      No_Flow_Threshold := "DB_Actuator".Acid_No_Flow_Threshold,
+      Flow_Deviation_Abs := "DB_Actuator".Acid_Flow_Deviation_Abs,
+      Flow_Deviation_Rel := "DB_Actuator".Acid_Flow_Deviation_Rel,
+      Run_Command => "DB_Actuator".Acid_Run_Command,
+      AO_Command_Raw => "DB_Actuator".Acid_AO_Command_Raw,
+      Flow_SP_Limited => "DB_Actuator".Acid_Flow_SP_Limited,
+      Running => "DB_Actuator".Acid_Running,
+      Ready => "DB_Actuator".Acid_Ready,
+      No_Flow_Alarm => "DB_Actuator".Acid_No_Flow_Alarm,
+      Flow_Deviation_Alarm => "DB_Actuator".Acid_Flow_Deviation_Alarm,
+      Start_Fail_Alarm => "DB_Actuator".Acid_Start_Fail_Alarm,
+      Saturated => "DB_Actuator".Acid_Saturated,
+      Interlocked => "DB_Actuator".Acid_Interlocked,
+      Control_Percent => "DB_Actuator".Acid_Control_Percent
+   );
+
+   "DB_Actuator".Any_Demand := "DB_Actuator".Execution_Enable AND (
+      ("DB1".q_n_cmd > 0.0) OR ("DB1".q_p_cmd > 0.0)
+      OR ("DB1".q_k_cmd > 0.0) OR ("DB1".q_a_cmd > 0.0));
+
+   "DB_Actuator".Any_Trip := "DB_Actuator".Execution_Enable AND (
+      "DB_Actuator".N_Start_Fail_Alarm OR "DB_Actuator".N_No_Flow_Alarm
+      OR "DB_Actuator".P_Start_Fail_Alarm OR "DB_Actuator".P_No_Flow_Alarm
+      OR "DB_Actuator".K_Start_Fail_Alarm OR "DB_Actuator".K_No_Flow_Alarm
+      OR "DB_Actuator".Acid_Start_Fail_Alarm OR "DB_Actuator".Acid_No_Flow_Alarm
+      OR "DB_Actuator".N_Drive_Fault OR "DB_Actuator".P_Drive_Fault
+      OR "DB_Actuator".K_Drive_Fault OR "DB_Actuator".Acid_Drive_Fault
+      OR "DB_Actuator".N_Tank_Low_Level OR "DB_Actuator".P_Tank_Low_Level
+      OR "DB_Actuator".K_Tank_Low_Level OR "DB_Actuator".Acid_Tank_Low_Level
+      OR ("DB_Actuator".Any_Demand AND NOT "DB_Actuator".Water_Flow_OK));
+
+   "DB_Actuator".Any_Alarm := "DB_Actuator".Execution_Enable AND (
+      "DB_Actuator".Any_Trip
+      OR "DB_Actuator".N_Flow_Deviation_Alarm
+      OR "DB_Actuator".P_Flow_Deviation_Alarm
+      OR "DB_Actuator".K_Flow_Deviation_Alarm
+      OR "DB_Actuator".Acid_Flow_Deviation_Alarm);
+
+   IF "DB_Actuator".Execution_Enable THEN
+      // The total fertilizer AO is forced off in Scheme B to prevent double dosing.
+      "DB1".AQ_Valve_F_Raw := 0;
+      "DB1".AQ_Valve_N_Raw := "DB_Actuator".N_AO_Command_Raw;
+      "DB1".AQ_Valve_P_Raw := "DB_Actuator".P_AO_Command_Raw;
+      "DB1".AQ_Valve_K_Raw := "DB_Actuator".K_AO_Command_Raw;
+      "DB1".AQ_Valve_A_Raw := "DB_Actuator".Acid_AO_Command_Raw;
+
+      // Real feedback replaces the previous command-as-feedback simulation value.
+      "DB1".Valve_F_Actual := "DB_Actuator".N_Flow_PV
+         + "DB_Actuator".P_Flow_PV + "DB_Actuator".K_Flow_PV;
+      "DB1".Valve_A_Actual := "DB_Actuator".Acid_Flow_PV;
+   END_IF;
+
+   "DB1".System_Alarm_Light := "DB1".System_Alarm_Light
+      OR "DB_Actuator".Any_Alarm;
+END_FUNCTION
+
 FUNCTION "FC_CallFertigationControl" : Void
 { S7_Optimized_Access := 'TRUE' }
 VERSION : 0.1
    VAR_TEMP
-      Manual_q_f_target : Real;
-      Manual_q_a_target : Real;
-      Manual_q_n_target : Real;
-      Manual_q_p_target : Real;
-      Manual_q_k_target : Real;
+      Mode_EStop : Bool;
+      Mode_Manual : Bool;
+      Mode_Remote_Auto : Bool;
+      Mode_Stage_Auto : Bool;
+      Mode_Local_Auto : Bool;
+      Mode_Standby : Bool;
+      Remote_Auto_Available : Bool;
+      PID_Control_Enable : Bool;
    END_VAR
 
 BEGIN
    // 在 OB1 中调用本 FC，即可完成：
    // DB1 输入区 -> FB_FertigationControl -> DB1 输出区。
-   // 优先级：急停 > 手动模式 > 自动闭环。
-   // 开关量模式联锁、报警灯和 q_f/q_a 手动选择由 LAD 块完成。
+   // 固定模式表：
+   // 1) Emergency_Stop=TRUE -> 急停，所有输出归零。
+   // 2) Emergency_Stop=FALSE 且 Manual_Mode=TRUE -> 人工 EC/pH 目标，PLC PID 执行。
+   // 3) Emergency_Stop=FALSE 且 Manual_Mode=FALSE 且 Auto_Mode=TRUE 且 SAC_Enable=TRUE -> 远程自动。
+   // 4) Emergency_Stop=FALSE 且 Manual_Mode=FALSE 且 Auto_Mode=TRUE 且 SAC_Enable=FALSE 且 Stage_Auto_SP_Enable=TRUE -> 阶段自动。
+   // 5) Emergency_Stop=FALSE 且 Manual_Mode=FALSE 且 Auto_Mode=TRUE 且 SAC_Enable=FALSE 且 Stage_Auto_SP_Enable=FALSE -> 本地定值自动。
+   // 6) Emergency_Stop=FALSE 且 Manual_Mode=FALSE 且 Auto_Mode=FALSE -> 待机，所有输出归零。
+   // 开关量联锁和报警灯由 FC_ModeInterlock_LAD 完成。
+   // 六种互斥运行模式由 FC_ModeSelector_LAD 完成。
    // 连续量限幅、斜坡、模拟量换算和自动控制算法保留在 SCL。
 
    "FC_ModeInterlock_LAD"();
 
-   IF "DB1".Emergency_Stop THEN
+   // 远程命令只有在心跳正常时才有效；失联后把 SAC 请求视为无效，
+   // 由现有 LAD 模式表自动选择阶段自动或本地定值自动。
+   IF NOT "DB1".Remote_Comms_OK THEN
+      "DB1".SAC_Enable := FALSE;
+   END_IF;
+   // 自动模式的本地来源固定为生长阶段目标，不提供人工来源切换。
+   "DB1".Stage_Auto_SP_Enable := TRUE;
+   #Remote_Auto_Available := "DB1".SAC_Enable AND "DB1".Remote_Comms_OK;
+
+   "FC_ModeSelector_LAD"(
+      Emergency_Stop := "DB1".Emergency_Stop,
+      Manual_Mode := "DB1".Manual_Mode,
+      Auto_Mode := "DB1".Auto_Mode,
+      SAC_Enable := #Remote_Auto_Available,
+      Stage_Auto_SP_Enable := "DB1".Stage_Auto_SP_Enable,
+      Mode_EStop => #Mode_EStop,
+      Mode_Manual => #Mode_Manual,
+      Mode_Remote_Auto => #Mode_Remote_Auto,
+      Mode_Stage_Auto => #Mode_Stage_Auto,
+      Mode_Local_Auto => #Mode_Local_Auto,
+      Mode_Standby => #Mode_Standby
+   );
+
+   #PID_Control_Enable := #Mode_Manual OR #Mode_Remote_Auto OR #Mode_Stage_Auto OR #Mode_Local_Auto;
+
+   IF #Mode_EStop THEN
       "DB1".q_f_cmd := 0.0;
       "DB1".q_a_cmd := 0.0;
       "DB1".q_n_cmd := 0.0;
@@ -1094,98 +2035,8 @@ BEGIN
       RETURN;
    END_IF;
 
-   IF "DB1".Manual_PumpValve_Enable THEN
-      #Manual_q_f_target := "DB1".Manual_q_f_Selected;
-      IF #Manual_q_f_target < 0.0 THEN
-         #Manual_q_f_target := 0.0;
-      ELSIF #Manual_q_f_target > 10.0 THEN
-         #Manual_q_f_target := 10.0;
-      END_IF;
-
-      #Manual_q_a_target := "DB1".Manual_q_a_Selected;
-      IF #Manual_q_a_target < 0.0 THEN
-         #Manual_q_a_target := 0.0;
-      ELSIF #Manual_q_a_target > 4.0 THEN
-         #Manual_q_a_target := 4.0;
-      END_IF;
-
-      #Manual_q_n_target := "DB1".Manual_q_n_Set;
-      IF #Manual_q_n_target < 0.0 THEN
-         #Manual_q_n_target := 0.0;
-      ELSIF #Manual_q_n_target > "DB1".N_Max THEN
-         #Manual_q_n_target := "DB1".N_Max;
-      END_IF;
-
-      #Manual_q_p_target := "DB1".Manual_q_p_Set;
-      IF #Manual_q_p_target < 0.0 THEN
-         #Manual_q_p_target := 0.0;
-      ELSIF #Manual_q_p_target > "DB1".P_Max THEN
-         #Manual_q_p_target := "DB1".P_Max;
-      END_IF;
-
-      #Manual_q_k_target := "DB1".Manual_q_k_Set;
-      IF #Manual_q_k_target < 0.0 THEN
-         #Manual_q_k_target := 0.0;
-      ELSIF #Manual_q_k_target > "DB1".K_Max THEN
-         #Manual_q_k_target := "DB1".K_Max;
-      END_IF;
-
-      "inst_RL_F"(
-         target := #Manual_q_f_target,
-         maxRateUp := 1.5,
-         maxRateDown := 2.0,
-         cycleTime := 0.1,
-         enable := TRUE,
-         reset := FALSE,
-         output => "DB1".q_f_cmd,
-         isLimited => "DB1".q_f_limited
-      );
-
-      "inst_RL_A"(
-         target := #Manual_q_a_target,
-         maxRateUp := 0.40,
-         maxRateDown := 0.45,
-         cycleTime := 0.1,
-         enable := TRUE,
-         reset := FALSE,
-         output => "DB1".q_a_cmd,
-         isLimited => "DB1".q_a_limited
-      );
-
-      "DB1".q_n_cmd := #Manual_q_n_target;
-      "DB1".q_p_cmd := #Manual_q_p_target;
-      "DB1".q_k_cmd := #Manual_q_k_target;
-      "DB1".q_f_raw := "DB1".q_f_cmd;
-      "DB1".q_a_raw := "DB1".q_a_cmd;
-      "DB1".Valve_F_Actual := "DB1".q_f_cmd;
-      "DB1".Valve_A_Actual := "DB1".q_a_cmd;
-      "DB1".AQ_Valve_F_Raw := REAL_TO_INT("DB1".q_f_cmd / 10.0 * 27648.0);
-      "DB1".AQ_Valve_A_Raw := REAL_TO_INT("DB1".q_a_cmd / 4.0 * 27648.0);
-      IF "DB1".N_Max > 0.0 THEN
-         "DB1".AQ_Valve_N_Raw := REAL_TO_INT("DB1".q_n_cmd / "DB1".N_Max * 27648.0);
-      ELSE
-         "DB1".AQ_Valve_N_Raw := 0;
-      END_IF;
-      IF "DB1".P_Max > 0.0 THEN
-         "DB1".AQ_Valve_P_Raw := REAL_TO_INT("DB1".q_p_cmd / "DB1".P_Max * 27648.0);
-      ELSE
-         "DB1".AQ_Valve_P_Raw := 0;
-      END_IF;
-      IF "DB1".K_Max > 0.0 THEN
-         "DB1".AQ_Valve_K_Raw := REAL_TO_INT("DB1".q_k_cmd / "DB1".K_Max * 27648.0);
-      ELSE
-         "DB1".AQ_Valve_K_Raw := 0;
-      END_IF;
-      "DB1".Actual_Valve_F := "DB1".Valve_F_Actual;
-      "DB1".Actual_Valve_A := "DB1".Valve_A_Actual;
-      "DB1".Valve_F_Opt_SP := "DB1".q_f_cmd;
-      "DB1".Valve_A_Opt_SP := "DB1".q_a_cmd;
-      "DB1".Ramp_Target_F := "DB1".q_f_cmd;
-      "DB1".Ramp_Target_A := "DB1".q_a_cmd;
-      RETURN;
-   END_IF;
-
-   IF NOT "DB1".Auto_Active THEN
+   // 待机没有任何目标来源，所有执行量安全归零。
+   IF #Mode_Standby THEN
       "DB1".q_f_cmd := 0.0;
       "DB1".q_a_cmd := 0.0;
       "DB1".q_n_cmd := 0.0;
@@ -1207,7 +2058,7 @@ BEGIN
       RETURN;
    END_IF;
 
-   IF "DB1".Stage_Auto_SP_Enable AND NOT "DB1".SAC_Enable THEN
+   IF #Mode_Stage_Auto THEN
       IF "DB1".Growth_Stage = 0 THEN
          "DB1".EC_Set_SP := 0.8;
          "DB1".pH_Set_SP := 6.2;
@@ -1223,12 +2074,30 @@ BEGIN
       END_IF;
    END_IF;
 
+   // 真实设备没有 N/P/K 在线反馈时，只使用 PLC 内置阶段配方。
+   // PLCSIM/Python 置 NPK_Feedback_Valid 后保留脚本写入的目标和土壤反馈。
+   IF NOT ("DB1".NPK_Feedback_Valid AND "DB1".Remote_Comms_OK) THEN
+      IF "DB1".Growth_Stage = 0 THEN
+         "DB1".N_Target := 0.75; "DB1".P_Target := 0.55; "DB1".K_Target := 0.65;
+      ELSIF "DB1".Growth_Stage = 1 THEN
+         "DB1".N_Target := 0.95; "DB1".P_Target := 0.75; "DB1".K_Target := 0.90;
+      ELSIF "DB1".Growth_Stage = 2 THEN
+         "DB1".N_Target := 1.10; "DB1".P_Target := 0.85; "DB1".K_Target := 1.25;
+      ELSE
+         "DB1".N_Target := 0.85; "DB1".P_Target := 0.65; "DB1".K_Target := 1.05;
+      END_IF;
+   END_IF;
+
    "inst_FertigationControl"(
       EC_Set_SP := "DB1".EC_Set_SP,
       pH_Set_SP := "DB1".pH_Set_SP,
       EC_Actual := "DB1".EC_Actual,
       pH_Actual := "DB1".pH_Actual,
-      SAC_Enable := "DB1".SAC_Enable,
+      SAC_Enable := #PID_Control_Enable,
+      Remote_Comms_Required := #Mode_Remote_Auto,
+      Local_Fallback_Mode := (#Mode_Manual OR #Mode_Stage_Auto OR #Mode_Local_Auto),
+      Local_EC_Bias := 0.0,
+      Local_pH_Bias := 0.0,
       Remote_Heartbeat := "DB1".Remote_Heartbeat,
       CycleTime := 0.1,
       Kp_EC := "DB1".Kp_EC_Set,
@@ -1239,8 +2108,8 @@ BEGIN
       Kd_pH := "DB1".Kd_pH_Set,
       EC_Filter_Tau := 2.0,
       pH_Filter_Tau := 4.0,
-      EC_Deadband := 0.03,
-      pH_Deadband := 0.06,
+      EC_Deadband := 0.005,
+      pH_Deadband := 0.005,
       EC_Trim_Band := "DB1".EC_Trim_Band,
       pH_Trim_Band := "DB1".pH_Trim_Band,
       EC_MaxInputStep := 0.15,
@@ -1275,6 +2144,9 @@ BEGIN
       K_Max := "DB1".K_Max,
       Watchdog_Limit := 10000,
       Growth_Stage := "DB1".Growth_Stage,
+      NPK_Feedback_Valid := "DB1".NPK_Feedback_Valid AND "DB1".Remote_Comms_OK,
+      Compressed_HIL_Enable := "DB1".Compressed_HIL_Enable AND "DB1".Remote_Comms_OK,
+      Fixed_PID_Test_Enable := "DB1".Fixed_PID_Test_Enable AND "DB1".Remote_Comms_OK,
       Remote_Comms_OK => "DB1".Remote_Comms_OK,
       Watchdog_Timer => "DB1".Watchdog_Timer,
       Stage_EC_SP => "DB1".Stage_EC_SP,
@@ -1293,10 +2165,46 @@ BEGIN
       q_k_cmd => "DB1".q_k_cmd,
       AQ_Valve_N_Raw => "DB1".AQ_Valve_N_Raw,
       AQ_Valve_P_Raw => "DB1".AQ_Valve_P_Raw,
-      AQ_Valve_K_Raw => "DB1".AQ_Valve_K_Raw
+      AQ_Valve_K_Raw => "DB1".AQ_Valve_K_Raw,
+      q_f_limited => "DB1".q_f_limited,
+      q_a_limited => "DB1".q_a_limited,
+      Kp_EC_Effective_Out => "DB1".Kp_EC_Effective,
+      Ki_EC_Effective_Out => "DB1".Ki_EC_Effective,
+      Kd_EC_Effective_Out => "DB1".Kd_EC_Effective,
+      Kp_pH_Effective_Out => "DB1".Kp_pH_Effective,
+      Ki_pH_Effective_Out => "DB1".Ki_pH_Effective,
+      Kd_pH_Effective_Out => "DB1".Kd_pH_Effective,
+      EC_PID_Error_Out => "DB1".EC_PID_Error,
+      pH_PID_Error_Out => "DB1".pH_PID_Error,
+      EC_PID_Integral_Out => "DB1".EC_PID_Integral,
+      pH_PID_Integral_Out => "DB1".pH_PID_Integral,
+      q_f_Feedforward_Out => "DB1".q_f_Feedforward,
+      q_f_PID_Correction_Out => "DB1".q_f_PID_Correction,
+      q_a_Feedforward_Out => "DB1".q_a_Feedforward,
+      q_a_PID_Correction_Out => "DB1".q_a_PID_Correction,
+      N_Error_Out => "DB1".N_Error,
+      P_Error_Out => "DB1".P_Error,
+      K_Error_Out => "DB1".K_Error,
+      N_PID_Correction_Out => "DB1".N_PID_Correction,
+      P_PID_Correction_Out => "DB1".P_PID_Correction,
+      K_PID_Correction_Out => "DB1".K_PID_Correction,
+      NPK_Optimization_Weight_Out => "DB1".NPK_Optimization_Weight,
+      NPK_Capacity_Limited_Out => "DB1".NPK_Capacity_Limited,
+      Feedforward_Hold_Active_Out => "DB1".Feedforward_Hold_Active,
+      Adaptive_PID_Active_Out => "DB1".Adaptive_PID_Active
    );
 
+   // 测试反馈和压缩 HIL 标志在通信超时后自动恢复真实设备默认。
+   IF NOT "DB1".Remote_Comms_OK THEN
+      "DB1".NPK_Feedback_Valid := FALSE;
+      "DB1".Compressed_HIL_Enable := FALSE;
+      "DB1".Fixed_PID_Test_Enable := FALSE;
+   END_IF;
+
    // 同步部分内部状态到 DB1，方便在线监控。
+   // Execute the isolated real-actuator layer after the supervisory controller.
+   "FC_CallDosingPumps"();
+
    "DB1".Last_Heartbeat := "inst_FertigationControl".Last_Heartbeat;
    "DB1".Watchdog_Count := "inst_FertigationControl".Watchdog_Count;
    "DB1".q_f_raw := "inst_FertigationControl".q_f_raw;

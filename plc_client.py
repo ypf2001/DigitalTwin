@@ -54,6 +54,7 @@ class PLCClient:
         self._client = snap7.client.Client()
         self._connected = False
         self._heartbeat = 0
+        self._read_retrying = False
 
     # ================================================================
     #  连接管理
@@ -266,9 +267,9 @@ class PLCClient:
             return False
 
         defaults = {
-            "N": {"enable": 1.0, "ratio": 0.3333, "target": 0.0, "actual": 0.0, "kp": 0.0, "ki": 0.0, "kd": 0.0, "max_flow": 4.0},
-            "P": {"enable": 1.0, "ratio": 0.3333, "target": 0.0, "actual": 0.0, "kp": 0.0, "ki": 0.0, "kd": 0.0, "max_flow": 4.0},
-            "K": {"enable": 1.0, "ratio": 0.3334, "target": 0.0, "actual": 0.0, "kp": 0.0, "ki": 0.0, "kd": 0.0, "max_flow": 4.0},
+            "N": {"enable": 1.0, "ratio": 0.3333, "target": 0.0, "actual": 0.0, "kp": 0.25, "ki": 0.01, "kd": 0.0, "max_flow": 4.0},
+            "P": {"enable": 1.0, "ratio": 0.3333, "target": 0.0, "actual": 0.0, "kp": 0.12, "ki": 0.006, "kd": 0.0, "max_flow": 4.0},
+            "K": {"enable": 1.0, "ratio": 0.3334, "target": 0.0, "actual": 0.0, "kp": 0.25, "ki": 0.008, "kd": 0.0, "max_flow": 4.0},
         }
 
         try:
@@ -299,30 +300,65 @@ class PLCClient:
                                   k_target: float,
                                   n_actual: float,
                                   p_actual: float,
-                                  k_actual: float) -> bool:
-        """Write online/estimated N/P/K target and feedback values into DB1."""
-        names = ["N_Target", "P_Target", "K_Target", "N_Actual", "P_Actual", "K_Actual"]
+                                  k_actual: float,
+                                  feedback_valid: bool = True) -> bool:
+        """Write N/P/K targets and feedback, then atomically expose validity to PLC logic."""
+        names = [
+            "N_Target", "P_Target", "K_Target",
+            "N_Actual", "P_Actual", "K_Actual",
+            "NPK_Feedback_Valid",
+        ]
         missing = [name for name in names if name not in self.addr_map]
         if missing:
             logger.error(f"[PLC] fertilizer feedback address mapping missing: {missing}")
             return False
         try:
             self._ensure_connected()
+            # Invalidate first so a partially written feedback frame is never consumed.
+            self._write_bool("NPK_Feedback_Valid", False)
             self._write_real("N_Target", n_target)
             self._write_real("P_Target", p_target)
             self._write_real("K_Target", k_target)
             self._write_real("N_Actual", n_actual)
             self._write_real("P_Actual", p_actual)
             self._write_real("K_Actual", k_actual)
+            self._write_bool("NPK_Feedback_Valid", bool(feedback_valid))
             return True
         except Exception as e:
             logger.error(f"[PLC] fertilizer feedback write failed: {e}")
             return False
 
     def write_fertilizer_actuals(self, n_actual: float, p_actual: float, k_actual: float) -> bool:
-        """Backward-compatible helper that updates actuals while preserving zero targets."""
-        return self.write_fertilizer_feedback(0.0, 0.0, 0.0, n_actual, p_actual, k_actual)
+        """Backward-compatible actual-only update; it does not enable N/P/K closed loop."""
+        return self.write_fertilizer_feedback(
+            0.0, 0.0, 0.0, n_actual, p_actual, k_actual, feedback_valid=False
+        )
 
+    def write_compressed_hil_mode(self, enabled: bool) -> bool:
+        """Enable shortened PLC feedforward hold for compressed PLCSIM tests only."""
+        if "Compressed_HIL_Enable" not in self.addr_map:
+            logger.error("[PLC] Compressed_HIL_Enable address mapping missing")
+            return False
+        try:
+            self._ensure_connected()
+            self._write_bool("Compressed_HIL_Enable", bool(enabled))
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] compressed HIL mode write failed: {e}")
+            return False
+
+    def write_fixed_pid_test_mode(self, enabled: bool) -> bool:
+        """Select fixed base gains for controlled PLC A/B tests only."""
+        if "Fixed_PID_Test_Enable" not in self.addr_map:
+            logger.error("[PLC] Fixed_PID_Test_Enable address mapping missing")
+            return False
+        try:
+            self._ensure_connected()
+            self._write_bool("Fixed_PID_Test_Enable", bool(enabled))
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] fixed PID test mode write failed: {e}")
+            return False
     def write_manual_mode(self,
                           enabled: bool,
                           q_f: float = 0.0,
@@ -413,21 +449,8 @@ class PLCClient:
         """
         try:
             self._ensure_connected()
-            self._heartbeat = (self._heartbeat + 1) % 32000
-
             self._write_real("EC_Set_SP", ec_set)
             self._write_real("pH_Set_SP", ph_set)
-            self._write_real("EC_Actual", ec_actual)
-            self._write_real("pH_Actual", ph_actual)
-            if "SAC_Enable" in self.addr_map:
-                self._write_bool("SAC_Enable", sac_enable)
-            self._write_int("Remote_Heartbeat", self._heartbeat)
-
-            logger.info(
-                f"[PLC] 写入 → EC_set={ec_set:.3f}, pH_set={ph_set:.3f}, "
-                f"EC_actual={ec_actual:.3f}, pH_actual={ph_actual:.3f}, Heartbeat={self._heartbeat}"
-            )
-            return True
         except (OSError, ConnectionError, AttributeError) as e:
             logger.error(f"[PLC] 写入失败 (网络断开): {e}")
             self._connected = False
@@ -435,6 +458,50 @@ class PLCClient:
             return False
         except Exception as e:
             logger.error(f"[PLC] 写入异常: {e}")
+            return False
+
+        return self.write_feedback(
+            ec_actual=ec_actual,
+            ph_actual=ph_actual,
+            sac_enable=sac_enable,
+        )
+
+    def write_feedback(self,
+                       ec_actual: float,
+                       ph_actual: float,
+                       sac_enable: bool) -> bool:
+        """Write feedback and heartbeat without changing automatic targets.
+
+        Local manual mode uses this path so the supervisory system keeps
+        monitoring the process without overwriting EC_Set_SP or pH_Set_SP.
+        """
+        try:
+            self._ensure_connected()
+            self._heartbeat = (self._heartbeat + 1) % 32000
+
+            # Remove remote automatic authority first when manual is active.
+            if "SAC_Enable" in self.addr_map:
+                self._write_bool("SAC_Enable", sac_enable)
+            self._write_real("EC_Actual", ec_actual)
+            self._write_real("pH_Actual", ph_actual)
+            self._write_int("Remote_Heartbeat", self._heartbeat)
+
+            logger.info(
+                "[PLC] feedback: EC_actual=%.3f, pH_actual=%.3f, "
+                "SAC_Enable=%s, Heartbeat=%d",
+                ec_actual,
+                ph_actual,
+                sac_enable,
+                self._heartbeat,
+            )
+            return True
+        except (OSError, ConnectionError, AttributeError) as e:
+            logger.error(f"[PLC] feedback write failed (connection lost): {e}")
+            self._connected = False
+            self.reconnect()
+            return False
+        except Exception as e:
+            logger.error(f"[PLC] feedback write failed: {e}")
             return False
 
     def write_action(self, valve_f: float, valve_a: float) -> bool:
@@ -461,16 +528,57 @@ class PLCClient:
     #  读取：PLC/PLCSIM → Python
     # ================================================================
 
+    def read_control_mode(self) -> dict | None:
+        """Read only the mode interlock bits needed by the control loop."""
+        names = ["Manual_Mode", "Auto_Mode", "Manual_Active", "Auto_Active"]
+        read_vars = [name for name in names if name in self.addr_map]
+        if not read_vars:
+            return {}
+
+        try:
+            self._ensure_connected()
+            start_offset, total_size = self._calc_read_range(read_vars)
+            raw = self._client.db_read(self.db_number, start_offset, total_size)
+            state = {}
+            for name in read_vars:
+                addr = self.addr_map[name]
+                state[name] = get_bool(
+                    raw,
+                    int(addr["offset"]) - start_offset,
+                    int(addr.get("bit", 0)),
+                )
+            return state
+        except (OSError, ConnectionError, AttributeError) as e:
+            logger.error(f"[PLC] mode read failed (connection lost): {e}")
+            self._connected = False
+            self.reconnect()
+            return None
+        except Exception as e:
+            logger.error(f"[PLC] mode read failed: {e}")
+            return None
+
     def read_state(self) -> dict:
         """从 PLC 回读执行层状态。"""
         preferred = [
             "Remote_Comms_OK", "Watchdog_Timer",
+            "EC_Set_SP", "pH_Set_SP", "EC_Actual", "pH_Actual",
+            "SAC_Enable", "Remote_Heartbeat",
             "Growth_Stage",
             "Stage_EC_SP", "Stage_pH_SP",
             "Active_EC_SP", "Active_pH_SP",
             "Setpoint_Protection_Active", "Stage_Auto_SP_Enable",
             "Kp_EC_Set", "Ki_EC_Set", "Kd_EC_Set",
             "Kp_pH_Set", "Ki_pH_Set", "Kd_pH_Set",
+            "Kp_EC_Effective", "Ki_EC_Effective", "Kd_EC_Effective",
+            "Kp_pH_Effective", "Ki_pH_Effective", "Kd_pH_Effective",
+            "EC_PID_Error", "pH_PID_Error", "EC_PID_Integral", "pH_PID_Integral",
+            "q_f_Feedforward", "q_f_PID_Correction", "q_f_raw", "q_f_limited",
+            "q_a_Feedforward", "q_a_PID_Correction", "q_a_raw", "q_a_limited",
+            "N_Error", "P_Error", "K_Error",
+            "N_PID_Correction", "P_PID_Correction", "K_PID_Correction",
+            "NPK_Optimization_Weight", "NPK_Feedback_Valid", "NPK_Capacity_Limited",
+            "Compressed_HIL_Enable", "Feedforward_Hold_Active", "Adaptive_PID_Active",
+            "Fixed_PID_Test_Enable",
             "Manual_Mode", "Auto_Mode", "Emergency_Stop", "Manual_Active", "Auto_Active",
             "Comm_Normal", "Manual_PumpValve_Enable",
             "Manual_q_f_Set", "Manual_q_a_Set",
@@ -496,25 +604,32 @@ class PLCClient:
         if "q_f_cmd" not in self.addr_map and "Actual_Valve_F" in self.addr_map:
             read_vars = [name for name in legacy if name in self.addr_map]
 
-        try:
-            self._ensure_connected()
-            start_offset, total_size = self._calc_read_range(read_vars)
-            raw = self._client.db_read(self.db_number, start_offset, total_size)
-            state = {}
-            for var_name in read_vars:
+        # Adaptive diagnostics begin at byte 312. A PLCSIM that still contains
+        # the previous DB1 rejects a single read extending to byte 396 with an
+        # "Invalid address" error. Keep the pre-adaptive range observable while
+        # the updated SCL/DB1 is being compiled and downloaded in TIA Portal.
+        legacy_schema_vars = [
+            name for name in read_vars
+            if int(self.addr_map[name]["offset"]) + int(self.addr_map[name]["bytes"]) <= 312
+        ]
+
+        def decode(var_names: list[str], raw: bytearray, start_offset: int) -> dict:
+            decoded = {}
+            for var_name in var_names:
                 addr = self.addr_map[var_name]
                 rel_offset = int(addr["offset"]) - start_offset
                 var_type = addr["type"]
                 if var_type == "real":
-                    state[var_name] = get_real(raw, rel_offset)
+                    decoded[var_name] = get_real(raw, rel_offset)
                 elif var_type == "int":
-                    state[var_name] = get_int(raw, rel_offset)
+                    decoded[var_name] = get_int(raw, rel_offset)
                 elif var_type == "bool":
-                    state[var_name] = get_bool(raw, rel_offset, int(addr.get("bit", 0)))
+                    decoded[var_name] = get_bool(raw, rel_offset, int(addr.get("bit", 0)))
                 else:
-                    state[var_name] = None
+                    decoded[var_name] = None
+            return decoded
 
-            # 统一别名，便于 PLCGymEnv 使用
+        def add_aliases(state: dict) -> dict:
             if "q_f_cmd" not in state and "Actual_Valve_F" in state:
                 state["q_f_cmd"] = state["Actual_Valve_F"]
             if "q_a_cmd" not in state and "Actual_Valve_A" in state:
@@ -523,6 +638,75 @@ class PLCClient:
                 state["Valve_F_Actual"] = state["Actual_Valve_F"]
             if "Valve_A_Actual" not in state and "Actual_Valve_A" in state:
                 state["Valve_A_Actual"] = state["Actual_Valve_A"]
+            return state
+
+        try:
+            self._ensure_connected()
+            start_offset, total_size = self._calc_read_range(read_vars)
+            try:
+                raw = self._client.db_read(self.db_number, start_offset, total_size)
+                state = decode(read_vars, raw, start_offset)
+                state["adaptive_schema_available"] = all(
+                    name in state
+                    for name in ("Kp_EC_Effective", "Kp_pH_Effective", "Adaptive_PID_Active")
+                )
+            except Exception as full_read_error:
+                if not legacy_schema_vars or legacy_schema_vars == read_vars:
+                    raise
+                fallback_start, fallback_size = self._calc_read_range(legacy_schema_vars)
+                logger.warning(
+                    "[PLC] adaptive DB1 fields unavailable; using legacy schema read: %s",
+                    full_read_error,
+                )
+                raw = self._client.db_read(self.db_number, fallback_start, fallback_size)
+                state = decode(legacy_schema_vars, raw, fallback_start)
+                state["adaptive_schema_available"] = False
+
+            state = add_aliases(state)
+
+            # The adaptive DB1 snapshot is larger than the negotiated 240-byte
+            # PDU, so snap7 may split one logical db_read across PLC scans. At a
+            # stage transition that can pair an old q_f_cmd with new N/P/K flows.
+            # Re-read only the fertilizer budget with q_f bracketing the compact
+            # N/P/K range; accept it only when q_f is stable across both reads.
+            budget_names = ("q_f_cmd", "q_n_cmd", "q_p_cmd", "q_k_cmd")
+            if all(name in state and name in self.addr_map for name in budget_names):
+                budget_error = (
+                    float(state["q_n_cmd"]) + float(state["q_p_cmd"])
+                    + float(state["q_k_cmd"]) - float(state["q_f_cmd"])
+                )
+                if not state.get("NPK_Capacity_Limited", False) and abs(budget_error) > 0.001:
+                    q_f_addr = self.addr_map["q_f_cmd"]
+                    npk_names = ("q_n_cmd", "q_p_cmd", "q_k_cmd")
+                    npk_start, npk_size = self._calc_read_range(list(npk_names))
+                    for _ in range(3):
+                        q_f_before = get_real(
+                            self._client.db_read(
+                                self.db_number, int(q_f_addr["offset"]), int(q_f_addr["bytes"])
+                            ),
+                            0,
+                        )
+                        npk_raw = self._client.db_read(self.db_number, npk_start, npk_size)
+                        npk_values = {
+                            name: get_real(
+                                npk_raw, int(self.addr_map[name]["offset"]) - npk_start
+                            )
+                            for name in npk_names
+                        }
+                        q_f_after = get_real(
+                            self._client.db_read(
+                                self.db_number, int(q_f_addr["offset"]), int(q_f_addr["bytes"])
+                            ),
+                            0,
+                        )
+                        if abs(q_f_after - q_f_before) <= 1e-5:
+                            candidate_error = sum(npk_values.values()) - q_f_after
+                            if abs(candidate_error) < abs(budget_error):
+                                state["q_f_cmd"] = q_f_after
+                                state.update(npk_values)
+                                budget_error = candidate_error
+                            if abs(candidate_error) <= 0.001:
+                                break
 
             logger.info(
                 f"[PLC] 读取 ← CommOK={state.get('Remote_Comms_OK')}, "
@@ -535,6 +719,20 @@ class PLCClient:
             self.reconnect()
             return None
         except Exception as e:
+            message = str(e).lower()
+            connection_fault = any(
+                marker in message
+                for marker in ("not connected", "receive timeout", "connection reset", "iso :")
+            )
+            if connection_fault:
+                logger.warning(f"[PLC] 读取通信异常，立即重连并重试一次: {e}")
+                self._connected = False
+                if self.reconnect() and not self._read_retrying:
+                    self._read_retrying = True
+                    try:
+                        return self.read_state()
+                    finally:
+                        self._read_retrying = False
             logger.error(f"[PLC] 读取异常: {e}")
             return None
 

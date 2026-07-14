@@ -27,6 +27,20 @@ PowerShell 常用运行命令：
      --fixed-dev-ec 1.1 --fixed-dev-ph 6.1 `
      --fixed-mid-ec 1.5 --fixed-mid-ph 5.9 `
      --fixed-late-ec 1.0 --fixed-late-ph 6.1
+   cd "D:\Digital Twin"
+   .\.venv\Scripts\python.exe .\experiments\run_full_season_plc.py `
+     --manual-test `
+     --fixed-ini-ec 0.8 --fixed-ini-ph 6.2 `
+     --fixed-dev-ec 1.1 --fixed-dev-ph 6.1 `
+     --fixed-mid-ec 1.5 --fixed-mid-ph 5.9 `
+     --fixed-late-ec 1.0 --fixed-late-ph 6.1
+
+        cd "D:\Digital Twin"
+   .\.venv\Scripts\python.exe .\experiments\run_full_season_plc.py `
+     --fixed-ini-ec 0.8 --fixed-ini-ph 6.2 `
+     --fixed-dev-ec 1.1 --fixed-dev-ph 6.1 `
+     --fixed-mid-ec 1.5 --fixed-mid-ph 5.9 `
+     --fixed-late-ec 1.0 --fixed-late-ph 6.1
 
 3. 10 天快速 PLC 测试：
 
@@ -63,6 +77,7 @@ import csv
 import json
 import logging
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -100,7 +115,46 @@ CROP_TARGETS = {
     "LATE": np.array([1.0, 6.1], dtype=np.float32),
 }
 
+
+def _enable_compressed_hil_after_handshake(plc, *, max_attempts: int = 8) -> bool:
+    """Enable the test-only flag only after the PLC heartbeat is accepted.
+
+    The PLC intentionally clears test flags while Remote_Comms_OK is false.
+    A successful Snap7 write alone therefore is not sufficient: wait for the
+    heartbeat handshake, write the flag, and verify the value after a scan.
+    """
+    for attempt in range(1, max_attempts + 1):
+        state = plc.read_state() or {}
+        if not bool(state.get("Remote_Comms_OK", False)):
+            plc.write_feedback(0.8, 6.25, sac_enable=False)
+            time.sleep(plc.cycle_s)
+            continue
+
+        if not plc.write_compressed_hil_mode(True):
+            time.sleep(plc.cycle_s)
+            continue
+
+        time.sleep(plc.cycle_s)
+        confirmed = plc.read_state() or {}
+        if bool(confirmed.get("Remote_Comms_OK", False)) and bool(
+            confirmed.get("Compressed_HIL_Enable", False)
+        ):
+            logger.info("Compressed HIL enabled and verified on attempt %d", attempt)
+            return True
+
+        logger.warning(
+            "Compressed HIL verification attempt %d/%d failed: CommOK=%s flag=%s",
+            attempt,
+            max_attempts,
+            confirmed.get("Remote_Comms_OK"),
+            confirmed.get("Compressed_HIL_Enable"),
+        )
+
+    return False
+
 STAGE_SEQUENCE = ("INI", "DEV", "MID", "LATE")
+EC_PH_INTEGRAL_LIMIT = 8.0
+INTEGRAL_LIMIT_DETECTION_EPSILON = 0.001
 
 
 def _fixed_actions_from_args(args: argparse.Namespace) -> dict[str, np.ndarray]:
@@ -301,7 +355,15 @@ def _plot_soil_ec_ph(path: Path, rows: list[dict[str, Any]]) -> None:
         label="目标EC",
     )
     ph_line, = ax_ph.plot(time_day, soil_ph, color="#4e79a7", linewidth=1.6, label="估算土壤pH")
-    ph_target_line = ax_ph.axhline(6.0, color="#4e79a7", linestyle="--", linewidth=1.2, alpha=0.65, label="目标pH")
+    ph_target_line, = ax_ph.plot(
+        time_day,
+        target_ph,
+        color="#4e79a7",
+        linestyle="--",
+        linewidth=1.2,
+        alpha=0.65,
+        label="目标pH",
+    )
 
     for stage, meta in STAGES.items():
         if meta["start_day"] > 0:
@@ -309,7 +371,7 @@ def _plot_soil_ec_ph(path: Path, rows: list[dict[str, Any]]) -> None:
         mid = (meta["start_day"] + meta["end_day"]) / 2.0
         ax_ec.text(mid, 0.98, stage, transform=ax_ec.get_xaxis_transform(), ha="center", va="top", fontsize=9)
 
-    ax_ec.set_title("110天SAC+PLC仿真：土壤EC与pH（日均平滑）")
+    ax_ec.set_title("110天PLC全周期仿真：土壤EC与pH（日均平滑）")
     ax_ec.set_xlabel("天数")
     ax_ec.set_ylabel("土壤EC (dS/m)", color="#2f7d32")
     ax_ph.set_ylabel("估算土壤pH", color="#4e79a7")
@@ -350,6 +412,164 @@ def _set_stage(env, plc, stage: str) -> bool:
     return plc.write_growth_stage(STAGES[stage]["idx"])
 
 
+
+def _tail_rows_by_stage(rows: list[dict[str, Any]], fraction: float = 0.25) -> dict[str, list[dict[str, Any]]]:
+    """Return the final part of every stage for steady-state acceptance checks."""
+    result: dict[str, list[dict[str, Any]]] = {}
+    for stage in STAGE_SEQUENCE:
+        stage_rows = [row for row in rows if row.get("stage") == stage]
+        if not stage_rows:
+            continue
+        count = min(len(stage_rows), max(3, int(np.ceil(len(stage_rows) * fraction))))
+        result[stage] = stage_rows[-count:]
+    return result
+
+
+def _signal_metrics(values: list[float]) -> dict[str, float | None]:
+    data = np.asarray(values, dtype=float)
+    finite = data[np.isfinite(data)]
+    if finite.size == 0:
+        return {"mae": None, "max_abs": None, "mean": None}
+    return {
+        "mae": float(np.mean(np.abs(finite))),
+        "max_abs": float(np.max(np.abs(finite))),
+        "mean": float(np.mean(finite)),
+    }
+
+
+def _sustained_oscillation(errors: list[float], tolerance: float) -> bool:
+    data = np.asarray(errors, dtype=float)
+    data = data[np.isfinite(data)]
+    if data.size < 8 or float(np.max(np.abs(data))) <= tolerance:
+        return False
+    centered = data - float(np.mean(data))
+    signs = np.sign(centered)
+    signs = signs[signs != 0.0]
+    crossings = int(np.count_nonzero(signs[1:] != signs[:-1])) if signs.size > 1 else 0
+    return crossings >= 4 and float(np.ptp(data)) > 2.0 * tolerance
+
+
+def _build_acceptance_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build auditable steady-state and protection metrics for summary.json."""
+    steady_groups = _tail_rows_by_stage(rows)
+    per_stage: dict[str, Any] = {}
+    ec_errors_all: list[float] = []
+    ph_errors_all: list[float] = []
+    npk_rel_all: dict[str, list[float]] = {"n": [], "p": [], "k": []}
+
+    for stage, stage_rows in steady_groups.items():
+        ec_errors = [float(r["plc_ec_target"]) - float(r["plc_ec_actual"]) for r in stage_rows]
+        ph_errors = [float(r["plc_ph_target"]) - float(r["plc_ph_actual"]) for r in stage_rows]
+        ec_errors_all.extend(ec_errors)
+        ph_errors_all.extend(ph_errors)
+        stage_metrics: dict[str, Any] = {
+            "samples": len(stage_rows),
+            "ec_error": _signal_metrics(ec_errors),
+            "ph_error": _signal_metrics(ph_errors),
+        }
+        for nutrient in ("n", "p", "k"):
+            relative = []
+            for row in stage_rows:
+                target = float(row.get(f"{nutrient}_target", 0.0))
+                actual = float(row.get(f"{nutrient}_actual", 0.0))
+                if bool(row.get("npk_feedback_valid", False)) and abs(target) > 1e-9:
+                    relative.append((actual - target) / target)
+            stage_metrics[f"{nutrient}_relative_error"] = _signal_metrics(relative)
+            npk_rel_all[nutrient].extend(relative)
+        per_stage[stage] = stage_metrics
+
+    normal_budget_rows = [r for r in rows if not bool(r.get("npk_capacity_limited", False))]
+    budget_errors = [
+        float(r.get("q_n_cmd", 0.0)) + float(r.get("q_p_cmd", 0.0))
+        + float(r.get("q_k_cmd", 0.0)) - float(r.get("q_f_cmd", 0.0))
+        for r in normal_budget_rows
+    ]
+    ec_summary = _signal_metrics(ec_errors_all)
+    ph_summary = _signal_metrics(ph_errors_all)
+    npk_summary = {name: _signal_metrics(values) for name, values in npk_rel_all.items()}
+    ec_oscillation = any(
+        _sustained_oscillation(
+            [float(r["plc_ec_target"]) - float(r["plc_ec_actual"]) for r in group], 0.02
+        ) for group in steady_groups.values()
+    )
+    ph_oscillation = any(
+        _sustained_oscillation(
+            [float(r["plc_ph_target"]) - float(r["plc_ph_actual"]) for r in group], 0.02
+        ) for group in steady_groups.values()
+    )
+
+    def rate(key: str) -> float:
+        return float(np.mean([bool(r.get(key, False)) for r in rows])) if rows else 0.0
+
+    gain_ranges = {}
+    for name in (
+        "kp_ec_effective", "ki_ec_effective", "kd_ec_effective",
+        "kp_ph_effective", "ki_ph_effective", "kd_ph_effective",
+    ):
+        values = np.asarray([float(r.get(name, 0.0)) for r in rows], dtype=float)
+        gain_ranges[name] = {
+            "min": float(np.min(values)) if values.size else 0.0,
+            "max": float(np.max(values)) if values.size else 0.0,
+        }
+
+    integral_max_abs = {
+        "ec": float(max((abs(float(r.get("ec_pid_integral", 0.0))) for r in rows), default=0.0)),
+        "ph": float(max((abs(float(r.get("ph_pid_integral", 0.0))) for r in rows), default=0.0)),
+    }
+    steady_rows = [row for group in steady_groups.values() for row in group]
+    integral_limit_threshold = EC_PH_INTEGRAL_LIMIT - INTEGRAL_LIMIT_DETECTION_EPSILON
+    integral_limit_rates = {
+        "ec": float(np.mean([abs(float(r.get("ec_pid_integral", 0.0))) >= integral_limit_threshold for r in steady_rows])) if steady_rows else 0.0,
+        "ph": float(np.mean([abs(float(r.get("ph_pid_integral", 0.0))) >= integral_limit_threshold for r in steady_rows])) if steady_rows else 0.0,
+    }
+    schema_rate = rate("adaptive_schema_available")
+    comm_rate = rate("remote_comms_ok")
+    adaptive_rate = rate("adaptive_pid_active")
+    q_f_limited_rate = rate("q_f_limited")
+    q_a_limited_rate = rate("q_a_limited")
+    npk_capacity_limited_rate = rate("npk_capacity_limited")
+    budget = _signal_metrics(budget_errors)
+
+    checks = {
+        "ec_steady_within_0_02": bool(ec_errors_all) and ec_summary["max_abs"] <= 0.02,
+        "ph_steady_within_0_02": bool(ph_errors_all) and ph_summary["max_abs"] <= 0.02,
+        "npk_steady_within_5_percent": all(
+            bool(npk_rel_all[name]) and npk_summary[name]["max_abs"] <= 0.05
+            for name in ("n", "p", "k")
+        ),
+        "fertilizer_budget_consistent": bool(budget_errors) and budget["max_abs"] <= 0.01,
+        "plc_comm_at_least_95_percent": comm_rate >= 0.95,
+        "adaptive_schema_at_least_95_percent": schema_rate >= 0.95,
+        "adaptive_pid_at_least_95_percent": adaptive_rate >= 0.95,
+        "no_sustained_oscillation": not (ec_oscillation or ph_oscillation),
+        "no_long_output_saturation": q_f_limited_rate <= 0.10 and q_a_limited_rate <= 0.10,
+        "no_long_integral_saturation": integral_limit_rates["ec"] <= 0.10 and integral_limit_rates["ph"] <= 0.10,
+    }
+    return {
+        "steady_state_window": "final 25% of samples in each growth stage",
+        "per_stage": per_stage,
+        "overall_steady": {
+            "ec_error": ec_summary,
+            "ph_error": ph_summary,
+            "npk_relative_error": npk_summary,
+        },
+        "fertilizer_budget_error": {**budget, "tolerance_abs": 0.01},
+        "rates": {
+            "plc_comm": comm_rate,
+            "adaptive_schema_available": schema_rate,
+            "adaptive_pid_active": adaptive_rate,
+            "q_f_limited": q_f_limited_rate,
+            "q_a_limited": q_a_limited_rate,
+            "npk_capacity_limited": npk_capacity_limited_rate,
+        },
+        "integral_max_abs": integral_max_abs,
+        "integral_limit_rates": integral_limit_rates,
+        "effective_gain_ranges": gain_ranges,
+        "oscillation": {"ec": ec_oscillation, "ph": ph_oscillation},
+        "checks": checks,
+        "pass": all(checks.values()),
+    }
+
 def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     if args.steps is None:
         runtime_budget_s = max(60.0, args.target_runtime_min * 60.0)
@@ -374,6 +594,13 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
         plc = PLCClient(cycle_s=args.plc_wait_s)
         if not plc.connect():
             raise RuntimeError("PLC connection failed. Check PLCSIM/NetToPLCsim and DB access.")
+        initial_state = plc.read_state()
+        if not initial_state or not initial_state.get("adaptive_schema_available", False):
+            plc.disconnect()
+            raise RuntimeError(
+                "PLCSIM is reachable, but DB1 is still the old schema. Import/compile/download "
+                "the updated xiaweiji.scl and DB1 in TIA Portal before running this test."
+            )
 
     models = None if args.manual_test else _load_models(Path(args.model_dir), args.model)
     fixed_actions = _fixed_actions_from_args(args)
@@ -402,6 +629,15 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
         )
 
     obs, _ = env.reset()
+    if plc is not None:
+        # reset() starts the heartbeat handshake. Enable and read back the
+        # test-only flag only after PLC communications are confirmed valid.
+        if not _enable_compressed_hil_after_handshake(plc):
+            env.close()
+            raise RuntimeError(
+                "PLC communication became reachable, but Compressed_HIL_Enable "
+                "could not be enabled and verified after the heartbeat handshake."
+            )
     rows: list[dict[str, Any]] = []
     total_reward = 0.0
     plc_ok_count = 0
@@ -478,6 +714,34 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
                     "target_ec": float(crop_target[0]),
                     "raw_target_ec": float(info.get("target_ec", 0.0)),
                     "target_ph": float(crop_target[1]),
+                    "plc_ec_target": float(plc_state.get("Active_EC_SP", action[0])),
+                    "plc_ph_target": float(plc_state.get("Active_pH_SP", action[1])),
+                    "plc_ec_actual": float(plc_state.get("EC_Actual", info.get("ec_soil", 0.0))),
+                    "plc_ph_actual": float(plc_state.get("pH_Actual", soil_ph_est)),
+                    "ec_pid_error": float(plc_state.get("EC_PID_Error", 0.0)),
+                    "ph_pid_error": float(plc_state.get("pH_PID_Error", 0.0)),
+                    "kp_ec_base": float(plc_state.get("Kp_EC_Set", 0.0)),
+                    "ki_ec_base": float(plc_state.get("Ki_EC_Set", 0.0)),
+                    "kd_ec_base": float(plc_state.get("Kd_EC_Set", 0.0)),
+                    "kp_ph_base": float(plc_state.get("Kp_pH_Set", 0.0)),
+                    "ki_ph_base": float(plc_state.get("Ki_pH_Set", 0.0)),
+                    "kd_ph_base": float(plc_state.get("Kd_pH_Set", 0.0)),
+                    "kp_ec_effective": float(plc_state.get("Kp_EC_Effective", 0.0)),
+                    "ki_ec_effective": float(plc_state.get("Ki_EC_Effective", 0.0)),
+                    "kd_ec_effective": float(plc_state.get("Kd_EC_Effective", 0.0)),
+                    "kp_ph_effective": float(plc_state.get("Kp_pH_Effective", 0.0)),
+                    "ki_ph_effective": float(plc_state.get("Ki_pH_Effective", 0.0)),
+                    "kd_ph_effective": float(plc_state.get("Kd_pH_Effective", 0.0)),
+                    "ec_pid_integral": float(plc_state.get("EC_PID_Integral", 0.0)),
+                    "ph_pid_integral": float(plc_state.get("pH_PID_Integral", 0.0)),
+                    "q_f_feedforward": float(plc_state.get("q_f_Feedforward", 0.0)),
+                    "q_f_pid_correction": float(plc_state.get("q_f_PID_Correction", 0.0)),
+                    "q_f_raw": float(plc_state.get("q_f_raw", 0.0)),
+                    "q_f_limited": bool(plc_state.get("q_f_limited", False)),
+                    "q_a_feedforward": float(plc_state.get("q_a_Feedforward", 0.0)),
+                    "q_a_pid_correction": float(plc_state.get("q_a_PID_Correction", 0.0)),
+                    "q_a_raw": float(plc_state.get("q_a_raw", 0.0)),
+                    "q_a_limited": bool(plc_state.get("q_a_limited", False)),
                     "q_f_cmd": float(plc_state.get("q_f_cmd", info.get("q_f", 0.0))),
                     "q_a_cmd": float(plc_state.get("q_a_cmd", info.get("q_a", 0.0))),
                     "q_n_cmd": float(plc_state.get("q_n_cmd", info.get("q_n", 0.0))),
@@ -489,6 +753,25 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
                     "n_target": float(info.get("n_target", plc_state.get("N_Target", 0.0))),
                     "p_target": float(info.get("p_target", plc_state.get("P_Target", 0.0))),
                     "k_target": float(info.get("k_target", plc_state.get("K_Target", 0.0))),
+                    "n_error": float(plc_state.get("N_Error", 0.0)),
+                    "p_error": float(plc_state.get("P_Error", 0.0)),
+                    "k_error": float(plc_state.get("K_Error", 0.0)),
+                    "n_pid_correction": float(plc_state.get("N_PID_Correction", 0.0)),
+                    "p_pid_correction": float(plc_state.get("P_PID_Correction", 0.0)),
+                    "k_pid_correction": float(plc_state.get("K_PID_Correction", 0.0)),
+                    "npk_optimization_weight": float(plc_state.get("NPK_Optimization_Weight", 0.0)),
+                    "npk_feedback_valid": bool(plc_state.get("NPK_Feedback_Valid", False)),
+                    "npk_capacity_limited": bool(plc_state.get("NPK_Capacity_Limited", False)),
+                    "feedforward_hold_active": bool(plc_state.get("Feedforward_Hold_Active", False)),
+                    "adaptive_pid_active": bool(plc_state.get("Adaptive_PID_Active", False)),
+                    "adaptive_schema_available": bool(plc_state.get("adaptive_schema_available", False)),
+                    "compressed_hil_enable": bool(plc_state.get("Compressed_HIL_Enable", False)),
+                    "run_mode": (
+                        "manual_target" if plc_state.get("Manual_Active", False)
+                        else "auto_online" if plc_state.get("SAC_Enable", False) and comm_ok
+                        else "auto_local" if plc_state.get("Auto_Active", True)
+                        else "standby"
+                    ),
                     "remote_comms_ok": comm_ok,
                     "alarm": bool(plc_state.get("System_Alarm_Light", False)),
                     "burn": bool(info.get("burn", False)),
@@ -551,11 +834,13 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
         "stage_write_supported": stage_write_supported,
         "plc_ok_rate": plc_ok_count / len(rows) if rows else 0.0,
         "total_reward": total_reward,
+        "acceptance": _build_acceptance_metrics(rows),
         "final": rows[-1] if rows else {},
         "artifacts": {
             "csv": "full_season_plc_timeseries.csv",
             "soil_ec_ph_png": "soil_ec_ph_by_day.png",
             "npk_ec_ph_png": npk_plot_path.name,
+            "adaptive_pid_npk_diagnostics_png": "adaptive_pid_npk_diagnostics.png",
             "summary": "summary.json",
         },
     }

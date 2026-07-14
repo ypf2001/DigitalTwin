@@ -122,6 +122,26 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
     if not plc.connect():
         raise RuntimeError("PLC connection failed.")
 
+    # 先建立远程通信握手，再写入 A/B 测试选择位。PLC 在通信未健康时会
+    # 自动清除 Fixed_PID_Test_Enable，若连接后立即写入会造成固定 PID
+    # 测试实际仍运行自适应 PID。
+    if not plc.write_setpoints(
+        ec_set=args.ec_set,
+        ph_set=args.ph_set,
+        ec_actual=float(args.ec_initial),
+        ph_actual=float(args.ph_initial),
+        sac_enable=True,
+    ):
+        raise RuntimeError("PLC remote handshake write failed.")
+    time.sleep(args.plc_wait_s)
+    plc.read_state()
+    if not plc.write_fixed_pid_test_mode(bool(args.fixed_pid_test)):
+        raise RuntimeError("PLC fixed/adaptive PID test selection failed.")
+    time.sleep(args.plc_wait_s)
+    pid_mode_state = plc.read_state() or {}
+    if bool(pid_mode_state.get("Fixed_PID_Test_Enable", False)) != bool(args.fixed_pid_test):
+        raise RuntimeError("PLC did not retain the requested fixed/adaptive PID test mode.")
+
     pid_args = [args.kp_ec, args.ki_ec, args.kd_ec, args.kp_ph, args.ki_ph, args.kd_ph]
     if any(v is not None for v in pid_args) or args.ec_trim_band is not None or args.ph_trim_band is not None:
         state = plc.read_state() or {}
@@ -162,6 +182,14 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
         "active_ec_sp",
         "active_ph_sp",
         "setpoint_protection",
+        "fixed_pid_test_enable",
+        "adaptive_pid_active",
+        "kp_ec_effective",
+        "ki_ec_effective",
+        "kd_ec_effective",
+        "kp_ph_effective",
+        "ki_ph_effective",
+        "kd_ph_effective",
     ]
 
     csv_file = csv_path.open("w", newline="", encoding="utf-8-sig")
@@ -216,6 +244,14 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
                 "active_ec_sp": float(state.get("Active_EC_SP", args.ec_set)),
                 "active_ph_sp": float(state.get("Active_pH_SP", args.ph_set)),
                 "setpoint_protection": bool(state.get("Setpoint_Protection_Active", False)),
+                "fixed_pid_test_enable": bool(state.get("Fixed_PID_Test_Enable", False)),
+                "adaptive_pid_active": bool(state.get("Adaptive_PID_Active", False)),
+                "kp_ec_effective": float(state.get("Kp_EC_Effective", 0.0)),
+                "ki_ec_effective": float(state.get("Ki_EC_Effective", 0.0)),
+                "kd_ec_effective": float(state.get("Kd_EC_Effective", 0.0)),
+                "kp_ph_effective": float(state.get("Kp_pH_Effective", 0.0)),
+                "ki_ph_effective": float(state.get("Ki_pH_Effective", 0.0)),
+                "kd_ph_effective": float(state.get("Kd_pH_Effective", 0.0)),
             }
             rows.append(row)
             writer.writerow(row)
@@ -232,6 +268,7 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
     finally:
         csv_file.close()
         try:
+            plc.write_fixed_pid_test_mode(False)
             plc.write_setpoints(args.ec_set, args.ph_set, ec_actual, ph_actual, sac_enable=False)
         finally:
             plc.disconnect()
@@ -328,6 +365,7 @@ def main() -> int:
     parser.add_argument("--ec-settle-band", type=float, default=0.05)
     parser.add_argument("--ph-settle-band", type=float, default=0.08)
     parser.add_argument("--ph-tail-drop-max", type=float, default=0.02, help="Max allowed pH decrease over the tail window.")
+    parser.add_argument("--fixed-pid-test", action="store_true", help="Use fixed base PID gains for PLC A/B comparison.")
     parser.add_argument("--strict", action="store_true", help="Exit with error if outlet metrics fail thresholds.")
     args = parser.parse_args()
 

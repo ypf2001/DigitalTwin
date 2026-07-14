@@ -77,7 +77,14 @@ def _load_sac_model(model_path: Path):
     return SAC.load(str(load_path))
 
 
-def _make_env(stage: GrowthStage, dt_min: float, duration_days: float, et0_mm_day: float, seed: int | None):
+def _make_env(
+    stage: GrowthStage,
+    dt_min: float,
+    duration_days: float,
+    et0_mm_day: float,
+    seed: int | None,
+    soil_model: str,
+):
     cfg = load_config()
     env_cfg = cfg.env()
     return DigitalTwinEnv(
@@ -87,6 +94,7 @@ def _make_env(stage: GrowthStage, dt_min: float, duration_days: float, et0_mm_da
         ep_len_days=duration_days,
         et0_mm_day=et0_mm_day,
         seed=seed,
+        soil_model=soil_model,
     )
 
 
@@ -99,6 +107,7 @@ def run_policy(
     event_hours: float,
     et0_mm_day: float,
     seed: int | None,
+    soil_model: str = "lumped_v1",
     continuous_control: bool = False,
     model=None,
 ) -> tuple[dict[str, list[float]], dict[str, Any]]:
@@ -106,7 +115,7 @@ def run_policy(
     cfg = load_config()
     irr_cfg = cfg.irrigation()
     fixed_action = np.array(cfg.action().get("fixed_strategy", [1.5, 6.0]), dtype=np.float32)
-    env = _make_env(stage, dt_min, duration_days, et0_mm_day, seed)
+    env = _make_env(stage, dt_min, duration_days, et0_mm_day, seed, soil_model)
     obs = env.reset()
     dt_hours = dt_min / 60.0
     total_steps = int(round(duration_days * 24.0 / dt_hours))
@@ -183,6 +192,8 @@ def run_policy(
     q_a = np.array(series["q_a"], dtype=float)
     stats = {
         "policy": name,
+        "soil_model": env.soil_model,
+        "parameter_status": info.get("parameter_status", "unknown"),
         "steps": len(series["time_hours"]),
         "duration_hours": float(series["time_hours"][-1]) if series["time_hours"] else 0.0,
         "event_start_hour": event_start_hour,
@@ -410,6 +421,12 @@ def main() -> int:
     parser.add_argument("--dt-min", type=float, default=float(env_cfg.get("dt_min", 60.0)))
     parser.add_argument("--et0", type=float, default=float(env_cfg.get("et0_mm_day", 5.0)))
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--soil-model",
+        choices=["lumped_v1", "layered_v2"],
+        default="lumped_v1",
+        help="固定策略与 SAC 必须使用同一个土壤模型进行公平对比。",
+    )
     args = parser.parse_args()
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -423,11 +440,13 @@ def main() -> int:
 
     fixed_series, fixed_stats = run_policy(
         "fixed", stage, args.dt_min, args.duration_days, args.event_start_hour,
-        args.event_hours, args.et0, args.seed, args.continuous_control, model=None
+        args.event_hours, args.et0, args.seed, args.soil_model,
+        args.continuous_control, model=None
     )
     sac_series, sac_stats = run_policy(
         "sac", stage, args.dt_min, args.duration_days, args.event_start_hour,
-        args.event_hours, args.et0, args.seed, args.continuous_control, model=model
+        args.event_hours, args.et0, args.seed, args.soil_model,
+        args.continuous_control, model=model
     )
 
     _write_csv(out_dir / "fixed_timeseries.csv", fixed_series)
@@ -442,6 +461,7 @@ def main() -> int:
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "stage": args.stage,
         "model": str(Path(args.model)),
+        "soil_model": args.soil_model,
         "dt_min": args.dt_min,
         "duration_days": args.duration_days,
         "event_start_hour": args.event_start_hour,

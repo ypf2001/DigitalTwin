@@ -4,13 +4,14 @@ import logging
 import os
 import traceback
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from models import SimulateRequest, SeasonRequest, ConfigSaveRequest, TrainRequest, UploadSelectedRequest
 from services import (
     get_weather_data, get_config_data, run_simulation, run_season_compare,
     save_config_section, get_training_status, start_training, stop_training,
     get_model_info, upload_models_to_cloud, get_upload_progress, stop_upload, upload_selected_models, delete_model, clear_training_progress,
+    get_active_calibration, run_field_calibration,
 )
 
 router = APIRouter()
@@ -72,6 +73,32 @@ def save_config(req: ConfigSaveRequest):
         return _error_response(e)
 
 
+
+@router.get("/api/calibration/active")
+def calibration_active():
+    try:
+        return get_active_calibration()
+    except Exception as e:
+        return _error_response(e)
+
+
+@router.post("/api/calibration/run")
+async def calibration_run(
+    request: Request,
+    filename: str = "field.csv",
+    trials: int = 300,
+    validation_fraction: float = 0.20,
+    activate: bool = True,
+):
+    try:
+        payload = await request.body()
+        return run_field_calibration(
+            payload, filename, trials, validation_fraction, activate
+        )
+    except Exception as e:
+        return _error_response(e)
+
+
 # ============ 训练相关 API ============
 
 @router.get("/api/training/status")
@@ -87,7 +114,10 @@ def training_status():
 def training_start(req: TrainRequest):
     """启动训练"""
     try:
-        return start_training(req.stage, req.timesteps, req.resume, req.load_model)
+        return start_training(
+            req.stage, req.timesteps, req.resume, req.load_model,
+            req.soil_model, req.domain_randomization,
+        )
     except Exception as e:
         return _error_response(e)
 

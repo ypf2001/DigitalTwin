@@ -30,6 +30,7 @@ import numpy as np
 from mixing_tank import MixingTank
 from pipe_dynamics import PipeDynamics
 from soil_transport import SoilTransport
+from soil_profile_v2 import LayeredSoilProfile, sample_soil_config
 from crop_model import CropModel, GrowthStage
 from config_loader import load_config
 from setpoint_controller import SetpointToFlowController
@@ -77,7 +78,9 @@ class DigitalTwinEnv:
                  et0_mm_day: float = None,
                  obs_noise_std: float = None,
                  q_w: float = None,
-                 seed: int = None):
+                 seed: int = None,
+                 soil_model: str = None,
+                 domain_randomization: bool = False):
         cfg = load_config()
         env_cfg = cfg.env()
         obs_cfg = cfg.obs()
@@ -95,10 +98,24 @@ class DigitalTwinEnv:
         # ---- 子模块 ----
         self.tank = MixingTank()
         self.pipe = PipeDynamics(dt=self.dt_min)
-        self.soil = SoilTransport()
+        soil_v2_cfg = cfg.soil_v2()
+        self._soil_v2_cfg = soil_v2_cfg
+        self.domain_randomization = bool(domain_randomization)
+        self.soil_model = soil_model or soil_v2_cfg.get("default_model", "lumped_v1")
+        supported = soil_v2_cfg.get("supported_models", ["lumped_v1", "layered_v2"])
+        if self.soil_model not in supported:
+            raise ValueError(f"未知土壤模型: {self.soil_model}，可选值: {supported}")
+        if self.soil_model == "layered_v2":
+            self.soil = LayeredSoilProfile(config=soil_v2_cfg, area_ha=self.area_ha)
+        else:
+            self.soil = SoilTransport()
         self.crop = CropModel(growth_stage)
         self.current_stage = growth_stage
-        self.soil.root_depth = self.crop.get_root_depth(growth_stage)
+        root_depth = self.crop.get_root_depth(growth_stage)
+        if self.soil_model == "layered_v2":
+            self.soil.set_growth_stage(growth_stage, root_depth)
+        else:
+            self.soil.root_depth = root_depth
         self.executor = SetpointToFlowController()
 
         # ---- 观测历史缓冲 ----
@@ -238,6 +255,29 @@ class DigitalTwinEnv:
         burn = hard_penalty < 0.0
         return reward, ec_reward, ph_reward, setpoint_reward, burn
 
+    def _soil_diagnostics_info(self):
+        """统一返回 V1/V2 土壤诊断，便于日志和后续田间标定。"""
+        if self.soil_model == "layered_v2":
+            return self.soil.diagnostics()
+        return {
+            "soil_model": "lumped_v1",
+            "parameter_status": "legacy",
+            "soil_ph": None,
+            "n_actual": None,
+            "p_actual": None,
+            "k_actual": None,
+            "theta_profile": [float(self.soil.theta)],
+            "ec_profile": [float(self.soil.ec_soil)],
+            "ph_profile": [],
+            "n_profile": [],
+            "p_profile": [],
+            "k_profile": [],
+            "drainage_mm": None,
+            "water_balance_error_mm": None,
+            "salt_balance_error": None,
+            "nutrient_balance_error_mg_m2": {},
+        }
+
     def step(self, action):
         """执行一个仿真步。
 
@@ -263,7 +303,20 @@ class DigitalTwinEnv:
         # ---- 4. SoilTransport ----
         et_mm_h = self._get_actual_et(self._time_min)
         dt_hours = self.dt_min / 60.0
-        theta, ec_soil = self.soil.step(irrigation_mm_h, ec_drip, et_mm_h, dt_hours)
+        if self.soil_model == "layered_v2":
+            theta, ec_soil = self.soil.step(
+                irrigation_mm_h,
+                ec_drip,
+                et_mm_h,
+                dt_hours,
+                ph_in=ph_drip,
+                q_f_l_min=q_f,
+                stage=self.current_stage,
+            )
+        else:
+            theta, ec_soil = self.soil.step(
+                irrigation_mm_h, ec_drip, et_mm_h, dt_hours
+            )
 
         # ---- 5. 记录历史 ----
         self._theta_history.append(theta)
@@ -316,6 +369,7 @@ class DigitalTwinEnv:
             "setpoint_reward": setpoint_reward_component,
             "burn": burn,
         }
+        info.update(self._soil_diagnostics_info())
 
         return obs, reward, self._done, info
 
@@ -323,7 +377,14 @@ class DigitalTwinEnv:
         """重置环境至初始状态。"""
         self.tank.reset()
         self.pipe.reset()
-        self.soil.reset()
+        if self.soil_model == "layered_v2" and self.domain_randomization:
+            sampled_cfg = sample_soil_config(self._soil_v2_cfg, self._rng)
+            self.soil = LayeredSoilProfile(config=sampled_cfg, area_ha=self.area_ha)
+            self.soil.set_growth_stage(
+                self.current_stage, self.crop.get_root_depth(self.current_stage)
+            )
+        else:
+            self.soil.reset()
 
         self._theta_history.clear()
         self._ec_soil_history.clear()
@@ -334,8 +395,7 @@ class DigitalTwinEnv:
         self._total_steps = 0
         self._done = False
 
-        soil = load_config().soil()
-        init_theta, init_ec_soil = soil["theta_init"], soil["ec_soil_init"]
+        init_theta, init_ec_soil = float(self.soil.theta), float(self.soil.ec_soil)
         init_ec_in, init_ph_in = 0.0, 7.0
         for _ in range(self.history_len):
             self._theta_history.append(init_theta)
@@ -349,14 +409,31 @@ class DigitalTwinEnv:
         """切换生育阶段，同步更新作物模型、根系深度和目标 EC 参考。"""
         self.current_stage = stage
         self.crop.current_stage = stage
-        self.soil.root_depth = self.crop.get_root_depth(stage)
+        root_depth = self.crop.get_root_depth(stage)
+        if self.soil_model == "layered_v2":
+            self.soil.set_growth_stage(stage, root_depth)
+        else:
+            self.soil.root_depth = root_depth
 
     def dry_step(self, rain_mm_h: float = 0.0):
         """执行一个纯蒸发/降雨步进（无灌溉、无施肥）。"""
         dt_hours = self.dt_min / 60.0
         et_mm_h = self._get_actual_et(self._time_min)
 
-        theta, ec_soil = self.soil.step(I=rain_mm_h, EC_in=0.0, ET=et_mm_h, dt_hours=dt_hours)
+        if self.soil_model == "layered_v2":
+            theta, ec_soil = self.soil.step(
+                I=rain_mm_h,
+                EC_in=0.0,
+                ET=et_mm_h,
+                dt_hours=dt_hours,
+                ph_in=7.0,
+                q_f_l_min=0.0,
+                stage=self.current_stage,
+            )
+        else:
+            theta, ec_soil = self.soil.step(
+                I=rain_mm_h, EC_in=0.0, ET=et_mm_h, dt_hours=dt_hours
+            )
 
         self._theta_history.append(theta)
         self._ec_soil_history.append(ec_soil)
@@ -380,12 +457,13 @@ class DigitalTwinEnv:
             "ph_set": 7.0,
             "etc_mm_h": et_mm_h,
             "target_ec": self.crop.get_target_ec(self.current_stage),
-            "irrigation_mm_h": 0.0,
+            "irrigation_mm_h": rain_mm_h,
             "q_f": 0.0,
             "q_a": 0.0,
             "total_flow_Lmin": 0.0,
             "is_night": self._is_nighttime(self._time_min),
         }
+        info.update(self._soil_diagnostics_info())
         return obs, 0.0, self._done, info
 
     def get_obs_dim(self):

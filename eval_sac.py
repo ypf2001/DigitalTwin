@@ -205,6 +205,7 @@ def run_eval(args):
         ep_len_days=90.0,
         et0_mm_day=args.et0,
         seed=args.seed,
+        soil_model=args.soil_model,
     )
 
     history = {
@@ -215,13 +216,14 @@ def run_eval(args):
     }
 
     obs = env.reset()
-    env.soil.theta = irr_cfg.get("initial_theta") or env.soil.theta_fc
-    env.soil.ec_soil = irr_cfg.get("initial_ec", 0.1)
-    env._theta_history.clear()
-    env._ec_soil_history.clear()
-    for _ in range(env.history_len):
-        env._theta_history.append(env.soil.theta)
-        env._ec_soil_history.append(env.soil.ec_soil)
+    if env.soil_model == "lumped_v1":
+        env.soil.theta = irr_cfg.get("initial_theta") or env.soil.theta_fc
+        env.soil.ec_soil = irr_cfg.get("initial_ec", 0.1)
+        env._theta_history.clear()
+        env._ec_soil_history.clear()
+        for _ in range(env.history_len):
+            env._theta_history.append(env.soil.theta)
+            env._ec_soil_history.append(env.soil.ec_soil)
 
     total_irr_mm = 0.0
     total_etc_mm = 0.0
@@ -308,6 +310,7 @@ def run_eval(args):
             ep_len_days=90.0,
             et0_mm_day=args.et0,
             seed=args.seed,
+            soil_model=args.soil_model,
         )
         res = run_season_simulation(
             env2, strategy=strategy, area_ha=args.area_ha,
@@ -403,6 +406,9 @@ def run_eval(args):
         "q_a_max": float(qa_arr.max()) if len(qa_arr) else 0.0,
         "stopped_by_safety": bool(stopped_by_safety),
         "model_path": _summary_model_path(args, runner),
+        "soil_model": args.soil_model,
+        "parameter_status": info.get("parameter_status", "unknown"),
+        "parameter_version": info.get("parameter_version", "unknown"),
         "stage_model_paths": runner.models,
         "dt_min": float(args.dt_min),
         "pipe_tau_min": pipe_tau_min,
@@ -461,6 +467,12 @@ if __name__ == "__main__":
     parser.add_argument("--dt-min", type=float, default=5.0)
     parser.add_argument("--et0", type=float, default=4.0)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--soil-model",
+        choices=["lumped_v1", "layered_v2"],
+        default="lumped_v1",
+        help="评估时使用的土壤模型；应与训练模型时的选择一致。",
+    )
     args = parser.parse_args()
     run_eval(args)
 

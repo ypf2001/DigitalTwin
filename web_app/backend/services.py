@@ -7,6 +7,7 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -22,6 +23,7 @@ STAGE_MAP = {"ini": "INI", "dev": "DEV", "mid": "MID", "late": "LATE"}
 
 training_lock = threading.Lock()
 upload_lock = threading.Lock()
+calibration_lock = threading.Lock()
 
 _IMAGES_DIR = os.path.join(os.path.dirname(__file__), "static", "images")
 os.makedirs(_IMAGES_DIR, exist_ok=True)
@@ -460,6 +462,79 @@ def save_config_section(section: str, updates: dict):
     return {"success": True, "section": section}
 
 
+
+def get_active_calibration() -> dict:
+    """Return the active calibration metadata and selected soil parameters."""
+    cfg = reload_config()
+    calibration = dict(cfg.calibration())
+    soil = cfg.soil_v2()
+    return {
+        "success": True,
+        "active": bool(calibration),
+        "calibration": calibration,
+        "soil_model": soil.get("default_model", "lumped_v1"),
+        "parameter_status": soil.get("parameter_status", "unknown"),
+        "parameter_version": soil.get("parameter_version", "unknown"),
+        "domain_randomization": soil.get("domain_randomization", {}),
+    }
+
+
+def run_field_calibration(file_bytes: bytes, filename: str, trials: int = 300,
+                          validation_fraction: float = 0.20, activate: bool = True) -> dict:
+    """Run field calibration from an uploaded CSV and optionally activate it."""
+    if not file_bytes:
+        raise ValueError("Uploaded CSV is empty")
+    if len(file_bytes) > 50 * 1024 * 1024:
+        raise ValueError("CSV exceeds the 50 MB limit")
+    trials = max(10, min(int(trials), 5000))
+    validation_fraction = float(validation_fraction)
+    if not 0.05 <= validation_fraction <= 0.50:
+        raise ValueError("validation_fraction must be between 0.05 and 0.50")
+
+    with calibration_lock:
+        if _training_state["running"]:
+            raise RuntimeError("Stop SAC training before activating a new calibration profile")
+        root = Path(_get_project_root())
+        calibration_dir = root / "config" / "calibration"
+        upload_dir = calibration_dir / "uploads"
+        run_dir = calibration_dir / "runs"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(filename or "field.csv").stem)[:80] or "field"
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        digest = __import__("hashlib").sha256(file_bytes).hexdigest()[:8]
+        csv_path = upload_dir / f"{stamp}-{safe_stem}-{digest}.csv"
+        output_path = run_dir / f"{stamp}-{safe_stem}-{digest}.yaml"
+        csv_path.write_bytes(file_bytes)
+
+        cmd = [
+            sys.executable, str(root / "scripts" / "calibrate_field_model.py"),
+            str(csv_path), "--trials", str(trials),
+            "--validation-fraction", str(validation_fraction),
+            "--output", str(output_path),
+        ]
+        if activate:
+            cmd.append("--activate")
+        result = subprocess.run(
+            cmd, cwd=str(root), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=3600,
+        )
+        if result.returncode != 0:
+            details = (result.stderr or result.stdout or "calibration failed").strip()
+            raise RuntimeError(details[-4000:])
+        profile = yaml.safe_load(output_path.read_text(encoding="utf-8")) or {}
+        if activate:
+            reload_config()
+        return {
+            "success": True,
+            "activated": bool(activate),
+            "profile_path": str(output_path),
+            "report_path": str(output_path.with_suffix(".report.json")),
+            "calibration": profile.get("calibration", {}),
+            "stdout": result.stdout[-4000:],
+        }
+
+
 def get_training_status():
     global _training_process
     with training_lock:
@@ -473,20 +548,29 @@ def get_training_status():
         return dict(_training_state)
 
 
-def start_training(stage: str, timesteps: int, resume: bool = False, load_model: str | None = None):
+def start_training(stage: str, timesteps: int, resume: bool = False,
+                   load_model: str | None = None, soil_model: str = "layered_v2",
+                   domain_randomization: bool = True):
     global _training_process
     with training_lock:
         if _training_state["running"]:
             return {"success": False, "error": "训练已经在运行"}
         stage = (stage or "MID").upper()
         timesteps = int(timesteps or load_config().sac().get("total_timesteps", 120000))
-        cmd = [sys.executable, os.path.join(_get_project_root(), "train_sac.py"), "--stage", stage, "--timesteps", str(timesteps)]
-        if resume:
+        soil_model = soil_model if soil_model in {"lumped_v1", "layered_v2"} else "layered_v2"
+        cmd = [
+            sys.executable, os.path.join(_get_project_root(), "train_sac.py"),
+            "--stage", stage, "--timesteps", str(timesteps),
+            "--soil-model", soil_model,
+        ]
+        if load_model:
+            cmd.extend(["--load-path", load_model])
+        elif resume:
             cmd.append("--resume")
         else:
             cmd.append("--fresh")
-        if load_model:
-            cmd.extend(["--load-path", load_model])
+        if soil_model == "layered_v2" and not domain_randomization:
+            cmd.append("--disable-domain-randomization")
         os.makedirs(_get_rl_logs_dir(), exist_ok=True)
         log_path = os.path.join(_get_rl_logs_dir(), "web_training.log")
         log_f = open(log_path, "a", encoding="utf-8")
@@ -495,6 +579,8 @@ def start_training(stage: str, timesteps: int, resume: bool = False, load_model:
             "running": True,
             "pid": _training_process.pid,
             "stage": stage,
+            "soil_model": soil_model,
+            "calibration_id": load_config().calibration().get("id"),
             "timesteps": 0,
             "target_steps": timesteps,
             "start_time": time.strftime("%Y-%m-%d %H:%M:%S"),

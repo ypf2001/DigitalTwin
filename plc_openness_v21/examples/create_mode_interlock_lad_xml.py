@@ -183,22 +183,18 @@ def flgnet_manual_pump_valve_enable() -> ET.Element:
     parts.extend(
         [
             access(21, ["DB1", "Manual_Active"]),
-            access(22, ["DB1", "Comm_Normal"]),
-            access(23, ["DB1", "Manual_PumpValve_Enable"]),
-            part("Contact", 24),
-            part("Contact", 25),
-            part("Coil", 26),
+            access(22, ["DB1", "Manual_PumpValve_Enable"]),
+            part("Contact", 23),
+            part("Coil", 24),
         ]
     )
     wires = ET.SubElement(net, q(FLG_NS, "Wires"))
     wires.extend(
         [
-            wire(27, ET.Element(q(FLG_NS, "Powerrail")), name_con(24, "in")),
-            wire(28, ident_con(21), name_con(24, "operand")),
-            wire(29, name_con(24, "out"), name_con(25, "in")),
-            wire(30, ident_con(22), name_con(25, "operand")),
-            wire(31, name_con(25, "out"), name_con(26, "in")),
-            wire(32, ident_con(23), name_con(26, "operand")),
+            wire(25, ET.Element(q(FLG_NS, "Powerrail")), name_con(23, "in")),
+            wire(26, ident_con(21), name_con(23, "operand")),
+            wire(27, name_con(23, "out"), name_con(24, "in")),
+            wire(28, ident_con(22), name_con(24, "operand")),
         ]
     )
     return net
@@ -234,7 +230,7 @@ def flgnet_move_manual_value(source: str, target: str, enabled: bool) -> ET.Elem
     if enabled:
         parts.append(access(22, ["DB1", source]))
     else:
-        parts.append(typed_constant(22, "0.0"))
+        parts.append(typed_constant(22, "0"))
     parts.append(access(23, ["DB1", target]))
     parts.append(part("Contact", 24, negated=not enabled))
     move = part("Move", 25)
@@ -270,14 +266,8 @@ def normalize_xml(root: ET.Element) -> str:
     return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" + raw
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Create FC_ModeInterlock_LAD XML from an exported FC shell.")
-    parser.add_argument("--base", required=True, help="Exported FC XML shell.")
-    parser.add_argument("--output", required=True, help="Generated LAD FC XML output path.")
-    parser.add_argument("--number", default="2", help="FC block number to assign.")
-    args = parser.parse_args()
-
-    tree = ET.parse(args.base)
+def generate_mode_interlock_xml(base: str | Path, output: str | Path, number: str = "2") -> Path:
+    tree = ET.parse(base)
     root = tree.getroot()
     fc = root.find("SW.Blocks.FC")
     if fc is None:
@@ -285,7 +275,7 @@ def main() -> int:
 
     al = attr(fc)
     text(al, "Name", "FC_ModeInterlock_LAD")
-    text(al, "Number", str(args.number))
+    text(al, "Number", str(number))
     text(al, "ProgrammingLanguage", "LAD")
 
     iface = al.find("Interface")
@@ -312,17 +302,32 @@ def main() -> int:
         if child.tag == "SW.Blocks.CompileUnit":
             obj.remove(child)
 
-    obj.insert(1, compile_unit("100", "101", "102", "Communication normal", flgnet_comm_normal()))
-    obj.insert(2, compile_unit("110", "111", "112", "Manual active interlock", flgnet_manual_active()))
-    obj.insert(3, compile_unit("120", "121", "122", "Auto active interlock", flgnet_auto_active()))
-    obj.insert(4, compile_unit("130", "131", "132", "Manual pump valve enable", flgnet_manual_pump_valve_enable()))
-    obj.insert(5, compile_unit("140", "141", "142", "Alarm light", flgnet_alarm_light()))
-    obj.insert(6, compile_unit("150", "151", "152", "Select manual q_f", flgnet_move_manual_value("Manual_q_f_Set", "Manual_q_f_Selected", True)))
-    obj.insert(7, compile_unit("160", "161", "162", "Select manual q_a", flgnet_move_manual_value("Manual_q_a_Set", "Manual_q_a_Selected", True)))
+    units = [
+        compile_unit("100", "101", "102", "Communication normal", flgnet_comm_normal()),
+        compile_unit("110", "111", "112", "Manual active interlock", flgnet_manual_active()),
+        compile_unit("120", "121", "122", "Auto active interlock", flgnet_auto_active()),
+        compile_unit("130", "131", "132", "Manual pump valve enable", flgnet_manual_pump_valve_enable()),
+        compile_unit("140", "141", "142", "Alarm light", flgnet_alarm_light()),
+        compile_unit("150", "151", "152", "Select manual q_f", flgnet_move_manual_value("Manual_q_f_Set", "Manual_q_f_Selected", True)),
+        compile_unit("160", "161", "162", "Select manual q_a", flgnet_move_manual_value("Manual_q_a_Set", "Manual_q_a_Selected", True)),
+    ]
+    for index, unit in enumerate(units, start=1):
+        obj.insert(index, unit)
 
-    output = Path(args.output).resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(normalize_xml(root), encoding="utf-8")
+    output_path = Path(output).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(normalize_xml(root), encoding="utf-8")
+    return output_path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Create FC_ModeInterlock_LAD XML from an exported FC shell.")
+    parser.add_argument("--base", required=True, help="Exported FC XML shell.")
+    parser.add_argument("--output", required=True, help="Generated LAD FC XML output path.")
+    parser.add_argument("--number", default="2", help="FC block number to assign.")
+    args = parser.parse_args()
+
+    output = generate_mode_interlock_xml(args.base, args.output, args.number)
     print(f"Generated {output}")
     return 0
 

@@ -391,6 +391,142 @@ plc:
       type: real
       bytes: 4
 
+    # 既有内部输出诊断（固定偏移，不移动）。
+    q_f_raw:
+      offset: 50
+      type: real
+      bytes: 4
+    q_a_raw:
+      offset: 54
+      type: real
+      bytes: 4
+    q_f_limited:
+      offset: 58
+      bit: 0
+      type: bool
+      bytes: 1
+    q_a_limited:
+      offset: 58
+      bit: 1
+      type: bool
+      bytes: 1
+
+    # DB1 末尾追加的自适应 PID / NPK 协调控制诊断。
+    Kp_EC_Effective:
+      offset: 312
+      type: real
+      bytes: 4
+    Ki_EC_Effective:
+      offset: 316
+      type: real
+      bytes: 4
+    Kd_EC_Effective:
+      offset: 320
+      type: real
+      bytes: 4
+    Kp_pH_Effective:
+      offset: 324
+      type: real
+      bytes: 4
+    Ki_pH_Effective:
+      offset: 328
+      type: real
+      bytes: 4
+    Kd_pH_Effective:
+      offset: 332
+      type: real
+      bytes: 4
+    EC_PID_Error:
+      offset: 336
+      type: real
+      bytes: 4
+    pH_PID_Error:
+      offset: 340
+      type: real
+      bytes: 4
+    EC_PID_Integral:
+      offset: 344
+      type: real
+      bytes: 4
+    pH_PID_Integral:
+      offset: 348
+      type: real
+      bytes: 4
+    q_f_Feedforward:
+      offset: 352
+      type: real
+      bytes: 4
+    q_f_PID_Correction:
+      offset: 356
+      type: real
+      bytes: 4
+    q_a_Feedforward:
+      offset: 360
+      type: real
+      bytes: 4
+    q_a_PID_Correction:
+      offset: 364
+      type: real
+      bytes: 4
+    N_Error:
+      offset: 368
+      type: real
+      bytes: 4
+    P_Error:
+      offset: 372
+      type: real
+      bytes: 4
+    K_Error:
+      offset: 376
+      type: real
+      bytes: 4
+    N_PID_Correction:
+      offset: 380
+      type: real
+      bytes: 4
+    P_PID_Correction:
+      offset: 384
+      type: real
+      bytes: 4
+    K_PID_Correction:
+      offset: 388
+      type: real
+      bytes: 4
+    NPK_Optimization_Weight:
+      offset: 392
+      type: real
+      bytes: 4
+    NPK_Feedback_Valid:
+      offset: 396
+      bit: 0
+      type: bool
+      bytes: 1
+    NPK_Capacity_Limited:
+      offset: 396
+      bit: 1
+      type: bool
+      bytes: 1
+    Compressed_HIL_Enable:
+      offset: 396
+      bit: 2
+      type: bool
+      bytes: 1
+    Feedforward_Hold_Active:
+      offset: 396
+      bit: 3
+      type: bool
+      bytes: 1
+    Adaptive_PID_Active:
+      offset: 396
+      bit: 4
+      type: bool
+      bytes: 1
+    Fixed_PID_Test_Enable:
+      offset: 396
+      bit: 5
+      type: bool
+      bytes: 1
+
     # PLC/PLCSIM 写回 Python 的执行结果与状态
     Remote_Comms_OK:
       offset: 20

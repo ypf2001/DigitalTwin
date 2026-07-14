@@ -30,3 +30,29 @@ def test_gym_env_step_accepts_fixed_strategy_action():
     assert "q_f" in step_info
     assert "q_a" in step_info
     assert isinstance(terminated, bool)
+
+
+def test_layered_v2_keeps_legacy_observation_and_reports_profiles():
+    env = DigitalTwinGymEnv(
+        growth_stage="MID",
+        obs_noise_std=0.0,
+        ep_len_days=0.05,
+        soil_model="layered_v2",
+    )
+    obs, _ = env.reset(seed=7)
+    action = np.array(reload_config().action()["fixed_strategy"], dtype=np.float32)
+    next_obs, reward, _, truncated, info = env.step(action)
+
+    assert obs.shape == env.observation_space.shape
+    assert next_obs.shape == env.observation_space.shape
+    assert np.isfinite(reward)
+    assert not truncated
+    assert info["soil_model"] == "layered_v2"
+    assert info["parameter_status"] == "literature_placeholder"
+    assert len(info["theta_profile"]) == 4
+    assert len(info["ec_profile"]) == 4
+    assert len(info["ph_profile"]) == 4
+    assert np.isfinite(info["soil_ph"])
+    assert np.isfinite(info["n_actual"])
+    assert np.isfinite(info["p_actual"])
+    assert np.isfinite(info["k_actual"])

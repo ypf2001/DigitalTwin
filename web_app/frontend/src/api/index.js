@@ -19,3 +19,12 @@ export function stopUpload() { return http.post('/training/upload/stop').then(r 
 export function deleteModel(name) { return http.delete('/training/models/' + encodeURIComponent(name)).then(r => r.data) }
 export function clearProgress() { return http.post('/training/progress/clear').then(r => r.data) }
 export function getUploadProgress() { return http.get('/training/upload/progress').then(r => r.data) }
+
+export function getActiveCalibration() { return http.get('/calibration/active').then(r => r.data) }
+export function runFieldCalibration(file, trials = 300, validationFraction = 0.20, activate = true) {
+  return http.post('/calibration/run', file, {
+    params: { filename: file.name || 'field.csv', trials, validation_fraction: validationFraction, activate },
+    headers: { 'Content-Type': 'text/csv' },
+    timeout: 3600000,
+  }).then(r => r.data)
+}

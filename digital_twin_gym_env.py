@@ -51,7 +51,9 @@ class DigitalTwinGymEnv(gym.Env):
                  et0_mm_day: float = None,
                  obs_noise_std: float = None,
                  reward_scale: float = 1.0,
-                 seed: int = None):
+                 seed: int = None,
+                 soil_model: str = None,
+                 domain_randomization: bool = False):
         super().__init__()
 
         if isinstance(growth_stage, str):
@@ -69,6 +71,8 @@ class DigitalTwinGymEnv(gym.Env):
             et0_mm_day=et0_mm_day,
             obs_noise_std=obs_noise_std,
             seed=seed,
+            soil_model=soil_model,
+            domain_randomization=domain_randomization,
         )
 
         obs_dim = self._env.get_obs_dim()

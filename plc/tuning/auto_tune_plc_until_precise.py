@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 
 from plc_client import PLCClient
 from plc.tuning.write_fertilizer_channels_to_plc import _load_config as _load_fertilizer_config
+from experiments.run_full_season_plc import STAGES
 
 
 def _latest_summary() -> Path:
@@ -115,6 +116,12 @@ def _run_python_tuning(args: argparse.Namespace, seed: int) -> Path:
         str(args.target_ec_over),
         "--target-ph-over",
         str(args.target_ph_over),
+        "--target-ec-under",
+        str(args.target_ec_under),
+        "--target-ph-under",
+        str(args.target_ph_under),
+        "--min-in-band-rate",
+        str(args.min_in_band_rate),
         "--kp-step",
         str(args.kp_step),
         "--ki-step",
@@ -165,14 +172,26 @@ def _metrics_from_plc_run(run_dir: Path) -> dict[str, float]:
     soil_ph = np.array([float(r["soil_ph_est"]) for r in rows], dtype=float)
     ph_set = np.array([float(r["ph_set"]) for r in rows], dtype=float)
     comm_ok = np.array([str(r["remote_comms_ok"]).lower() == "true" for r in rows], dtype=bool)
+    settled = np.array(
+        [float(r["time_day"]) >= STAGES[r["stage"]]["start_day"] + 3.0 for r in rows],
+        dtype=bool,
+    )
 
     ec_error = ec_soil - ec_target
     ph_error = soil_ph - ph_set
+    ec_steady = ec_error[settled]
+    ph_steady = ph_error[settled]
+    if not len(ec_steady):
+        raise RuntimeError("PLC validation produced no settled tracking samples.")
     return {
-        "ec_mae": float(np.mean(np.abs(ec_error))),
-        "ph_mae": float(np.mean(np.abs(ph_error))),
+        "ec_mae": float(np.mean(np.abs(ec_steady))),
+        "ph_mae": float(np.mean(np.abs(ph_steady))),
         "ec_over_max": float(np.max(np.maximum(ec_error, 0.0))),
         "ph_over_max": float(np.max(np.maximum(ph_error, 0.0))),
+        "ec_under_mean": float(np.mean(np.maximum(-ec_steady, 0.0))),
+        "ph_under_mean": float(np.mean(np.maximum(-ph_steady, 0.0))),
+        "ec_in_band_rate": float(np.mean(np.abs(ec_steady) <= 0.02)),
+        "ph_in_band_rate": float(np.mean(np.abs(ph_steady) <= 0.02)),
         "plc_ok_rate": float(np.mean(comm_ok)),
     }
 
@@ -236,6 +255,10 @@ def _precise(metrics: dict[str, float], args: argparse.Namespace) -> bool:
         and metrics["ph_mae"] <= args.target_ph_mae
         and metrics["ec_over_max"] <= args.target_ec_over
         and metrics["ph_over_max"] <= args.target_ph_over
+        and metrics["ec_under_mean"] <= args.target_ec_under
+        and metrics["ph_under_mean"] <= args.target_ph_under
+        and metrics["ec_in_band_rate"] >= args.min_in_band_rate
+        and metrics["ph_in_band_rate"] >= args.min_in_band_rate
         and metrics["plc_ok_rate"] >= args.min_plc_ok_rate
     )
 
@@ -246,8 +269,8 @@ def main() -> int:
     parser.add_argument("--max-plc-rounds", type=int, default=20)
     parser.add_argument("--trials", type=int, default=80)
     parser.add_argument("--python-rounds", type=int, default=4)
-    parser.add_argument("--python-season-days", type=float, default=10.0)
-    parser.add_argument("--plc-season-days", type=float, default=10.0)
+    parser.add_argument("--python-season-days", type=float, default=110.0)
+    parser.add_argument("--plc-season-days", type=float, default=110.0)
     parser.add_argument("--plc-runtime-min", type=float, default=2.0)
     parser.add_argument("--plc-wait-s", type=float, default=1.0)
     parser.add_argument("--dt-min", type=float, default=5.0)
@@ -256,6 +279,9 @@ def main() -> int:
     parser.add_argument("--target-ph-mae", type=float, default=0.08)
     parser.add_argument("--target-ec-over", type=float, default=0.02)
     parser.add_argument("--target-ph-over", type=float, default=0.03)
+    parser.add_argument("--target-ec-under", type=float, default=0.04)
+    parser.add_argument("--target-ph-under", type=float, default=0.03)
+    parser.add_argument("--min-in-band-rate", type=float, default=0.75)
     parser.add_argument("--kp-step", type=float, default=0.1)
     parser.add_argument("--ki-step", type=float, default=0.001)
     parser.add_argument("--kd-step", type=float, default=0.001)
@@ -295,11 +321,19 @@ def main() -> int:
             + metrics["ph_mae"]
             + 5.0 * metrics["ec_over_max"]
             + 5.0 * metrics["ph_over_max"]
+            + 2.0 * metrics["ec_under_mean"]
+            + 2.0 * metrics["ph_under_mean"]
+            + (1.0 - metrics["ec_in_band_rate"])
+            + (1.0 - metrics["ph_in_band_rate"])
         ) < (
             best_row["ec_mae"]
             + best_row["ph_mae"]
             + 5.0 * best_row["ec_over_max"]
             + 5.0 * best_row["ph_over_max"]
+            + 2.0 * best_row["ec_under_mean"]
+            + 2.0 * best_row["ph_under_mean"]
+            + (1.0 - best_row["ec_in_band_rate"])
+            + (1.0 - best_row["ph_in_band_rate"])
         ):
             best_row = row
         print("PLC validation metrics:", json.dumps(metrics, ensure_ascii=False, indent=2), flush=True)
@@ -321,6 +355,10 @@ def main() -> int:
             "ph_mae": best_row["ph_mae"],
             "ec_over_max": best_row["ec_over_max"],
             "ph_over_max": best_row["ph_over_max"],
+            "ec_under_mean": best_row["ec_under_mean"],
+            "ph_under_mean": best_row["ph_under_mean"],
+            "ec_in_band_rate": best_row["ec_in_band_rate"],
+            "ph_in_band_rate": best_row["ph_in_band_rate"],
             "plc_ok_rate": best_row["plc_ok_rate"],
         }, ensure_ascii=False, indent=2), flush=True)
         print(f"Best EC/pH plot: {best_row['plot']}", flush=True)

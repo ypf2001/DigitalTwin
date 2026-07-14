@@ -1,6 +1,6 @@
 # PLC 当前完成情况与后续研究流程
 
-检查日期：2026-07-06
+检查日期：2026-07-10
 
 PLC 工程路径：`D:\dw_plc\xiaweiji\xiaweiji.ap21`
 
@@ -26,6 +26,8 @@ Warnings: 0
 | ------------------------- | ----------: | ---: | ---- | -------- |
 | Main                      |          OB |    1 | LAD  | 已存在   |
 | FB_CommsWatchdog_LAD      |          FB |    3 | LAD  | 已存在   |
+| FC_ModeInterlock_LAD      |          FC |    2 | LAD  | 已实现   |
+| FC_ModeSelector_LAD       |          FC |    3 | LAD  | 已实现   |
 | RateLimiter               |          FB |    1 | SCL  | 已实现   |
 | inst_RL_A                 | Instance DB |    3 | DB   | 已生成   |
 | inst_RL_F                 | Instance DB |    2 | DB   | 已生成   |
@@ -106,6 +108,12 @@ plc_client.py
 - `q_n_cmd/q_p_cmd/q_k_cmd` 表示 N/P/K 三路计量泵流量
 
 这与论文中的“上位机智能决策 + PLC 底层执行”分层控制路线一致。
+
+模式相关的离散逻辑已进一步拆分为 LAD：
+
+- `FC_ModeInterlock_LAD`：本地手动/自动互锁、通信状态、报警灯和手动 q_f/q_a 选择。
+- `FC_ModeSelector_LAD`：将急停、手动、自动、SAC 和阶段自动命令解码为六个互斥运行模式。
+- `FC_CallFertigationControl`：保留安全归零、连续量限幅、斜坡、模拟量换算和自动控制调用。
 
 ### 3.3 安全保护与工程约束
 
@@ -297,4 +305,3 @@ PLC 前馈-模糊 PID 安全执行
 6. 将 PLC 编译快照、DB1 通信表和实验结果写入开题/中期材料。
 
 这条路线最适合当前研究生论文：风险低、闭环完整、结果可解释，也能自然承接后续 ESO-AFOPID 和硬件电路设计。
-

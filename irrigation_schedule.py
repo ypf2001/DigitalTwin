@@ -178,14 +178,16 @@ def run_season_simulation(
     }
 
     obs = env.reset()
-    env.soil.theta = initial_theta
-    env.soil.ec_soil = initial_ec
-    # 更新历史缓冲以匹配新的初始 theta
-    env._theta_history.clear()
-    env._ec_soil_history.clear()
-    for _ in range(env.history_len):
-        env._theta_history.append(initial_theta)
-        env._ec_soil_history.append(initial_ec)
+    if getattr(env, "soil_model", "lumped_v1") == "lumped_v1":
+        env.soil.theta = initial_theta
+        env.soil.ec_soil = initial_ec
+        # 更新历史缓冲以匹配新的初始 theta。
+        env._theta_history.clear()
+        env._ec_soil_history.clear()
+        for _ in range(env.history_len):
+            env._theta_history.append(initial_theta)
+            env._ec_soil_history.append(initial_ec)
+    # layered_v2 使用 soil_v2.yaml 中的分层初始剖面，避免用单一标量覆盖田间参数。
     total_irrigation_mm = 0.0
     total_scheduled_irrigation_mm = 0.0
     total_etc_mm = 0.0

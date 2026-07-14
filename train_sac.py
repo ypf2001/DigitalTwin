@@ -13,6 +13,9 @@ import argparse
 import logging
 import os
 import sys
+import json
+import hashlib
+from datetime import datetime, timezone
 import numpy as np
 
 logger = logging.getLogger("train_sac")
@@ -49,7 +52,8 @@ class KeyboardStopCallback(BaseCallback):
                 return False
         return True
 
-def make_env(stage_name: str, obs_noise: float = None, reward_scale: float = None):
+def make_env(stage_name: str, obs_noise: float = None, reward_scale: float = None,
+             soil_model: str = None, domain_randomization: bool = False):
     """创建环境的工厂函数（环境参数从 simulation.yaml 读取）。"""
     env_cfg = load_config().env()
     sac_cfg = load_config().sac()
@@ -62,9 +66,42 @@ def make_env(stage_name: str, obs_noise: float = None, reward_scale: float = Non
             et0_mm_day=env_cfg["et0_mm_day"],
             obs_noise_std=obs_noise if obs_noise is not None else env_cfg["obs_noise_std"],
             reward_scale=reward_scale if reward_scale is not None else sac_cfg.get("reward_scale", 0.1),
+            soil_model=soil_model,
+            domain_randomization=domain_randomization,
         )
         return env
     return _init
+
+
+def _configuration_fingerprint(soil_model: str) -> tuple[str, dict]:
+    cfg = load_config()
+    payload = {
+        "soil_model": soil_model,
+        "soil_v2": cfg.soil_v2() if soil_model == "layered_v2" else cfg.soil(),
+        "mixing_tank": cfg.mixing_tank(),
+        "pipe": cfg.pipe(),
+        "action": cfg.action(),
+        "calibration": cfg.calibration(),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16], payload
+
+
+def _check_model_metadata(model_path: str, fingerprint: str, allow_mismatch: bool) -> None:
+    metadata_path = model_path + ".metadata.json"
+    if not os.path.exists(metadata_path):
+        logger.warning("Model metadata is missing; calibration version cannot be checked: %s", model_path)
+        return
+    with open(metadata_path, "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+    previous = metadata.get("configuration_fingerprint")
+    if previous and previous != fingerprint:
+        message = (f"Model configuration {previous} differs from current {fingerprint}. "
+                   "Use --fresh, or explicitly pass --allow-config-mismatch.")
+        if allow_mismatch:
+            logger.warning(message)
+        else:
+            raise RuntimeError(message)
 
 
 if __name__ == "__main__":
@@ -83,6 +120,20 @@ if __name__ == "__main__":
                         help="忽略已有模型并从头训练，适合配置变化后的可重复实验")
     parser.add_argument("--load-path", type=str, default=None,
                         help="从指定模型路径加载 (如 sac_mid_6000_steps)")
+    parser.add_argument(
+        "--soil-model",
+        choices=["lumped_v1", "layered_v2"],
+        default=load_config().soil_v2().get("default_model", "lumped_v1"),
+        help="土壤数字孪生后端；layered_v2 用于新版分层模型训练",
+    )
+    parser.add_argument(
+        "--disable-domain-randomization", action="store_true",
+        help="Disable layered-soil domain randomization for an ablation run.",
+    )
+    parser.add_argument(
+        "--allow-config-mismatch", action="store_true",
+        help="Allow loading a model trained with a different configuration fingerprint.",
+    )
     args = parser.parse_args()
 
     if args.resume and args.fresh:
@@ -121,11 +172,27 @@ if __name__ == "__main__":
     logger.info("=" * 60)
     logger.info(f"SAC 训练 - 生育阶段: {args.stage} (简写: {stage_short})")
     logger.info(f"总步数: {args.timesteps}")
+    logger.info(f"土壤模型: {args.soil_model}")
     logger.info("=" * 60)
 
     # ---- 创建环境（SAC 不需要 VecNormalize） ----
-    train_env = make_env(stage_short)()
-    eval_env = make_env(stage_short, obs_noise=0.0)()
+    config_fingerprint, config_payload = _configuration_fingerprint(args.soil_model)
+    calibration = load_config().calibration()
+    logger.info(f"Configuration fingerprint: {config_fingerprint}")
+    if calibration:
+        logger.info(f"Active calibration: {calibration.get('id', calibration.get('active_profile', 'unknown'))}")
+
+    use_randomization = (
+        args.soil_model == "layered_v2" and not args.disable_domain_randomization
+    )
+    train_env = make_env(
+        stage_short, soil_model=args.soil_model,
+        domain_randomization=use_randomization,
+    )()
+    eval_env = make_env(
+        stage_short, obs_noise=0.0, soil_model=args.soil_model,
+        domain_randomization=False,
+    )()
 
     # ---- SAC 模型（新建 或 从 checkpoint 恢复） ----
     final_path = os.path.join(args.save_dir, f"sac_{model_tag}_final")
@@ -139,6 +206,7 @@ if __name__ == "__main__":
         if not os.path.exists(load_path + ".zip"):
             logger.error(f"指定模型不存在: {load_path}.zip")
             sys.exit(1)
+        _check_model_metadata(load_path, config_fingerprint, args.allow_config_mismatch)
         model = SAC.load(load_path)
         model.observation_space = train_env.observation_space
         model.set_env(train_env)
@@ -200,6 +268,7 @@ if __name__ == "__main__":
                         key=lambda x: int(x.split("_")[-2]),
                     )
                     load_path = os.path.join(args.save_dir, ckpts[-1].replace(".zip", ""))
+                _check_model_metadata(load_path, config_fingerprint, args.allow_config_mismatch)
                 model = SAC.load(load_path)
                 model.observation_space = train_env.observation_space
                 model.set_env(train_env)
@@ -280,4 +349,17 @@ if __name__ == "__main__":
 
     # ---- 保存最终模型（正常结束或中断都会执行） ----
     model.save(final_path)
-    logger.info(f"SAC 模型已保存: {final_path}.zip (总步数: {model.num_timesteps})")
+    metadata = {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "stage": stage_short,
+        "soil_model": args.soil_model,
+        "configuration_fingerprint": config_fingerprint,
+        "calibration": load_config().calibration(),
+        "domain_randomization": use_randomization,
+        "num_timesteps": int(model.num_timesteps),
+        "configuration": config_payload,
+    }
+    with open(final_path + ".metadata.json", "w", encoding="utf-8") as f:
+        json.dump(metadata, f, ensure_ascii=False, indent=2)
+    logger.info(f"SAC model saved: {final_path}.zip (timesteps: {model.num_timesteps})")
+    logger.info(f"Configuration metadata saved: {final_path}.metadata.json")

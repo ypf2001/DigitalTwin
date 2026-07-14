@@ -5,6 +5,22 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+
+import sys
+
+sys.path.insert(0, str(ROOT))
+
+from plc_hmi_codegen import (
+    SCREEN_SPECS,
+    db1_field_map,
+    default_scl_path,
+    section_lines,
+    validate_screen_tags,
+    write_hmi_tag_manifest_csv,
+    write_symbol_manifest_csv,
+)
+
 
 def build_paragraph_body(lines: list[str]) -> ET.Element:
     body = ET.Element("body")
@@ -66,7 +82,7 @@ def add_text_field(
     font_item = ET.SubElement(font_obj, "Hmi.Globalization.FontItem", {"ID": format(font_item_id, "X"), "CompositionName": "Items"})
     font_attrs = ET.SubElement(font_item, "AttributeList")
     ET.SubElement(font_attrs, "Culture").text = "zh-CN"
-    ET.SubElement(font_attrs, "FontFamily").text = "宋体"
+    ET.SubElement(font_attrs, "FontFamily").text = "SimSun"
     ET.SubElement(font_attrs, "FontSize").text = str(font_size)
     ET.SubElement(font_attrs, "FontStyle").text = "Bold" if bold else "Regular"
 
@@ -82,6 +98,7 @@ def add_text_field(
 def build_screen(
     base_xml: Path,
     output_xml: Path,
+    *,
     screen_name: str,
     screen_title: str,
     sections: list[tuple[str, list[str], tuple[int, int, int, int]]],
@@ -105,7 +122,6 @@ def build_screen(
     if obj_list is None:
         raise RuntimeError("Missing screen ObjectList")
 
-    # Remove default generated objects and rebuild from a clean layer.
     for child in list(obj_list):
         obj_list.remove(child)
 
@@ -158,7 +174,7 @@ def build_screen(
         bold=False,
         align="Center",
         object_name="NavBar",
-        lines=["主监控    手动调试    参数设置    报警诊断    趋势"],
+        lines=["主监控 | 手动调试 | 参数设置 | 报警诊断"],
     )
     next_id += 0x10
 
@@ -181,6 +197,7 @@ def build_screen(
             lines=[title],
         )
         next_id += 0x10
+
         add_text_field(
             layer_obj,
             item_id=next_id,
@@ -205,62 +222,35 @@ def build_screen(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate KTP900 HMI wireframe screens from an exported screen template.")
+    parser = argparse.ArgumentParser(description="Generate KTP900 HMI wireframe screens and tag manifests from the PLC DB1 source.")
     parser.add_argument("--base", required=True, help="Exported HMI screen XML used as template.")
     parser.add_argument("--output-dir", required=True, help="Directory for generated screen XML files.")
+    parser.add_argument("--scl", default=str(default_scl_path()), help="Path to xiaweiji.scl.")
     args = parser.parse_args()
 
     base = Path(args.base).resolve()
     out_dir = Path(args.output_dir).resolve()
+    field_map = db1_field_map(args.scl)
+    validate_screen_tags(field_map)
 
-    screens = [
-        (
-            "Screen_01_MainOverview",
-            "画面 1：主监控画面",
-            [
-                ("EC / pH 总览", ["EC_Set_SP", "EC_Actual", "pH_Set_SP", "pH_Actual", "Active_EC_SP", "Active_pH_SP", "Growth_Stage"], (20, 60, 360, 150)),
-                ("系统状态", ["Remote_Comms_OK", "Comm_Normal", "System_Alarm_Light", "Emergency_Stop", "Manual_Active", "Auto_Active"], (410, 60, 370, 150)),
-                ("执行量监控", ["q_f_cmd", "q_a_cmd", "Valve_F_Actual", "Valve_A_Actual", "AQ_Valve_F_Raw", "AQ_Valve_A_Raw"], (20, 225, 360, 150)),
-                ("多通道输出", ["q_n_cmd", "q_p_cmd", "q_k_cmd", "Stage_EC_SP", "Stage_pH_SP", "Setpoint_Protection_Active"], (410, 225, 370, 150)),
-            ],
-        ),
-        (
-            "Screen_02_ManualControl",
-            "画面 2：手动与调试画面",
-            [
-                ("模式控制", ["Manual_Mode", "Auto_Mode", "Emergency_Stop", "Manual_Active", "Auto_Active"], (20, 60, 360, 120)),
-                ("手动设定输入", ["Manual_q_f_Set", "Manual_q_a_Set", "Manual_q_n_Set", "Manual_q_p_Set", "Manual_q_k_Set"], (20, 190, 360, 190)),
-                ("联锁与放行", ["Comm_Normal", "Manual_PumpValve_Enable", "Manual_q_f_Selected", "Manual_q_a_Selected"], (410, 60, 370, 120)),
-                ("执行链路反馈", ["q_f_cmd", "q_a_cmd", "Valve_F_Actual", "Valve_A_Actual", "建议起始值: q_f=0.2, q_a=0.0"], (410, 190, 370, 190)),
-            ],
-        ),
-        (
-            "Screen_03_PID_Settings",
-            "画面 3：参数设置画面",
-            [
-                ("EC PID", ["Kp_EC_Set", "Ki_EC_Set", "Kd_EC_Set", "EC_Trim_Band", "Active_EC_SP"], (20, 60, 240, 150)),
-                ("pH PID", ["Kp_pH_Set", "Ki_pH_Set", "Kd_pH_Set", "pH_Trim_Band", "Active_pH_SP"], (280, 60, 240, 150)),
-                ("N/P/K 配方", ["N_Enable / N_Ratio / N_Max", "P_Enable / P_Ratio / P_Max", "K_Enable / K_Ratio / K_Max"], (540, 60, 240, 150)),
-                ("阶段与策略", ["Growth_Stage", "Stage_Auto_SP_Enable", "Stage_EC_SP", "Stage_pH_SP", "Setpoint_Protection_Active"], (20, 230, 500, 150)),
-                ("执行通道参考", ["N_Target / N_Actual / q_n_cmd", "P_Target / P_Actual / q_p_cmd", "K_Target / K_Actual / q_k_cmd"], (540, 230, 240, 150)),
-            ],
-        ),
-        (
-            "Screen_04_AlarmsDiagnostics",
-            "画面 4：报警与诊断",
-            [
-                ("报警摘要", ["System_Alarm_Light", "Emergency_Stop", "Remote_Comms_OK", "Comm_Normal"], (20, 60, 360, 120)),
-                ("通信诊断", ["Remote_Heartbeat", "Last_Heartbeat", "Watchdog_Timer", "Watchdog_Count", "Remote_Comms_Was_OK"], (20, 190, 360, 190)),
-                ("模式联锁诊断", ["Manual_Mode", "Auto_Mode", "Manual_Active", "Auto_Active", "Manual_PumpValve_Enable"], (410, 60, 370, 120)),
-                ("手动执行快照", ["Manual_q_f_Set", "Manual_q_f_Selected", "Manual_q_a_Set", "Manual_q_a_Selected", "q_f_cmd", "q_a_cmd"], (410, 190, 370, 190)),
-            ],
-        ),
-    ]
+    for screen in SCREEN_SPECS:
+        sections = [
+            (section.title, section_lines(field_map, section.tags), section.rect)
+            for section in screen.sections
+        ]
+        build_screen(
+            base,
+            out_dir / f"{screen.name}.xml",
+            screen_name=screen.name,
+            screen_title=screen.title,
+            sections=sections,
+        )
+        print(f"Generated {out_dir / f'{screen.name}.xml'}")
 
-    for name, title, sections in screens:
-        build_screen(base, out_dir / f"{name}.xml", name, title, sections)
-        print(f"Generated {out_dir / f'{name}.xml'}")
-
+    symbol_manifest = write_symbol_manifest_csv(field_map, out_dir / "DB1_symbol_map.csv")
+    tag_manifest = write_hmi_tag_manifest_csv(field_map, out_dir / "HMI_tags_from_DB1.csv")
+    print(f"Generated {symbol_manifest}")
+    print(f"Generated {tag_manifest}")
     return 0
 
 

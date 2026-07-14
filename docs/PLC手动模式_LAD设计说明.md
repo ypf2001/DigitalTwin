@@ -203,7 +203,7 @@ LAD 网络：
 Network 1: Comm_Normal = Remote_Comms_OK AND NOT Emergency_Stop
 Network 2: Manual_Active = Manual_Mode AND NOT Emergency_Stop
 Network 3: Auto_Active = Auto_Mode AND NOT Manual_Mode AND NOT Emergency_Stop
-Network 4: Manual_PumpValve_Enable = Manual_Active AND Comm_Normal
+Network 4: Manual_PumpValve_Enable = Manual_Active
 Network 5: System_Alarm_Light = NOT Comm_Normal
 Network 6: Manual_PumpValve_Enable -> MOVE Manual_q_f_Set to Manual_q_f_Selected
 Network 7: Manual_PumpValve_Enable -> MOVE Manual_q_a_Set to Manual_q_a_Selected
@@ -215,6 +215,8 @@ Network 7: Manual_PumpValve_Enable -> MOVE Manual_q_a_Set to Manual_q_a_Selected
 "FC_ModeInterlock_LAD"();
 ```
 
+本地手动不依赖 `Remote_Comms_OK` 或 `Comm_Normal`。通信异常仍会置位报警灯，并禁止依赖上位机的远程自动，但不会阻止 HMI/控制柜手动点动。
+
 然后 SCL 只根据 `DB1.Manual_PumpValve_Enable` 进入手动连续量控制分支。也就是说，模式互锁、通信判断、报警灯和 q_f/q_a 手动选择已经是梯形图；EC/pH 前馈、模糊 PID、N/P/K 分配和复杂数学仍保留在 SCL。
 
 验证结果：
@@ -224,3 +226,36 @@ FC_ModeInterlock_LAD: LAD, IsConsistent=True
 FC_CallFertigationControl: SCL, IsConsistent=True
 Whole PLC compile: 0 errors, 0 warnings
 ```
+
+## 9. 本地手动解除通信依赖
+
+2026-07-10 将 Network 4 从：
+
+```text
+Manual_PumpValve_Enable = Manual_Active AND Comm_Normal
+```
+
+改为：
+
+```text
+Manual_PumpValve_Enable = Manual_Active
+```
+
+因此上位机通信断开时，只要 `Manual_Mode = TRUE` 且未急停，本地 HMI/控制柜仍可进行手动点动。`Comm_Normal` 继续用于通信报警，远程自动仍由通信看门狗保护。
+
+已通过 Openness 导入 `FC_ModeInterlock_LAD`、编译并保存工程：
+
+```text
+Compile state: Success
+Errors: 0
+Warnings: 0
+Project saved: yes
+```
+
+随后从 TIA 工程回读导出 Network 4，确认仅包含：
+
+```text
+Manual_Active -> Manual_PumpValve_Enable
+```
+
+回读文件：`docs/tia_export_FC_ModeInterlock_LAD_local_manual.xml`。

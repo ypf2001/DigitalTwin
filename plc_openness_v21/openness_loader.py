@@ -39,6 +39,7 @@ def load_openness(public_api_dir: str | os.PathLike[str] | None = None) -> Path:
     for dll_name in (
         "Siemens.Engineering.Base.dll",
         "Siemens.Engineering.Step7.dll",
+        "Siemens.Engineering.WinCC.dll",
     ):
         dll_path = api_dir / dll_name
         if not dll_path.exists():
