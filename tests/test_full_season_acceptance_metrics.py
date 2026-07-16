@@ -1,6 +1,8 @@
 from experiments.run_full_season_plc import (
     EC_PH_INTEGRAL_LIMIT,
     STAGE_SEQUENCE,
+    STAGES,
+    _stage_for_day,
     _build_acceptance_metrics,
 )
 
@@ -43,6 +45,22 @@ def good_rows():
                 "kd_ph_effective": 0.02,
             })
     return rows
+
+
+def test_plc_stage_boundaries_follow_paper_irrigation_phases():
+    assert [(STAGES[name]["start_day"], STAGES[name]["end_day"])
+            for name in STAGE_SEQUENCE] == [
+                (0.0, 24.0),
+                (24.0, 38.0),
+                (38.0, 65.0),
+                (65.0, 90.0),
+            ]
+    assert _stage_for_day(23.999) == "INI"
+    assert _stage_for_day(24.0) == "DEV"
+    assert _stage_for_day(37.999) == "DEV"
+    assert _stage_for_day(38.0) == "MID"
+    assert _stage_for_day(64.999) == "MID"
+    assert _stage_for_day(65.0) == "LATE"
 
 
 def test_acceptance_metrics_pass_a_stable_coordinated_run():

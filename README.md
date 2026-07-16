@@ -19,7 +19,7 @@
         ↓
 PLC / PLCSIM / 仿真执行层 PID
         ↓
-输出 q_f、q_a
+主水泵建立 q_w_actual，输出 q_f、q_a
         ↓
 混合罐模型 → 管道滞后模型 → 根区水盐模型
         ↓
@@ -31,7 +31,8 @@ PLC / PLCSIM / 仿真执行层 PID
 ```text
 SAC 负责：决定目标 EC 和目标 pH
 PID/PLC 负责：根据 EC/pH 目标和反馈值计算施肥泵、酸泵控制量
-数字孪生负责：模拟混肥、管道、土壤水盐和作物生育期响应
+灌溉执行层负责：控制主水泵流量/压力、累计水量并建立 Water_Flow_OK 联锁
+数字孪生负责：模拟水泵动态、混肥、管道、土壤水盐和作物生育期响应
 ```
 
 ---
@@ -104,6 +105,7 @@ B 方案更适合论文表述为：
 | `digital_twin_env.py` | 数字孪生核心环境，当前动作输入为 `[EC_set, pH_set]` |
 | `digital_twin_gym_env.py` | Gymnasium 封装，用于 SAC 训练 |
 | `setpoint_controller.py` | 纯仿真执行层，将 `EC_set/pH_set` 转换为 `q_f/q_a` |
+| `water_pump.py` | 主灌溉水泵动态、流量/压力模式、累计水量和无水联锁模型 |
 | `mixing_tank.py` | 混肥罐 EC/pH 估算模型 |
 | `pipe_dynamics.py` | 管道纯滞后 + 一阶惯性模型 |
 | `soil_transport.py` | 根区水分-盐分集总模型 |

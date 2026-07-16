@@ -10,12 +10,16 @@ $DigitalTwinMirror = "D:\Digital Twin\plc\xiaweiji\src\xiaweiji.scl"
 $Project = Join-Path $PlcRepoPath "xiaweiji.ap21"
 $RepoSource = Join-Path $PlcRepoPath "src\xiaweiji.scl"
 
-if (Test-Path -LiteralPath $RepoSource) {
+if (Test-Path -LiteralPath $DigitalTwinMirror) {
+  # The Digital Twin source is canonical. The separate TIA project directory
+  # only stores the .ap21 project; importing its stale src copy would silently
+  # drop newer DB1 and batch-control fields.
+  $Source = $DigitalTwinMirror
+} elseif (Test-Path -LiteralPath $RepoSource) {
+  Write-Warning "DigitalTwin SCL not found, falling back to PLC repo source: $RepoSource"
   $Source = $RepoSource
 } else {
-  Write-Warning "PLC repo SCL not found, falling back to DigitalTwin mirror: $DigitalTwinMirror"
-  $Project = "D:\dw_plc\xiaweiji\xiaweiji.ap21"
-  $Source = $DigitalTwinMirror
+  throw "No xiaweiji.scl source found in either DigitalTwin or PLC repo path."
 }
 
 Write-Host "PLC repo path: $PlcRepoPath"
@@ -28,10 +32,7 @@ if ((Test-Path -LiteralPath $RepoSource) -and (Test-Path -LiteralPath $DigitalTw
   Write-Host "PLC repo SCL SHA256: $RepoHash"
   Write-Host "DigitalTwin mirror SCL SHA256: $MirrorHash"
   if ($RepoHash -ne $MirrorHash) {
-    if (-not $AllowMismatchedScl) {
-      throw "SCL hash mismatch. Sync the two xiaweiji.scl files or pass -AllowMismatchedScl explicitly."
-    }
-    Write-Warning "SCL hash mismatch allowed by -AllowMismatchedScl."
+    Write-Warning "SCL hash mismatch: importing the canonical DigitalTwin source, not the stale PLC repo copy."
   } else {
     Write-Host "SCL hash check passed: files are identical."
   }

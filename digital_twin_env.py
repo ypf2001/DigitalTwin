@@ -34,6 +34,7 @@ from soil_profile_v2 import LayeredSoilProfile, sample_soil_config
 from crop_model import CropModel, GrowthStage
 from config_loader import load_config
 from setpoint_controller import SetpointToFlowController
+from water_pump import WaterPump
 
 
 class DigitalTwinEnv:
@@ -90,6 +91,8 @@ class DigitalTwinEnv:
         self.ep_len_days = ep_len_days if ep_len_days is not None else env_cfg["ep_len_days"]
         self.et0_base = et0_mm_day if et0_mm_day is not None else env_cfg["et0_mm_day"]
         self.obs_noise_std = obs_noise_std if obs_noise_std is not None else env_cfg["obs_noise_std"]
+        # Compatibility alias: q_w is now the requested carrier-water flow.
+        # Mixing and irrigation use WaterPump.q_actual_l_min instead.
         self.q_w = q_w if q_w is not None else env_cfg["q_w"]
 
         seed = seed if seed is not None else env_cfg.get("seed")
@@ -117,6 +120,7 @@ class DigitalTwinEnv:
         else:
             self.soil.root_depth = root_depth
         self.executor = SetpointToFlowController()
+        self.water_pump = WaterPump(q_set_l_min=self.q_w)
 
         # ---- 观测历史缓冲 ----
         self.history_len = obs_cfg["history_len"]
@@ -171,18 +175,63 @@ class DigitalTwinEnv:
         """
         ec_set = float(action[0])
         ph_set = float(action[1])
-        result = self.executor.to_flow(ec_set, ph_set, q_w=self.q_w)
+        pump_state = self.water_pump.step(self.dt_min)
+        q_w_actual = pump_state.q_actual_l_min
+        result = self.executor.to_flow(ec_set, ph_set, q_w=q_w_actual)
 
         q_f = result.q_f
         q_a = result.q_a
-        if self._is_nighttime(self._time_min):
+        if (
+            self._is_nighttime(self._time_min)
+            or not pump_state.flow_ok
+            or not pump_state.fertigation_active
+        ):
             q_f = 0.0
             q_a = 0.0
 
-        total_flow_with_water = q_f + q_a + self.q_w
-        irrigation_mm_h = total_flow_with_water * 60.0 / (self.area_ha * 10000.0)
+        # The final batch step may be shorter than dt so it lands exactly on
+        # Water_Volume_SP. Use that delivered volume for irrigation accounting.
+        delivered_water_l = pump_state.delivered_volume_l
+        if self.dt_min > 0.0:
+            carrier_irrigation_mm_h = delivered_water_l * 60.0 / (
+                self.dt_min * self.area_ha * 10000.0
+            )
+        else:
+            carrier_irrigation_mm_h = 0.0
+        dosing_irrigation_mm_h = (q_f + q_a) * 60.0 / (self.area_ha * 10000.0)
+        irrigation_mm_h = carrier_irrigation_mm_h + dosing_irrigation_mm_h
 
-        return result.ec_set, result.ph_set, q_f, q_a, irrigation_mm_h
+        return (
+            result.ec_set,
+            result.ph_set,
+            q_f,
+            q_a,
+            q_w_actual,
+            irrigation_mm_h,
+            carrier_irrigation_mm_h,
+            pump_state,
+        )
+
+    def set_irrigation_command(self,
+                               enabled: bool,
+                               q_set_l_min: float = None,
+                               pressure_set_bar: float = None,
+                               target_volume_l: float = None,
+                               mode: str = None,
+                               pre_flush_ratio: float = None,
+                               post_flush_ratio: float = None,
+                               reset_volume: bool = False):
+        """Update the slow irrigation command without changing the SAC action."""
+        self.water_pump.set_command(
+            enabled=enabled,
+            q_set_l_min=q_set_l_min,
+            pressure_set_bar=pressure_set_bar,
+            target_volume_l=target_volume_l,
+            mode=mode,
+            pre_flush_ratio=pre_flush_ratio,
+            post_flush_ratio=post_flush_ratio,
+            reset_volume=reset_volume,
+        )
 
     def _get_obs(self):
         """返回 23 维观测向量。"""
@@ -291,11 +340,20 @@ class DigitalTwinEnv:
         obs, reward, done, info
         """
         # ---- 1. 上层目标值 → 执行流量 ----
-        ec_set, ph_set, q_f, q_a, irrigation_mm_h = self._setpoint_to_flow(action)
+        (
+            ec_set,
+            ph_set,
+            q_f,
+            q_a,
+            q_w_actual,
+            irrigation_mm_h,
+            carrier_irrigation_mm_h,
+            pump_state,
+        ) = self._setpoint_to_flow(action)
         actuator_flow_Lmin = q_f + q_a
 
         # ---- 2. MixingTank ----
-        ec_tank, ph_tank = self.tank.step(q_f, q_a, q_w=self.q_w)
+        ec_tank, ph_tank = self.tank.step(q_f, q_a, q_w=q_w_actual)
 
         # ---- 3. PipeDynamics ----
         ec_drip, ph_drip = self.pipe.step(ec_tank, ph_tank)
@@ -325,7 +383,7 @@ class DigitalTwinEnv:
         self._ph_in_history.append(ph_drip)
 
         # ---- 6. 奖励 ----
-        control_active = not self._is_nighttime(self._time_min)
+        control_active = not self._is_nighttime(self._time_min) and pump_state.flow_ok
         reward, ec_reward_component, ph_reward_component, setpoint_reward_component, burn = self._compute_reward(
             ec_drip,
             ec_soil,
@@ -362,7 +420,22 @@ class DigitalTwinEnv:
             "irrigation_mm_h": irrigation_mm_h,
             "q_f": q_f,
             "q_a": q_a,
-            "total_flow_Lmin": actuator_flow_Lmin,
+            "q_w_set": pump_state.q_set_l_min,
+            "q_w_actual": q_w_actual,
+            "carrier_irrigation_mm_h": carrier_irrigation_mm_h,
+            "carrier_water_delivered_l": pump_state.delivered_volume_l,
+            "water_pressure_set_bar": pump_state.pressure_set_bar,
+            "water_pressure_actual_bar": pump_state.pressure_actual_bar,
+            "water_pump_speed_percent": pump_state.speed_percent,
+            "water_volume_l": pump_state.volume_l,
+            "water_flow_ok": pump_state.flow_ok,
+            "water_volume_complete": pump_state.volume_complete,
+            "water_batch_phase": pump_state.batch_phase,
+            "fertigation_active": pump_state.fertigation_active,
+            "water_pre_flush_volume_l": pump_state.pre_flush_volume_l,
+            "water_fertigation_end_volume_l": pump_state.fertigation_end_volume_l,
+            "dosing_flow_Lmin": actuator_flow_Lmin,
+            "total_flow_Lmin": q_w_actual + actuator_flow_Lmin,
             "is_night": self._is_nighttime(self._time_min),
             "ec_reward": ec_reward_component,
             "ph_reward": ph_reward_component,
@@ -377,6 +450,7 @@ class DigitalTwinEnv:
         """重置环境至初始状态。"""
         self.tank.reset()
         self.pipe.reset()
+        self.water_pump.reset()
         if self.soil_model == "layered_v2" and self.domain_randomization:
             sampled_cfg = sample_soil_config(self._soil_v2_cfg, self._rng)
             self.soil = LayeredSoilProfile(config=sampled_cfg, area_ha=self.area_ha)
@@ -460,6 +534,15 @@ class DigitalTwinEnv:
             "irrigation_mm_h": rain_mm_h,
             "q_f": 0.0,
             "q_a": 0.0,
+            "q_w_set": self.water_pump.q_set_l_min,
+            "q_w_actual": 0.0,
+            "water_pressure_set_bar": self.water_pump.pressure_set_bar,
+            "water_pressure_actual_bar": 0.0,
+            "water_pump_speed_percent": 0.0,
+            "water_volume_l": self.water_pump.volume_l,
+            "water_flow_ok": False,
+            "water_volume_complete": self.water_pump.volume_complete,
+            "dosing_flow_Lmin": 0.0,
             "total_flow_Lmin": 0.0,
             "is_night": self._is_nighttime(self._time_min),
         }

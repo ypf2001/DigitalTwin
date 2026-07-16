@@ -8,6 +8,25 @@ env:
   seed: null
   theta_fc: 0.32
   theta_wp: 0.04
+water_pump:
+  # The SAC action remains [EC_set, pH_set]. Irrigation scheduling owns this
+  # slower command; the pump model supplies the dynamic carrier-water flow.
+  mode: flow                 # flow | pressure
+  enabled_on_reset: true
+  q_set_l_min: 136.0
+  q_min_l_min: 0.0
+  q_max_l_min: 180.0
+  safe_flow_min_l_min: 20.0
+  pressure_set_bar: 1.8
+  rated_pressure_bar: 2.5
+  response_tau_min: 0.5
+  ramp_up_l_min_min: 300.0
+  ramp_down_l_min_min: 400.0
+  target_volume_l: 0.0       # 0 disables automatic volume completion
+  # A nonzero Water_Volume_SP is a complete irrigation batch. These two
+  # clean-water sections are included in the event total, not added on top.
+  pre_flush_ratio: 0.10
+  post_flush_ratio: 0.20
 experiment:
   short_dt_min: 5.0      # 短期仿真实验步长 (分钟)。用于解析 pipe.tau=8 min 的管道延迟，不影响 SAC 默认训练步长
   season_dt_min: 5.0     # 季节对比实验步长 (分钟)。用于 T1/T2 仿真导出更平滑的曲线，不作为训练默认步长
@@ -524,6 +543,145 @@ plc:
     Fixed_PID_Test_Enable:
       offset: 396
       bit: 5
+      type: bool
+      bytes: 1
+
+    # Main irrigation-water pump channel. Bytes 397-399 are reserved in DB1
+    # so this deployment contract starts on a stable REAL boundary.
+    Water_Enable:
+      offset: 400
+      type: real
+      bytes: 4
+    Qw_Set:
+      offset: 404
+      type: real
+      bytes: 4
+    Qw_Actual:
+      offset: 408
+      type: real
+      bytes: 4
+    Pressure_Set:
+      offset: 412
+      type: real
+      bytes: 4
+    Pressure_Actual:
+      offset: 416
+      type: real
+      bytes: 4
+    Water_Volume_SP:
+      offset: 420
+      type: real
+      bytes: 4
+    Water_Volume_Actual:
+      offset: 424
+      type: real
+      bytes: 4
+    Water_Pump_Speed_CMD:
+      offset: 428
+      type: real
+      bytes: 4
+    Water_Pump_Speed_Actual:
+      offset: 432
+      type: real
+      bytes: 4
+    Water_Pump_Run_CMD:
+      offset: 436
+      bit: 0
+      type: bool
+      bytes: 1
+    Water_Pump_Running:
+      offset: 436
+      bit: 1
+      type: bool
+      bytes: 1
+    Water_Pump_Ready:
+      offset: 436
+      bit: 2
+      type: bool
+      bytes: 1
+    Water_Pump_Fault:
+      offset: 436
+      bit: 3
+      type: bool
+      bytes: 1
+    Water_Flow_OK:
+      offset: 436
+      bit: 4
+      type: bool
+      bytes: 1
+    Water_Volume_Complete:
+      offset: 436
+      bit: 5
+      type: bool
+      bytes: 1
+    AQ_Water_Pump_Raw:
+      offset: 438
+      type: int
+      bytes: 2
+    Water_Control_Mode:
+      offset: 440
+      type: int
+      bytes: 2
+    Water_Pump_Alarm:
+      offset: 442
+      bit: 0
+      type: bool
+      bytes: 1
+    Water_Pump_Run_Feedback:
+      offset: 442
+      bit: 1
+      type: bool
+      bytes: 1
+    Water_Pump_Drive_Ready:
+      offset: 442
+      bit: 2
+      type: bool
+      bytes: 1
+    Water_Pump_Drive_Fault:
+      offset: 442
+      bit: 3
+      type: bool
+      bytes: 1
+    Water_Source_Low_Level:
+      offset: 442
+      bit: 4
+      type: bool
+      bytes: 1
+    Water_Pump_Reset:
+      offset: 442
+      bit: 5
+      type: bool
+      bytes: 1
+    # Irrigation batch contract. Batch phase: 0=idle, 1=pre-flush,
+    # 2=fertigate, 3=post-flush, 4=complete.
+    Pre_Flush_Ratio:
+      offset: 444
+      type: real
+      bytes: 4
+    Post_Flush_Ratio:
+      offset: 448
+      type: real
+      bytes: 4
+    Pre_Flush_Volume:
+      offset: 452
+      type: real
+      bytes: 4
+    Fertigation_End_Volume:
+      offset: 456
+      type: real
+      bytes: 4
+    Water_Batch_Phase:
+      offset: 460
+      type: int
+      bytes: 2
+    Batch_Fertigation_Active:
+      offset: 462
+      bit: 0
+      type: bool
+      bytes: 1
+    Water_Batch_Active:
+      offset: 462
+      bit: 1
       type: bool
       bytes: 1
 

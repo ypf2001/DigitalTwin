@@ -30,7 +30,7 @@ class ScreenSpec:
     sections: tuple[SectionSpec, ...]
 
 
-DEFAULT_SCL = Path(r"D:\dw_plc\xiaweiji\src\xiaweiji.scl")
+DEFAULT_SCL = Path(r"D:\Digital Twin\plc\xiaweiji\src\xiaweiji.scl")
 
 TYPE_SIZES = {
     "Bool": ("bit", 1),
@@ -238,6 +238,10 @@ def all_hmi_tags() -> list[str]:
             for tag in section.tags:
                 if tag not in seen:
                     seen.append(tag)
+    # Compact read-only irrigation monitor added to the live main screen.
+    for tag in ("Water_Volume_SP", "Water_Volume_Actual", "Qw_Actual"):
+        if tag not in seen:
+            seen.append(tag)
     return seen
 
 

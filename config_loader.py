@@ -51,6 +51,10 @@ class _Config:
     def pipe(self) -> dict:
         return self._data.get("pipe", {})
 
+    def water_pump(self) -> dict:
+        """Main irrigation-water pump and hydraulic-control parameters."""
+        return self._data.get("water_pump", {})
+
     def crop(self) -> dict:
         return self._data.get("crop", {})
 

@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 from openness_loader import load_openness, start_tia
 from plc_hmi_codegen import all_hmi_tags, db1_field_map, default_scl_path
-from plc_programming import attach_to_open_project, iter_device_items, open_project
+from plc_programming import attach_to_open_project, force_project_offline, iter_device_items, open_project
 
 
 DEFAULT_PROJECT_PATH = Path(r"D:\dw_plc\xiaweiji\xiaweiji.ap21")
@@ -228,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
             project = open_project(tia, project_path)
         log(f"Project: {project.Name}")
 
+        offline_count = force_project_offline(project)
+        log(f"Requested offline mode for {offline_count} online provider(s).")
         hmi = find_hmi(project)
         log(f"HMI: {hmi.Name}")
         log_hmi_connection_state(hmi)

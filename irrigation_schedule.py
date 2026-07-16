@@ -210,14 +210,21 @@ def run_season_simulation(
 
             _record_step(history, info, np.array([0.0, 0.0]), event_idx, is_event=False)
 
-        # 灌溉期：按 event 水量计算持续时长
+        # 灌溉期：一次论文定额是清水预冲洗、载肥水和清水后冲洗的总量。
+        # 主水泵按累计水量结束，持续时间仅用于防止配置/执行异常导致无限循环。
         amount = event.t1_amount_m3ha if strategy == "T1" else event.t2_amount_m3ha
         total_scheduled_irrigation_mm += amount / 10.0
+        target_volume_l = amount * area_ha * 1000.0
+        env.set_irrigation_command(
+            enabled=True,
+            target_volume_l=target_volume_l,
+            reset_volume=True,
+        )
         event_hours = event_duration_hours(amount, area_ha)
-        event_steps = max(1, int(event_hours / dt_hours))
+        max_event_steps = max(2, int(np.ceil(event_hours / dt_hours)) + 8)
 
         event_irr_total = 0.0
-        for _ in range(event_steps):
+        for _ in range(max_event_steps):
             if model is not None:
                 action, _ = model.predict(normalize_obs(obs), deterministic=True)
             else:
@@ -225,11 +232,23 @@ def run_season_simulation(
 
             obs, reward, done, info = env.step(action)
             total_steps += 1
-            total_irrigation_mm += info["irrigation_mm_h"] * dt_hours
-            event_irr_total += info["irrigation_mm_h"] * dt_hours
+            # The agronomic quota is main carrier water. Fertilizer/acid stock
+            # solution remains part of the hydraulic model but not the paper's
+            # irrigation-water accounting.
+            carrier_mm_h = info.get("carrier_irrigation_mm_h", info["irrigation_mm_h"])
+            total_irrigation_mm += carrier_mm_h * dt_hours
+            event_irr_total += carrier_mm_h * dt_hours
             total_etc_mm += info["etc_mm_h"] * dt_hours
 
             _record_step(history, info, action, event_idx, is_event=True)
+
+            if bool(info.get("water_volume_complete", False)):
+                break
+        else:
+            raise RuntimeError(
+                f"Irrigation event {event_idx + 1} did not reach its water-volume target "
+                f"within {max_event_steps} simulation steps."
+            )
 
         if verbose:
             target_ec = env.crop.get_target_ec(event.growth_stage)

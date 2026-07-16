@@ -8,7 +8,12 @@
 
 ```text
 上位机 / 数字孪生 / SAC
-  -> 写 EC_Set_SP、pH_Set_SP、EC_Actual、pH_Actual、SAC_Enable、Remote_Heartbeat
+  -> 写 EC/pH 目标、灌溉水泵命令和 Remote_Heartbeat
+
+PLC 主水泵执行层
+  -> 流量或压力 PI + 变频器输出
+  -> 累计本次灌溉水量
+  -> 实际流量达标后置 Water_Flow_OK
 
 PLC FB_FertigationControl
   -> 目标保护
@@ -28,8 +33,22 @@ PLC FB_FertigationControl
 ```text
 q_f_cmd: 1 路复合肥母液
 q_a_cmd: 1 路酸液
-q_w: 清水流量，当前作为过程参数，不由 PLC 输出
+Qw_Set/Qw_Actual: 主水泵目标流量与流量计反馈
+Pressure_Set/Pressure_Actual: 主管压力目标与反馈
+Water_Pump_Speed_CMD: 主泵变频器速度命令
 ```
+
+主水泵先启动并建立 `Water_Flow_OK`，N/P/K/酸液计量泵才能运行。
+
+单次灌溉按 `Water_Volume_SP` 闭环，并且总水量已经包含三段：
+
+```text
+PRE_FLUSH (清水) -> FERTIGATE (清水 + 肥/酸) -> POST_FLUSH (清水) -> COMPLETE
+```
+
+`Pre_Flush_Ratio` 默认 10%，`Post_Flush_Ratio` 默认 20%。只有
+`Batch_Fertigation_Active=TRUE` 时，N/P/K/酸泵允许输出；三段体积之和
+始终等于本次 `Water_Volume_SP`，不额外增加到作物灌溉定额之外。
 
 ## 2. DB1 通讯契约
 
@@ -45,6 +64,10 @@ pH_Actual
 SAC_Enable
 Remote_Heartbeat
 Growth_Stage
+Water_Enable
+Qw_Set
+Pressure_Set
+Water_Volume_SP
 Kp_EC_Set / Ki_EC_Set / Kd_EC_Set
 Kp_pH_Set / Ki_pH_Set / Kd_pH_Set
 ```
@@ -59,6 +82,14 @@ Active_pH_SP
 Setpoint_Protection_Active
 q_f_cmd
 q_a_cmd
+Qw_Actual
+Pressure_Actual
+Water_Volume_Actual
+Water_Pump_Run_CMD
+Water_Pump_Running
+Water_Flow_OK
+Water_Batch_Phase
+Batch_Fertigation_Active
 Valve_F_Actual
 Valve_A_Actual
 System_Alarm_Light
@@ -76,7 +107,9 @@ SAC_Enable = TRUE 时，上位机目标优先生效。
 这些参数不能只相信仿真值，现场必须重新测：
 
 ```text
-清水流量 q_w
+水泵设计流量、扬程和变频器频率范围
+清水流量计与压力传感器量程、零点和比例系数
+最低安全清水流量
 原水 EC / pH
 肥液母液 EC
 酸液 pH
@@ -139,4 +172,10 @@ cd "D:\Digital Twin"
 
 ```powershell
 .\.venv\Scripts\python.exe .\plc\tools\deployment_preflight.py --connect
+```
+
+水泵 DB、启停和 `Water_Flow_OK` 在线验收：
+
+```powershell
+.\.venv\Scripts\python.exe .\plc\tools\commission_water_pump.py
 ```

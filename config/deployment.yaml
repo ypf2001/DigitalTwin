@@ -27,6 +27,13 @@ deployment:
       - pH_Actual
       - SAC_Enable
       - Remote_Heartbeat
+      - Water_Enable
+      - Qw_Set
+      - Pressure_Set
+      - Water_Volume_SP
+      - Pre_Flush_Ratio
+      - Post_Flush_Ratio
+      - Water_Pump_Reset
     # 上位机至少应读取这些变量，用于监控执行量、安全状态和实际生效目标。
     required_read_tags:
       - Remote_Comms_OK
@@ -35,13 +42,22 @@ deployment:
       - Active_pH_SP
       - q_f_cmd
       - q_a_cmd
+      - Qw_Actual
+      - Pressure_Actual
+      - Water_Pump_Run_CMD
+      - Water_Flow_OK
+      - Water_Volume_Actual
+      - Water_Batch_Phase
+      - Batch_Fertigation_Active
       - System_Alarm_Light
 
   process_model:
     # 以下参数现在服务于仿真；真实部署时要用现场标定值替换。
     source_water:
-      # 清水主管流量。真实系统建议由流量计测得，而不是写死。
+      # 清水主管目标流量；过程计算必须使用流量计的 Qw_Actual。
       q_w_l_min: 136.0
+      q_w_safe_min_l_min: 20.0
+      pressure_set_bar: 1.8
       # 原水本底 EC。后续做酸液 EC 串扰补偿时会用到。
       ec_source_ds_m: 0.0
       ph_water: 7.2

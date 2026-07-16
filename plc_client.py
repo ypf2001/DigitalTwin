@@ -294,6 +294,67 @@ class PLCClient:
             logger.error(f"[PLC] fertilizer channel config write failed: {e}")
             return False
 
+    def write_water_command(self,
+                             enabled: bool,
+                             q_w_set: float,
+                             pressure_set: float,
+                             volume_set: float = 0.0,
+                             control_mode: int = 0,
+                             pre_flush_ratio: float | None = None,
+                             post_flush_ratio: float | None = None,
+                             reset_volume: bool = False) -> bool:
+        """Write the slow main-pump command. Mode 0=flow, 1=pressure."""
+        names = [
+            "Water_Enable", "Qw_Set", "Pressure_Set",
+            "Water_Volume_SP", "Water_Control_Mode",
+        ]
+        if not all(name in self.addr_map for name in names):
+            return False
+        try:
+            self._ensure_connected()
+            self._write_real("Water_Enable", 1.0 if enabled else 0.0)
+            self._write_real("Qw_Set", q_w_set)
+            self._write_real("Pressure_Set", pressure_set)
+            self._write_real("Water_Volume_SP", max(float(volume_set), 0.0))
+            self._write_int("Water_Control_Mode", int(control_mode))
+            if pre_flush_ratio is not None and "Pre_Flush_Ratio" in self.addr_map:
+                self._write_real("Pre_Flush_Ratio", min(max(float(pre_flush_ratio), 0.0), 1.0))
+            if post_flush_ratio is not None and "Post_Flush_Ratio" in self.addr_map:
+                self._write_real("Post_Flush_Ratio", min(max(float(post_flush_ratio), 0.0), 1.0))
+            if "Water_Pump_Reset" in self.addr_map:
+                self._write_bool("Water_Pump_Reset", bool(reset_volume))
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] water-pump command write failed: {e}")
+            return False
+
+    def write_water_feedback(self,
+                             q_w_actual: float,
+                             pressure_actual: float,
+                             speed_actual: float,
+                             running: bool) -> bool:
+        """Write simulated pump feedback during PLCSIM/HIL operation."""
+        names = [
+            "Qw_Actual", "Pressure_Actual", "Water_Pump_Speed_Actual",
+            "Water_Pump_Run_Feedback", "Water_Pump_Drive_Ready",
+            "Water_Pump_Drive_Fault", "Water_Source_Low_Level",
+        ]
+        if not all(name in self.addr_map for name in names):
+            return False
+        try:
+            self._ensure_connected()
+            self._write_real("Qw_Actual", q_w_actual)
+            self._write_real("Pressure_Actual", pressure_actual)
+            self._write_real("Water_Pump_Speed_Actual", speed_actual)
+            self._write_bool("Water_Pump_Run_Feedback", running)
+            self._write_bool("Water_Pump_Drive_Ready", True)
+            self._write_bool("Water_Pump_Drive_Fault", False)
+            self._write_bool("Water_Source_Low_Level", False)
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] water-pump feedback write failed: {e}")
+            return False
+
     def write_fertilizer_feedback(self,
                                   n_target: float,
                                   p_target: float,
@@ -579,6 +640,18 @@ class PLCClient:
             "NPK_Optimization_Weight", "NPK_Feedback_Valid", "NPK_Capacity_Limited",
             "Compressed_HIL_Enable", "Feedforward_Hold_Active", "Adaptive_PID_Active",
             "Fixed_PID_Test_Enable",
+            "Water_Enable", "Qw_Set", "Qw_Actual",
+            "Pressure_Set", "Pressure_Actual",
+            "Water_Volume_SP", "Water_Volume_Actual",
+            "Water_Pump_Speed_CMD", "Water_Pump_Speed_Actual",
+            "Water_Pump_Run_CMD", "Water_Pump_Running", "Water_Pump_Ready",
+            "Water_Pump_Fault", "Water_Flow_OK", "Water_Volume_Complete",
+            "AQ_Water_Pump_Raw", "Water_Control_Mode", "Water_Pump_Alarm",
+            "Water_Pump_Run_Feedback", "Water_Pump_Drive_Ready",
+            "Water_Pump_Drive_Fault", "Water_Source_Low_Level", "Water_Pump_Reset",
+            "Pre_Flush_Ratio", "Post_Flush_Ratio",
+            "Pre_Flush_Volume", "Fertigation_End_Volume",
+            "Water_Batch_Phase", "Batch_Fertigation_Active", "Water_Batch_Active",
             "Manual_Mode", "Auto_Mode", "Emergency_Stop", "Manual_Active", "Auto_Active",
             "Comm_Normal", "Manual_PumpValve_Enable",
             "Manual_q_f_Set", "Manual_q_a_Set",
@@ -604,10 +677,13 @@ class PLCClient:
         if "q_f_cmd" not in self.addr_map and "Actual_Valve_F" in self.addr_map:
             read_vars = [name for name in legacy if name in self.addr_map]
 
-        # Adaptive diagnostics begin at byte 312. A PLCSIM that still contains
-        # the previous DB1 rejects a single read extending to byte 396 with an
-        # "Invalid address" error. Keep the pre-adaptive range observable while
-        # the updated SCL/DB1 is being compiled and downloaded in TIA Portal.
+        # Keep older PLCSIM DB1 schemas observable while updated SCL is being
+        # compiled and downloaded. The adaptive schema ends at byte 396 and the
+        # optional water-pump extension begins at byte 400.
+        adaptive_schema_vars = [
+            name for name in read_vars
+            if int(self.addr_map[name]["offset"]) + int(self.addr_map[name]["bytes"]) <= 397
+        ]
         legacy_schema_vars = [
             name for name in read_vars
             if int(self.addr_map[name]["offset"]) + int(self.addr_map[name]["bytes"]) <= 312
@@ -651,16 +727,44 @@ class PLCClient:
                     for name in ("Kp_EC_Effective", "Kp_pH_Effective", "Adaptive_PID_Active")
                 )
             except Exception as full_read_error:
-                if not legacy_schema_vars or legacy_schema_vars == read_vars:
-                    raise
-                fallback_start, fallback_size = self._calc_read_range(legacy_schema_vars)
-                logger.warning(
-                    "[PLC] adaptive DB1 fields unavailable; using legacy schema read: %s",
-                    full_read_error,
+                if adaptive_schema_vars and adaptive_schema_vars != read_vars:
+                    try:
+                        adaptive_start, adaptive_size = self._calc_read_range(adaptive_schema_vars)
+                        raw = self._client.db_read(self.db_number, adaptive_start, adaptive_size)
+                        state = decode(adaptive_schema_vars, raw, adaptive_start)
+                        state["adaptive_schema_available"] = all(
+                            name in state
+                            for name in ("Kp_EC_Effective", "Kp_pH_Effective", "Adaptive_PID_Active")
+                        )
+                        state["water_schema_available"] = False
+                    except Exception:
+                        state = None
+                else:
+                    state = None
+
+                if state is None:
+                    if not legacy_schema_vars or legacy_schema_vars == read_vars:
+                        raise
+                    fallback_start, fallback_size = self._calc_read_range(legacy_schema_vars)
+                    logger.warning(
+                        "[PLC] extended DB1 fields unavailable; using legacy schema read: %s",
+                        full_read_error,
+                    )
+                    raw = self._client.db_read(self.db_number, fallback_start, fallback_size)
+                    state = decode(legacy_schema_vars, raw, fallback_start)
+                    state["adaptive_schema_available"] = False
+
+            state.setdefault("water_schema_available", all(
+                name in state
+                for name in ("Qw_Set", "Qw_Actual", "Water_Pump_Run_CMD", "Water_Flow_OK")
+            ))
+            state["water_batch_schema_available"] = all(
+                name in state
+                for name in (
+                    "Pre_Flush_Ratio", "Post_Flush_Ratio", "Water_Batch_Phase",
+                    "Batch_Fertigation_Active",
                 )
-                raw = self._client.db_read(self.db_number, fallback_start, fallback_size)
-                state = decode(legacy_schema_vars, raw, fallback_start)
-                state["adaptive_schema_available"] = False
+            )
 
             state = add_aliases(state)
 

@@ -1,11 +1,11 @@
-r"""110 天 SAC + PLC 全生命周期压缩仿真。
+r"""90 天 SAC + PLC 全生命周期压缩仿真。
 
 这个脚本通过 PLCGymEnv 驱动 PLCSIM/PLC：
 SAC 输出 EC/pH 目标值，PLC 根据 EC_Actual/pH_Actual 计算 q_f/q_a，
 Python 再用 PLC 输出推动数字孪生模型继续运行。
 
-默认运行模式是 SAC + PLC，不加参数会跑 110 天生命周期，并压缩到约 20 分钟完成。
-当 PLC 等待时间为 1 秒时，默认约 1080 步，所以 1 步约等于 0.102 天。
+默认运行模式是 SAC + PLC，不加参数会跑 90 天生命周期，并压缩到约 20 分钟完成。
+当 PLC 等待时间为 1 秒时，默认约 1080 步，所以 1 步约等于 0.083 天。
 
 注意：
 - 不加 --manual-test：使用 SAC 模型输出 EC_Set_SP / pH_Set_SP。
@@ -95,10 +95,12 @@ logger = logging.getLogger(__name__)
 
 
 STAGES = {
-    "INI": {"idx": 0, "tag": "ini", "start_day": 0.0, "end_day": 20.0},
-    "DEV": {"idx": 1, "tag": "dev", "start_day": 20.0, "end_day": 50.0},
-    "MID": {"idx": 2, "tag": "mid", "start_day": 50.0, "end_day": 75.0},
-    "LATE": {"idx": 3, "tag": "late", "start_day": 75.0, "end_day": 110.0},
+    # The four PLC control phases follow the paper's irrigation phases:
+    # seedling, tuber formation, tuber bulking, and starch accumulation.
+    "INI": {"idx": 0, "tag": "ini", "start_day": 0.0, "end_day": 24.0},
+    "DEV": {"idx": 1, "tag": "dev", "start_day": 24.0, "end_day": 38.0},
+    "MID": {"idx": 2, "tag": "mid", "start_day": 38.0, "end_day": 65.0},
+    "LATE": {"idx": 3, "tag": "late", "start_day": 65.0, "end_day": 90.0},
 }
 
 FIXED_ACTIONS = {
@@ -319,7 +321,7 @@ def _plot_soil_ec_ph(path: Path, rows: list[dict[str, Any]]) -> None:
     # The compressed run records sub-daily control steps. Plot daily averages
     # with a short rolling mean so irrigation pulses do not dominate the chart.
     day_index = np.floor(raw_day).astype(int)
-    days = np.arange(0, int(np.ceil(max(raw_day.max(), 110.0))) + 1)
+    days = np.arange(0, int(np.ceil(max(raw_day.max(), 90.0))) + 1)
     time_day = []
     ec_soil = []
     soil_ph = []
@@ -371,13 +373,13 @@ def _plot_soil_ec_ph(path: Path, rows: list[dict[str, Any]]) -> None:
         mid = (meta["start_day"] + meta["end_day"]) / 2.0
         ax_ec.text(mid, 0.98, stage, transform=ax_ec.get_xaxis_transform(), ha="center", va="top", fontsize=9)
 
-    ax_ec.set_title("110天PLC全周期仿真：土壤EC与pH（日均平滑）")
+    ax_ec.set_title("90天PLC全周期仿真：土壤EC与pH（日均平滑）")
     ax_ec.set_xlabel("天数")
     ax_ec.set_ylabel("土壤EC (dS/m)", color="#2f7d32")
     ax_ph.set_ylabel("估算土壤pH", color="#4e79a7")
     ax_ec.tick_params(axis="y", labelcolor="#2f7d32")
     ax_ph.tick_params(axis="y", labelcolor="#4e79a7")
-    ax_ec.set_xlim(0.0, max(110.0, float(time_day[-1])))
+    ax_ec.set_xlim(0.0, max(90.0, float(time_day[-1])))
     ax_ec.set_ylim(bottom=0.0)
     ax_ph.set_ylim(5.0, 7.5)
     ax_ec.grid(True, axis="y", color="#dddddd", linewidth=0.7)
@@ -853,8 +855,8 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s", datefmt="%H:%M:%S")
-    parser = argparse.ArgumentParser(description="Run compressed 110-day SAC + PLC simulation.")
-    parser.add_argument("--season-days", type=float, default=110.0)
+    parser = argparse.ArgumentParser(description="Run compressed 90-day SAC + PLC simulation.")
+    parser.add_argument("--season-days", type=float, default=90.0)
     parser.add_argument("--steps", type=int, default=None, help="Override step count. Default is calculated from --target-runtime-min.")
     parser.add_argument("--target-runtime-min", type=float, default=20.0, help="Approximate PLC run budget. Default is 20 minutes.")
     parser.add_argument("--runtime-margin", type=float, default=0.9, help="Fraction of runtime budget used for PLC waits.")
@@ -902,4 +904,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

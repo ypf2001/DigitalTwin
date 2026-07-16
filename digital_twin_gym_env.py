@@ -121,6 +121,10 @@ class DigitalTwinGymEnv(gym.Env):
     def close(self):
         pass
 
+    def set_irrigation_command(self, **kwargs):
+        """Forward the slow water-pump command to the unwrapped environment."""
+        return self._env.set_irrigation_command(**kwargs)
+
     @property
     def current_stage(self):
         return self._env.current_stage

@@ -69,6 +69,30 @@ REQUIRED_FERTILIZER_CHANNEL_TAGS = [
     "q_k_cmd",
 ]
 
+REQUIRED_WATER_PUMP_TAGS = [
+    "Water_Enable",
+    "Qw_Set",
+    "Qw_Actual",
+    "Pressure_Set",
+    "Pressure_Actual",
+    "Water_Volume_SP",
+    "Water_Volume_Actual",
+    "Water_Pump_Run_CMD",
+    "Water_Pump_Running",
+    "Water_Pump_Fault",
+    "Water_Flow_OK",
+    "AQ_Water_Pump_Raw",
+    "Water_Control_Mode",
+    "Water_Pump_Reset",
+    "Pre_Flush_Ratio",
+    "Post_Flush_Ratio",
+    "Pre_Flush_Volume",
+    "Fertigation_End_Volume",
+    "Water_Batch_Phase",
+    "Batch_Fertigation_Active",
+    "Water_Batch_Active",
+]
+
 
 def _check(condition: bool, ok: str, fail: str, errors: list[str]) -> None:
     if condition:
@@ -80,7 +104,10 @@ def _check(condition: bool, ok: str, fail: str, errors: list[str]) -> None:
 
 def _check_addresses(addr_map: dict, errors: list[str]) -> None:
     # 只检查通讯契约是否完整，不在这里判断每个 offset 的物理含义。
-    required = REQUIRED_WRITE_TAGS + REQUIRED_READ_TAGS + REQUIRED_PID_TAGS + REQUIRED_FERTILIZER_CHANNEL_TAGS
+    required = (
+        REQUIRED_WRITE_TAGS + REQUIRED_READ_TAGS + REQUIRED_PID_TAGS
+        + REQUIRED_FERTILIZER_CHANNEL_TAGS + REQUIRED_WATER_PUMP_TAGS
+    )
     for tag in required:
         _check(
             tag in addr_map,
@@ -119,7 +146,10 @@ def _connect_plc(errors: list[str]) -> None:
         state = plc.read_state()
         _check(state is not None, "PLC state readable.", "PLC state read failed.", errors)
         if state:
-            for tag in ("q_f_cmd", "q_a_cmd", "Active_EC_SP", "Active_pH_SP"):
+            for tag in (
+                "q_f_cmd", "q_a_cmd", "Active_EC_SP", "Active_pH_SP",
+                "Qw_Actual", "Water_Pump_Run_CMD", "Water_Flow_OK",
+            ):
                 _check(tag in state, f"PLC readback contains {tag}", f"PLC readback missing {tag}", errors)
     finally:
         plc.disconnect()
