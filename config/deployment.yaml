@@ -34,6 +34,28 @@ deployment:
       - Pre_Flush_Ratio
       - Post_Flush_Ratio
       - Water_Pump_Reset
+    # Control parameters are written only during commissioning or a controlled
+    # parameter update, never as part of the normal SAC heartbeat frame.
+    control_parameter_write_tags:
+      - Kp_EC_Set
+      - Ki_EC_Set
+      - Kd_EC_Set
+      - Kp_pH_Set
+      - Ki_pH_Set
+      - Kd_pH_Set
+      - G_EC_F
+      - G_EC_A
+      - G_pH_F
+      - G_pH_A
+      - Decoupler_Weight
+      - Decoupler_Regularization
+      - Mixing_Delay_s
+      - Decoupler_Determinant_Min
+      - q_f_min
+      - q_f_max
+      - q_a_min
+      - q_a_max
+      - Decoupler_Enable
     # 上位机至少应读取这些变量，用于监控执行量、安全状态和实际生效目标。
     required_read_tags:
       - Remote_Comms_OK
@@ -50,6 +72,10 @@ deployment:
       - Water_Batch_Phase
       - Batch_Fertigation_Active
       - System_Alarm_Light
+      - Decoupler_Valid
+      - Decoupler_Determinant
+      - Delta_q_f
+      - Delta_q_a
 
   process_model:
     # 以下参数现在服务于仿真；真实部署时要用现场标定值替换。

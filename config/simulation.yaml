@@ -679,11 +679,82 @@ plc:
       bit: 0
       type: bool
       bytes: 1
+    # DB1末尾追加的EC/pH解耦参数。旧字段偏移保持不变。
     Water_Batch_Active:
       offset: 462
       bit: 1
       type: bool
       bytes: 1
+    G_EC_F:
+      offset: 464
+      type: real
+      bytes: 4
+    G_EC_A:
+      offset: 468
+      type: real
+      bytes: 4
+    G_pH_F:
+      offset: 472
+      type: real
+      bytes: 4
+    G_pH_A:
+      offset: 476
+      type: real
+      bytes: 4
+    Decoupler_Weight:
+      offset: 480
+      type: real
+      bytes: 4
+    Decoupler_Regularization:
+      offset: 484
+      type: real
+      bytes: 4
+    Mixing_Delay_s:
+      offset: 488
+      type: real
+      bytes: 4
+    Decoupler_Determinant_Min:
+      offset: 492
+      type: real
+      bytes: 4
+    q_f_min:
+      offset: 496
+      type: real
+      bytes: 4
+    q_f_max:
+      offset: 500
+      type: real
+      bytes: 4
+    q_a_min:
+      offset: 504
+      type: real
+      bytes: 4
+    q_a_max:
+      offset: 508
+      type: real
+      bytes: 4
+    Decoupler_Enable:
+      offset: 512
+      bit: 0
+      type: bool
+      bytes: 1
+    Decoupler_Valid:
+      offset: 512
+      bit: 1
+      type: bool
+      bytes: 1
+    Decoupler_Determinant:
+      offset: 516
+      type: real
+      bytes: 4
+    Delta_q_f:
+      offset: 520
+      type: real
+      bytes: 4
+    Delta_q_a:
+      offset: 524
+      type: real
+      bytes: 4
 
     # PLC/PLCSIM 写回 Python 的执行结果与状态
     Remote_Comms_OK:

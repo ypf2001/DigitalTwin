@@ -735,6 +735,27 @@ NON_RETAIN
        Batch_Fertigation_Active : Bool; // DBX462.0，肥/酸泵唯一批次许可
        Water_Batch_Active : Bool;       // DBX462.1
        Reserved_463 : Byte;
+
+       // EC/pH decoupling deployment contract. Append only; do not move older fields.
+       G_EC_F : Real;                    // DBD464, dEC/dq_f
+       G_EC_A : Real;                    // DBD468, dEC/dq_a
+       G_pH_F : Real;                    // DBD472, dpH/dq_f
+       G_pH_A : Real;                    // DBD476, dpH/dq_a
+       Decoupler_Weight : Real;          // DBD480, 0..1
+       Decoupler_Regularization : Real;  // DBD484, reserved for robust inversion
+       Mixing_Delay_s : Real;            // DBD488, process delay used by control logic
+       Decoupler_Determinant_Min : Real; // DBD492, minimum valid determinant
+       q_f_min : Real;                   // DBD496
+       q_f_max : Real;                   // DBD500
+       q_a_min : Real;                   // DBD504
+       q_a_max : Real;                   // DBD508
+       Decoupler_Enable : Bool;          // DBX512.0, default FALSE
+       Decoupler_Valid : Bool;           // DBX512.1, PLC validation result
+       Reserved_513 : Byte;
+       Reserved_514 : Word;
+       Decoupler_Determinant : Real;     // DBD516, diagnostic
+       Delta_q_f : Real;                 // DBD520, diagnostic
+       Delta_q_a : Real;                 // DBD524, diagnostic
    END_STRUCT;
 
 
@@ -886,6 +907,25 @@ BEGIN
    Batch_Fertigation_Active := false;
    Water_Batch_Active := false;
    Reserved_463 := 0;
+   G_EC_F := 0.0;
+   G_EC_A := 0.0;
+   G_pH_F := 0.0;
+   G_pH_A := 0.0;
+   Decoupler_Weight := 0.0;
+   Decoupler_Regularization := 0.001;
+   Mixing_Delay_s := 60.0;
+   Decoupler_Determinant_Min := 0.001;
+   q_f_min := 0.0;
+   q_f_max := 10.0;
+   q_a_min := 0.0;
+   q_a_max := 4.0;
+   Decoupler_Enable := false;
+   Decoupler_Valid := false;
+   Reserved_513 := 0;
+   Reserved_514 := 0;
+   Decoupler_Determinant := 0.0;
+   Delta_q_f := 0.0;
+   Delta_q_a := 0.0;
 
 END_DATA_BLOCK
 
@@ -2294,6 +2334,20 @@ BEGIN
       END_IF;
    END_IF;
 
+   // Validate the downloaded decoupling contract before any future use.
+   // The current PID path remains unchanged until the execution branch is commissioned.
+   "DB1".Decoupler_Determinant := "DB1".G_EC_F * "DB1".G_pH_A
+      - "DB1".G_EC_A * "DB1".G_pH_F;
+   "DB1".Decoupler_Valid := ("DB1".Decoupler_Determinant_Min > 0.0)
+      AND (ABS("DB1".Decoupler_Determinant) >= "DB1".Decoupler_Determinant_Min)
+      AND ("DB1".Decoupler_Weight >= 0.0)
+      AND ("DB1".Decoupler_Weight <= 1.0)
+      AND ("DB1".q_f_max > "DB1".q_f_min)
+      AND ("DB1".q_a_max > "DB1".q_a_min);
+   IF "DB1".Decoupler_Enable AND NOT "DB1".Decoupler_Valid THEN
+      "DB1".Decoupler_Enable := FALSE;
+   END_IF;
+
    "inst_FertigationControl"(
       EC_Set_SP := "DB1".EC_Set_SP,
       pH_Set_SP := "DB1".pH_Set_SP,
@@ -2320,10 +2374,10 @@ BEGIN
       pH_Trim_Band := "DB1".pH_Trim_Band,
       EC_MaxInputStep := 0.15,
       pH_MaxInputStep := 0.10,
-      q_f_min := 0.0,
-      q_f_max := 10.0,
-      q_a_min := 0.0,
-      q_a_max := 4.0,
+       q_f_min := "DB1".q_f_min,
+       q_f_max := "DB1".q_f_max,
+       q_a_min := "DB1".q_a_min,
+       q_a_max := "DB1".q_a_max,
       N_Enable := "DB1".N_Enable,
       N_Ratio := "DB1".N_Ratio,
       N_Target := "DB1".N_Target,
