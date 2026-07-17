@@ -217,5 +217,15 @@ def compile_plc_software(plc_software):
 def print_compile_result(result) -> None:
     print(f"Compile state: {result.State}")
     print(f"Errors: {result.ErrorCount}, warnings: {result.WarningCount}")
-    for message in result.Messages:
-        print(f"[{message.State}] {message.Description}")
+
+    def print_messages(messages, depth: int = 0) -> None:
+        for message in messages:
+            description = str(getattr(message, "Description", "") or "").strip()
+            state = getattr(message, "State", "")
+            if description:
+                print(f"{'  ' * depth}[{state}] {description}")
+            children = getattr(message, "Messages", None)
+            if children is not None:
+                print_messages(children, depth + 1)
+
+    print_messages(result.Messages)

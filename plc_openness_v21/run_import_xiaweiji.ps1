@@ -48,6 +48,22 @@ python "$Root\examples\import_scl_to_project.py" `
   --project "$Project" `
   --source "$Source" `
   --source-name "xiaweiji"
+if ($LASTEXITCODE -ne 0) {
+  throw "SCL import failed with exit code $LASTEXITCODE"
+}
+
+$ModeSelectorLad = Join-Path $Root "generated_lad\FC_ModeSelector_LAD.xml"
+if (-not (Test-Path -LiteralPath $ModeSelectorLad)) {
+  throw "LAD mode selector XML not found: $ModeSelectorLad"
+}
+Write-Host "Importing LAD mode selector: $ModeSelectorLad"
+python "$Root\examples\import_lad_xml.py" `
+  --project "$Project" `
+  --plc "PLC_1" `
+  --xml "$ModeSelectorLad"
+if ($LASTEXITCODE -ne 0) {
+  throw "LAD mode selector import failed with exit code $LASTEXITCODE"
+}
 
 $ModeInterlockLad = Join-Path $Root "lad_templates\FC_ModeInterlock_LAD.xml"
 if (Test-Path -LiteralPath $ModeInterlockLad) {
@@ -57,6 +73,9 @@ if (Test-Path -LiteralPath $ModeInterlockLad) {
     --plc "PLC_1" `
     --xml "$ModeInterlockLad" `
     --compile
+  if ($LASTEXITCODE -ne 0) {
+    throw "PLC compile failed with exit code $LASTEXITCODE"
+  }
 } else {
   Write-Warning "LAD mode interlock XML not found: $ModeInterlockLad"
   python "$Root\examples\import_scl_to_project.py" `
@@ -65,4 +84,7 @@ if (Test-Path -LiteralPath $ModeInterlockLad) {
     --source-name "xiaweiji" `
     --compile `
     --go-online-after
+  if ($LASTEXITCODE -ne 0) {
+    throw "PLC compile failed with exit code $LASTEXITCODE"
+  }
 }

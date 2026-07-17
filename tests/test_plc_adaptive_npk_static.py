@@ -56,7 +56,8 @@ def test_scl_contains_priority_weight_recipe_and_capacity_projection():
 def test_compressed_hil_is_gated_and_cleared_on_timeout():
     scl = SCL_PATH.read_text(encoding="utf-8")
     assert 'Compressed_HIL_Enable := "DB1".Compressed_HIL_Enable AND "DB1".Remote_Comms_OK,' in scl
-    assert 'IF #Compressed_HIL_Enable THEN #Hold_Time_S := 1.0; ELSE #Hold_Time_S := 60.0; END_IF;' in scl
+    assert "#Hold_Time_S := #Mixing_Delay_s;" in scl
+    assert "IF #Hold_Time_S > 600.0 THEN #Hold_Time_S := 600.0; END_IF;" in scl
     assert '"DB1".Compressed_HIL_Enable := FALSE;' in scl
     assert '"DB1".NPK_Feedback_Valid := FALSE;' in scl
 

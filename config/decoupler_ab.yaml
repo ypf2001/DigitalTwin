@@ -1,0 +1,16 @@
+ab_validation:
+  schema_version: 1
+  baseline_weight: 0.0
+  candidate_weights:
+    - 0.1
+    - 0.25
+    - 0.5
+  require_all_disturbances: true
+  min_cross_coupling_reduction_fraction: 0.10
+  max_ec_mae_degradation_abs: 0.01
+  max_ph_mae_degradation_abs: 0.01
+  max_q_f_saturation_increase: 0
+  max_q_a_saturation_increase: 0
+  max_alarm_increase: 0
+  max_communication_failure_increase: 0
+  max_setpoint_protection_count: 0

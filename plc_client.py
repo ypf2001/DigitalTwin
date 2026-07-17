@@ -9,6 +9,7 @@ B 方案通讯约定：
 """
 
 import logging
+import math
 import os
 import time
 
@@ -54,6 +55,7 @@ class PLCClient:
         self._client = snap7.client.Client()
         self._connected = False
         self._heartbeat = 0
+        self._heartbeat_initialized = False
         self._read_retrying = False
 
     # ================================================================
@@ -171,6 +173,256 @@ class PLCClient:
         buf = bytearray(raw)
         set_bool(buf, 0, int(addr.get("bit", 0)), bool(value))
         self._client.db_write(self.db_number, offset, buf)
+
+    def _read_real(self, name: str) -> float:
+        addr = self._addr(name)
+        raw = self._client.db_read(self.db_number, int(addr["offset"]), 4)
+        return float(get_real(raw, 0))
+
+    def _read_bool(self, name: str) -> bool:
+        addr = self._addr(name)
+        raw = self._client.db_read(self.db_number, int(addr["offset"]), 1)
+        return bool(get_bool(raw, 0, int(addr.get("bit", 0))))
+
+    def _advance_heartbeat(self) -> int:
+        """Continue the PLC heartbeat across short-lived client processes."""
+        if not getattr(self, "_heartbeat_initialized", True):
+            try:
+                addr = self._addr("Remote_Heartbeat")
+                raw = self._client.db_read(self.db_number, int(addr["offset"]), 2)
+                self._heartbeat = int(get_int(raw, 0))
+            except Exception:
+                # A missing/unsupported read falls back to the historical
+                # zero-based behavior; the write still remains best effort.
+                self._heartbeat = int(getattr(self, "_heartbeat", 0))
+            self._heartbeat_initialized = True
+        self._heartbeat = (int(self._heartbeat) + 1) % 32000
+        return self._heartbeat
+
+    @staticmethod
+    def _control_float(section: dict, key: str, *, minimum: float = None,
+                       maximum: float = None) -> float:
+        """Read and validate one deployable control parameter."""
+        try:
+            value = float(section[key])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"invalid control parameter: {key}") from exc
+        if not math.isfinite(value):
+            raise ValueError(f"non-finite control parameter: {key}")
+        if minimum is not None and value < minimum:
+            raise ValueError(f"control parameter below minimum: {key}")
+        if maximum is not None and value > maximum:
+            raise ValueError(f"control parameter above maximum: {key}")
+        return value
+
+    def write_control_parameters(self, parameters: dict, verify: bool = True) -> bool:
+        """Write deployable DB1 parameters while keeping decoupling disabled.
+
+        The caller must explicitly call set_decoupler_enabled(True) after PLC
+        readback and commissioning checks. This method never enables the
+        decoupler as part of a parameter update.
+        """
+        dec = parameters.get("decoupling", {})
+        limits = parameters.get("limits", {})
+        pid = parameters.get("pid", {})
+        ec_pid = pid.get("ec", {})
+        ph_pid = pid.get("ph", {})
+        npk = parameters.get("npk")
+        required = [
+            "G_EC_F", "G_EC_A", "G_pH_F", "G_pH_A",
+            "Decoupler_Weight", "Decoupler_Regularization",
+            "Mixing_Delay_s", "Decoupler_Determinant_Min",
+            "q_f_min", "q_f_max", "q_a_min", "q_a_max",
+            "Decoupler_Enable",
+        ]
+        missing = [name for name in required if name not in self.addr_map]
+        if missing:
+            logger.error("[PLC] control parameter address mapping missing: %s", missing)
+            return False
+
+        try:
+            values = {
+                "G_EC_F": self._control_float(dec, "g_ec_f"),
+                "G_EC_A": self._control_float(dec, "g_ec_a"),
+                "G_pH_F": self._control_float(dec, "g_ph_f"),
+                "G_pH_A": self._control_float(dec, "g_ph_a"),
+                "Decoupler_Weight": self._control_float(dec, "weight", minimum=0.0, maximum=1.0),
+                "Decoupler_Regularization": self._control_float(dec, "regularization", minimum=0.0),
+                "Mixing_Delay_s": self._control_float(dec, "mixing_delay_s", minimum=0.0),
+                "Decoupler_Determinant_Min": self._control_float(dec, "determinant_min", minimum=0.0),
+                "q_f_min": self._control_float(limits, "q_f_min", minimum=0.0),
+                "q_f_max": self._control_float(limits, "q_f_max", minimum=0.0),
+                "q_a_min": self._control_float(limits, "q_a_min", minimum=0.0),
+                "q_a_max": self._control_float(limits, "q_a_max", minimum=0.0),
+            }
+            if values["q_f_max"] <= values["q_f_min"]:
+                raise ValueError("q_f_max must be greater than q_f_min")
+            if values["q_a_max"] <= values["q_a_min"]:
+                raise ValueError("q_a_max must be greater than q_a_min")
+            pid_values = {
+                "Kp_EC_Set": self._control_float(ec_pid, "kp", minimum=0.0),
+                "Ki_EC_Set": self._control_float(ec_pid, "ki", minimum=0.0),
+                "Kd_EC_Set": self._control_float(ec_pid, "kd", minimum=0.0),
+                "Kp_pH_Set": self._control_float(ph_pid, "kp", minimum=0.0),
+                "Ki_pH_Set": self._control_float(ph_pid, "ki", minimum=0.0),
+                "Kd_pH_Set": self._control_float(ph_pid, "kd", minimum=0.0),
+            }
+            missing_pid = [name for name in pid_values if name not in self.addr_map]
+            if missing_pid:
+                raise ValueError(f"PID address mapping missing: {missing_pid}")
+            npk_values = {}
+            if npk is not None:
+                npk_values = {
+                    "N_Enable": 1.0 if bool(npk.get("n_enable", True)) else 0.0,
+                    "N_Ratio": self._control_float(npk, "n_ratio", minimum=0.0),
+                    "P_Enable": 1.0 if bool(npk.get("p_enable", True)) else 0.0,
+                    "P_Ratio": self._control_float(npk, "p_ratio", minimum=0.0),
+                    "K_Enable": 1.0 if bool(npk.get("k_enable", True)) else 0.0,
+                    "K_Ratio": self._control_float(npk, "k_ratio", minimum=0.0),
+                }
+                missing_npk = [name for name in npk_values if name not in self.addr_map]
+                if missing_npk:
+                    raise ValueError(f"N/P/K address mapping missing: {missing_npk}")
+        except ValueError as exc:
+            logger.error("[PLC] invalid control parameters: %s", exc)
+            return False
+
+        try:
+            self._ensure_connected()
+            # Invalidate the runtime contract before changing any value.
+            self._write_bool("Decoupler_Enable", False)
+            for name, value in {**values, **pid_values, **npk_values}.items():
+                self._write_real(name, value)
+
+            if verify:
+                readback = self.read_control_parameters()
+                if readback is None:
+                    logger.error("[PLC] control parameter readback failed")
+                    return False
+                expected = {**values, **pid_values, **npk_values}
+                actual = readback["flat"]
+                mismatched = [
+                    name for name, value in expected.items()
+                    if abs(float(actual[name]) - float(value)) > 1e-5
+                ]
+                if mismatched:
+                    logger.error("[PLC] control parameter readback mismatch: %s", mismatched)
+                    return False
+            logger.info("[PLC] control parameters written; decoupler remains disabled")
+            return True
+        except Exception as exc:
+            logger.error("[PLC] control parameter write failed: %s", exc)
+            return False
+
+    def read_control_parameters(self) -> dict | None:
+        """Read the deployable DB1 control contract and diagnostics."""
+        real_names = [
+            "G_EC_F", "G_EC_A", "G_pH_F", "G_pH_A",
+            "Decoupler_Weight", "Decoupler_Regularization",
+            "Mixing_Delay_s", "Decoupler_Determinant_Min",
+            "q_f_min", "q_f_max", "q_a_min", "q_a_max",
+            "Kp_EC_Set", "Ki_EC_Set", "Kd_EC_Set",
+            "Kp_pH_Set", "Ki_pH_Set", "Kd_pH_Set",
+            "N_Enable", "N_Ratio", "P_Enable", "P_Ratio", "K_Enable", "K_Ratio",
+            "Decoupler_Determinant", "Delta_q_f", "Delta_q_a",
+        ]
+        bool_names = ["Decoupler_Enable", "Decoupler_Valid"]
+        missing = [name for name in [*real_names, *bool_names] if name not in self.addr_map]
+        if missing:
+            logger.error("[PLC] control parameter read mapping missing: %s", missing)
+            return None
+        try:
+            self._ensure_connected()
+            flat = {name: self._read_real(name) for name in real_names}
+            flat.update({name: self._read_bool(name) for name in bool_names})
+            return {"flat": flat}
+        except Exception as exc:
+            logger.error("[PLC] control parameter read failed: %s", exc)
+            return None
+
+    def set_decoupler_enabled(self, enabled: bool) -> bool:
+        """Change the enable bit only after a valid PLC readback."""
+        required = ["Decoupler_Enable", "Decoupler_Valid"]
+        missing = [name for name in required if name not in self.addr_map]
+        if missing:
+            logger.error("[PLC] decoupler enable mapping missing: %s", missing)
+            return False
+        try:
+            self._ensure_connected()
+            if enabled and not self._read_bool("Decoupler_Valid"):
+                logger.error("[PLC] decoupler rejected: PLC reports Decoupler_Valid=FALSE")
+                return False
+            self._write_bool("Decoupler_Enable", bool(enabled))
+            return True
+        except Exception as exc:
+            logger.error("[PLC] decoupler enable write failed: %s", exc)
+            return False
+
+    def write_active_gain_matrix(self, point: dict, verify: bool = True) -> bool:
+        """Write one validated local G matrix without enabling decoupling.
+
+        ``point`` is one entry from the supervisory gain schedule.  The full
+        schedule remains in Python; DB1 receives only the active four gains
+        and optional process delay.  Enabling the PLC decoupler is a separate,
+        explicitly guarded operation.
+        """
+        try:
+            from plc_control.gain_schedule import gain_diagnostics
+
+            diagnostics = gain_diagnostics(point)
+            if not diagnostics["valid"]:
+                logger.error("[PLC] rejected invalid active gain point: %s", diagnostics)
+                return False
+            gains = point.get("gains", point)
+            values = {
+                "G_EC_F": float(gains["g_ec_f"]),
+                "G_EC_A": float(gains["g_ec_a"]),
+                "G_pH_F": float(gains["g_ph_f"]),
+                "G_pH_A": float(gains["g_ph_a"]),
+            }
+            if "Mixing_Delay_s" in self.addr_map and point.get("delay_s") is not None:
+                values["Mixing_Delay_s"] = max(float(point["delay_s"]), 0.0)
+            missing = [name for name in values if name not in self.addr_map]
+            if missing:
+                logger.error("[PLC] active gain address mapping missing: %s", missing)
+                return False
+
+            self._ensure_connected()
+            # Invalidate the runtime contract before replacing the matrix.
+            self._write_bool("Decoupler_Enable", False)
+            for name, value in values.items():
+                self._write_real(name, value)
+            if not verify:
+                return True
+            readback = self.read_control_parameters()
+            if readback is None:
+                return False
+            actual = readback["flat"]
+            return all(abs(float(actual[name]) - value) <= 1e-5 for name, value in values.items())
+        except (KeyError, TypeError, ValueError) as exc:
+            logger.error("[PLC] invalid active gain point: %s", exc)
+            return False
+        except Exception as exc:
+            logger.error("[PLC] active gain write failed: %s", exc)
+            return False
+
+    def write_decoupler_weight(self, weight: float, verify: bool = True) -> bool:
+        """Write the bounded A/B test weight without changing the enable bit."""
+        try:
+            value = float(weight)
+            if not math.isfinite(value) or value < 0.0 or value > 1.0:
+                raise ValueError("decoupler weight must be finite and within [0, 1]")
+            self._ensure_connected()
+            self._write_real("Decoupler_Weight", value)
+            if verify:
+                return abs(self._read_real("Decoupler_Weight") - value) <= 1e-5
+            return True
+        except (KeyError, TypeError, ValueError) as exc:
+            logger.error("[PLC] invalid decoupler weight: %s", exc)
+            return False
+        except Exception as exc:
+            logger.error("[PLC] decoupler weight write failed: %s", exc)
+            return False
 
     def write_growth_stage(self, stage: int) -> bool:
         """Write the simplified PLC growth stage if it is mapped in config.
@@ -461,6 +713,135 @@ class PLCClient:
             logger.error(f"[PLC] manual mode write failed: {e}")
             return False
 
+    def write_manual_flow(self, q_f: float, q_a: float,
+                          q_n: float = 0.0, q_p: float = 0.0,
+                          q_k: float = 0.0) -> bool:
+        """Update manual flow values without rewriting the mode selector bits."""
+        names = [
+            "Manual_q_f_Set", "Manual_q_a_Set", "Manual_q_n_Set",
+            "Manual_q_p_Set", "Manual_q_k_Set",
+        ]
+        missing = [name for name in names if name not in self.addr_map]
+        if missing:
+            logger.error("[PLC] manual flow address mapping missing: %s", missing)
+            return False
+        try:
+            self._ensure_connected()
+            for name, value in zip(names, (q_f, q_a, q_n, q_p, q_k)):
+                self._write_real(name, value)
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] manual flow write failed: {e}")
+            return False
+
+    def write_gain_experiment_frame(self, ec_actual: float, ph_actual: float,
+                                    q_f: float, q_a: float) -> bool:
+        """Write one compact PLCSIM identification frame with two DB writes."""
+        required = [
+            "Manual_q_f_Set", "Manual_q_k_Set", "EC_Actual", "pH_Actual",
+            "SAC_Enable", "Remote_Heartbeat",
+        ]
+        if any(name not in self.addr_map for name in required):
+            return False
+        try:
+            self._ensure_connected()
+            flow_start = int(self.addr_map["Manual_q_f_Set"]["offset"])
+            flow_end = int(self.addr_map["Manual_q_k_Set"]["offset"]) + 4
+            flow_buf = bytearray(flow_end - flow_start)
+            for index, value in enumerate((q_f, q_a, 0.0, 0.0, 0.0)):
+                set_real(flow_buf, index * 4, float(value))
+            self._client.db_write(self.db_number, flow_start, flow_buf)
+
+            self._advance_heartbeat()
+            feedback_start = int(self.addr_map["EC_Actual"]["offset"])
+            heartbeat_end = int(self.addr_map["Remote_Heartbeat"]["offset"]) + 2
+            feedback_buf = bytearray(heartbeat_end - feedback_start)
+            set_real(feedback_buf, int(self.addr_map["EC_Actual"]["offset"]) - feedback_start, ec_actual)
+            set_real(feedback_buf, int(self.addr_map["pH_Actual"]["offset"]) - feedback_start, ph_actual)
+            sac_addr = self.addr_map["SAC_Enable"]
+            set_bool(feedback_buf, int(sac_addr["offset"]) - feedback_start,
+                     int(sac_addr.get("bit", 0)), False)
+            set_int(feedback_buf, int(self.addr_map["Remote_Heartbeat"]["offset"]) - feedback_start,
+                    self._heartbeat)
+            self._client.db_write(self.db_number, feedback_start, feedback_buf)
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] compact experiment frame write failed: {e}")
+            return False
+
+    def read_gain_experiment_state(self) -> dict:
+        """Read only the compact DB1 fields needed by the identification loop."""
+        try:
+            self._ensure_connected()
+            state = {}
+            feedback_start = int(self.addr_map["Remote_Comms_OK"]["offset"])
+            feedback_end = int(self.addr_map["q_a_cmd"]["offset"]) + 4
+            raw = self._client.db_read(self.db_number, feedback_start, feedback_end - feedback_start)
+            for name in ("Remote_Comms_OK", "Watchdog_Timer", "q_f_cmd", "q_a_cmd"):
+                addr = self.addr_map[name]
+                rel = int(addr["offset"]) - feedback_start
+                if addr["type"] == "bool":
+                    state[name] = bool(get_bool(raw, rel, int(addr.get("bit", 0))))
+                elif addr["type"] == "int":
+                    state[name] = int(get_int(raw, rel))
+                else:
+                    state[name] = float(get_real(raw, rel))
+            for name in ("System_Alarm_Light", "Manual_Active", "Water_Flow_OK",
+                         "Decoupler_Enable", "Decoupler_Valid", "q_f_limited", "q_a_limited"):
+                addr = self.addr_map[name]
+                raw_one = self._client.db_read(self.db_number, int(addr["offset"]), 1)
+                state[name] = bool(get_bool(raw_one, 0, int(addr.get("bit", 0))))
+            return state
+        except Exception as e:
+            logger.error(f"[PLC] compact experiment state read failed: {e}")
+            return {}
+
+    def write_standby(self) -> bool:
+        """Return the PLC to a non-running standby mode after commissioning."""
+        names = [name for name in ("Manual_Mode", "Auto_Mode") if name in self.addr_map]
+        if len(names) < 2:
+            logger.error("[PLC] standby mode requires Manual_Mode and Auto_Mode mappings")
+            return False
+        try:
+            self._ensure_connected()
+            self._write_bool("Manual_Mode", False)
+            self._write_bool("Auto_Mode", False)
+            if "SAC_Enable" in self.addr_map:
+                self._write_bool("SAC_Enable", False)
+            logger.info("[PLC] standby mode requested")
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] standby mode write failed: {e}")
+            return False
+
+    def write_remote_auto_mode(self) -> bool:
+        """Select remote automatic mode without changing setpoints."""
+        names = [name for name in ("Manual_Mode", "Auto_Mode") if name in self.addr_map]
+        if len(names) != 2:
+            logger.error("[PLC] remote automatic mode mappings are incomplete")
+            return False
+        try:
+            self._ensure_connected()
+            self._write_bool("Manual_Mode", False)
+            self._write_bool("Auto_Mode", True)
+            return True
+        except Exception as exc:
+            logger.error("[PLC] remote automatic mode write failed: %s", exc)
+            return False
+
+    def write_system_alarm_reset(self, enabled: bool) -> bool:
+        """Pulse the DB1 alarm acknowledge bit during commissioning."""
+        if "System_Alarm_Reset" not in self.addr_map:
+            logger.error("[PLC] System_Alarm_Reset address mapping missing")
+            return False
+        try:
+            self._ensure_connected()
+            self._write_bool("System_Alarm_Reset", bool(enabled))
+            return True
+        except Exception as e:
+            logger.error(f"[PLC] system alarm reset write failed: {e}")
+            return False
+
     def write_emergency_stop(self, enabled: bool = True) -> bool:
         """Set or clear the PLC emergency stop flag in DB1."""
         if "Emergency_Stop" not in self.addr_map:
@@ -538,7 +919,7 @@ class PLCClient:
         """
         try:
             self._ensure_connected()
-            self._heartbeat = (self._heartbeat + 1) % 32000
+            self._advance_heartbeat()
 
             # Remove remote automatic authority first when manual is active.
             if "SAC_Enable" in self.addr_map:
@@ -576,7 +957,7 @@ class PLCClient:
             return False
         try:
             self._ensure_connected()
-            self._heartbeat = (self._heartbeat + 1) % 32000
+            self._advance_heartbeat()
             self._write_real("Valve_F_Opt_SP", valve_f)
             self._write_real("Valve_A_Opt_SP", valve_a)
             self._write_int("Remote_Heartbeat", self._heartbeat)
@@ -640,6 +1021,11 @@ class PLCClient:
             "NPK_Optimization_Weight", "NPK_Feedback_Valid", "NPK_Capacity_Limited",
             "Compressed_HIL_Enable", "Feedforward_Hold_Active", "Adaptive_PID_Active",
             "Fixed_PID_Test_Enable",
+            "G_EC_F", "G_EC_A", "G_pH_F", "G_pH_A",
+            "Decoupler_Weight", "Decoupler_Regularization", "Mixing_Delay_s",
+            "Decoupler_Determinant_Min", "q_f_min", "q_f_max", "q_a_min", "q_a_max",
+            "Decoupler_Enable", "Decoupler_Valid", "Decoupler_Determinant",
+            "Delta_q_f", "Delta_q_a",
             "Water_Enable", "Qw_Set", "Qw_Actual",
             "Pressure_Set", "Pressure_Actual",
             "Water_Volume_SP", "Water_Volume_Actual",
@@ -654,6 +1040,7 @@ class PLCClient:
             "Water_Batch_Phase", "Batch_Fertigation_Active", "Water_Batch_Active",
             "Manual_Mode", "Auto_Mode", "Emergency_Stop", "Manual_Active", "Auto_Active",
             "Comm_Normal", "Manual_PumpValve_Enable",
+            "Actuator_Execution_Enable", "Actuator_Any_Alarm", "Actuator_Any_Trip",
             "Manual_q_f_Set", "Manual_q_a_Set",
             "Manual_q_f_Selected", "Manual_q_a_Selected",
             "Manual_q_n_Set", "Manual_q_p_Set", "Manual_q_k_Set",

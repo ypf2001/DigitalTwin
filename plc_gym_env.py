@@ -27,6 +27,7 @@ import numpy as np
 from config_loader import load_config
 from digital_twin_gym_env import DigitalTwinGymEnv, STAGE_MAP
 from plc_client import PLCClient
+from plc_control.gain_schedule import load_gain_schedule, select_gain_point
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +47,21 @@ class PLCGymEnv(gym.Env):
                  obs_noise_std: float = None,
                  reward_scale: float = 1.0,
                  seed: int = None,
-                 plc_enabled: bool = True):
+                 plc_enabled: bool = True,
+                 gain_schedule_path: str = None,
+                 use_gain_schedule: bool = False):
         super().__init__()
 
         self.plc = plc_client
         self.plc_enabled = plc_enabled and (self.plc is not None)
+        self.use_gain_schedule = bool(use_gain_schedule and self.plc_enabled)
+        self.gain_schedule_path = gain_schedule_path
+        self._gain_schedule = None
+        self._active_gain_id = None
+        if self.use_gain_schedule:
+            if not gain_schedule_path:
+                raise ValueError("gain_schedule_path is required when use_gain_schedule=True")
+            self._gain_schedule = load_gain_schedule(gain_schedule_path)
         plc_cfg = load_config().plc()
         action_cfg = load_config().action()
         feedback_filter_cfg = plc_cfg.get("feedback_filter", {})
@@ -123,6 +134,7 @@ class PLCGymEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         """重置仿真环境，并向 PLC 写入安全默认目标。"""
+        self._active_gain_id = None
         obs, _ = self._sim_env.reset(seed=seed, options=options)
         base = self._sim_env.unwrapped_env
         base.soil.ec_soil = 0.78
@@ -151,6 +163,7 @@ class PLCGymEnv(gym.Env):
             plc_state = self.plc.read_state()
             if plc_state is not None:
                 self._last_plc_state = plc_state
+                self._maybe_update_gain_schedule("INI", plc_state)
 
         return obs, self._build_info({
             "theta": base.soil.theta,
@@ -187,6 +200,7 @@ class PLCGymEnv(gym.Env):
         ec_actual, ph_actual = self._filter_feedback(ec_actual, ph_actual)
         self._sync_water_pump(base)
         self._sync_plc_inputs(ec_set, ph_set, ec_actual, ph_actual)
+        self._maybe_update_gain_schedule(self._stage_name(base.current_stage), self._last_plc_state)
         npk_targets_for_plc = self._npk_targets_for_stage(base.current_stage)
         self.plc.write_fertilizer_feedback(
             npk_targets_for_plc["N"],
@@ -587,7 +601,40 @@ class PLCGymEnv(gym.Env):
         info = dict(sim_info)
         info["plc"] = dict(self._last_plc_state)
         info["plc_enabled"] = self.plc_enabled
+        info["gain_schedule_enabled"] = self.use_gain_schedule
+        info["active_gain_id"] = self._active_gain_id
         return info
+
+    @staticmethod
+    def _stage_name(stage) -> str:
+        for name, value in STAGE_MAP.items():
+            if value == stage:
+                return name
+        return str(stage).upper()
+
+    def _maybe_update_gain_schedule(self, stage: str, state: dict) -> None:
+        """Write one local matrix only when the selected point changes."""
+        if not self.use_gain_schedule or self._gain_schedule is None:
+            return
+        point = select_gain_point(
+            self._gain_schedule,
+            stage,
+            float(state.get("EC_Actual", self._root_ec_est)),
+            float(state.get("pH_Actual", self._soil_ph_est)),
+            float(state.get("q_f_cmd", 0.0)),
+            float(state.get("q_a_cmd", 0.0)),
+        )
+        if point is None or point.get("id") == self._active_gain_id:
+            return
+        if self.plc.write_active_gain_matrix(point, verify=True):
+            self._active_gain_id = point.get("id")
+            logger.info(
+                "[HIL] active gain point=%s stage=%s; decoupler remains disabled",
+                self._active_gain_id,
+                stage,
+            )
+        else:
+            logger.warning("[HIL] failed to write active gain point=%s", point.get("id"))
 
     def _sync_water_pump(self, base, reset_volume: bool = False) -> None:
         """Write the slow pump command and simulated feedback when supported."""

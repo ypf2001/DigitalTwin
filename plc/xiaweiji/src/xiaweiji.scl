@@ -663,7 +663,7 @@ NON_RETAIN
 
       // LAD 离散联锁与手动输出选择区。从 DBX300/DBD304 继续追加，不改变既有地址。
       Comm_Normal : Bool;              // LAD 判断通信可用：Remote_Comms_OK 且未急停
-      Manual_PumpValve_Enable : Bool;  // 兼容状态位：手动目标 PID 已接管，不再表示直接泵阀输出
+      Manual_PumpValve_Enable : Bool;  // 手动直接流量输出许可（仅调试/辨识使用）
       Reserved_300 : Byte;             // 占位，使手动选择输出从 DBD304 开始
       Reserved_301 : Word;             // 对齐占位
       Manual_q_f_Selected : Real;      // LAD 选择后的手动肥液流量设定
@@ -735,6 +735,31 @@ NON_RETAIN
        Batch_Fertigation_Active : Bool; // DBX462.0，肥/酸泵唯一批次许可
        Water_Batch_Active : Bool;       // DBX462.1
        Reserved_463 : Byte;
+
+       // EC/pH decoupling deployment contract. Append only; do not move older fields.
+       G_EC_F : Real;                    // DBD464, dEC/dq_f
+       G_EC_A : Real;                    // DBD468, dEC/dq_a
+       G_pH_F : Real;                    // DBD472, dpH/dq_f
+       G_pH_A : Real;                    // DBD476, dpH/dq_a
+       Decoupler_Weight : Real;          // DBD480, 0..1
+       Decoupler_Regularization : Real;  // DBD484, reserved for robust inversion
+       Mixing_Delay_s : Real;            // DBD488, process delay used by control logic
+       Decoupler_Determinant_Min : Real; // DBD492, minimum valid determinant
+       q_f_min : Real;                   // DBD496
+       q_f_max : Real;                   // DBD500
+       q_a_min : Real;                   // DBD504
+       q_a_max : Real;                   // DBD508
+       Decoupler_Enable : Bool;          // DBX512.0, default FALSE
+       Decoupler_Valid : Bool;           // DBX512.1, PLC validation result
+       Reserved_513 : Byte;
+       Reserved_514 : Word;
+       Decoupler_Determinant : Real;     // DBD516, diagnostic
+       Delta_q_f : Real;                 // DBD520, diagnostic
+       Delta_q_a : Real;                 // DBD524, diagnostic
+       System_Alarm_Reset : Bool;        // DBX528.0, commissioning/alarm acknowledge
+       Actuator_Execution_Enable : Bool; // DBX529.0, actuator layer diagnostic
+       Actuator_Any_Alarm : Bool;        // DBX529.1, actuator layer diagnostic
+       Actuator_Any_Trip : Bool;         // DBX529.2, actuator layer diagnostic
    END_STRUCT;
 
 
@@ -809,7 +834,8 @@ BEGIN
    EC_Trim_Band := 0.10;
    pH_Trim_Band := 0.08;
    Manual_Mode := false;
-   Auto_Mode := true;
+   // Safe startup: require an explicit HMI/Python command before automatic dosing.
+   Auto_Mode := false;
    Emergency_Stop := false;
    Manual_Active := false;
    Auto_Active := false;
@@ -886,6 +912,29 @@ BEGIN
    Batch_Fertigation_Active := false;
    Water_Batch_Active := false;
    Reserved_463 := 0;
+   G_EC_F := 0.0;
+   G_EC_A := 0.0;
+   G_pH_F := 0.0;
+   G_pH_A := 0.0;
+   Decoupler_Weight := 0.0;
+   Decoupler_Regularization := 0.001;
+   Mixing_Delay_s := 60.0;
+   Decoupler_Determinant_Min := 0.001;
+   q_f_min := 0.0;
+   q_f_max := 10.0;
+   q_a_min := 0.0;
+   q_a_max := 4.0;
+   Decoupler_Enable := false;
+   Decoupler_Valid := false;
+   Reserved_513 := 0;
+   Reserved_514 := 0;
+   Decoupler_Determinant := 0.0;
+   Delta_q_f := 0.0;
+   Delta_q_a := 0.0;
+   System_Alarm_Reset := false;
+   Actuator_Execution_Enable := false;
+   Actuator_Any_Alarm := false;
+   Actuator_Any_Trip := false;
 
 END_DATA_BLOCK
 
@@ -922,6 +971,15 @@ VERSION : 0.1
       q_f_max : Real := 10.0;
       q_a_min : Real := 0.0;
       q_a_max : Real := 4.0;
+      Decoupler_Enable : Bool := FALSE;
+      Decoupler_Valid : Bool := FALSE;
+      G_EC_F : Real := 0.0;
+      G_EC_A : Real := 0.0;
+      G_pH_F : Real := 0.0;
+      G_pH_A : Real := 0.0;
+      Decoupler_Weight : Real := 0.0;
+      Decoupler_Regularization : Real := 0.001;
+      Mixing_Delay_s : Real := 60.0;
       N_Enable : Real := 1.0;
       N_Ratio : Real := 0.3333;
       N_Target : Real := 0.0;
@@ -1000,6 +1058,8 @@ VERSION : 0.1
       NPK_Capacity_Limited_Out : Bool;
       Feedforward_Hold_Active_Out : Bool;
       Adaptive_PID_Active_Out : Bool;
+      Delta_q_f_Out : Real;
+      Delta_q_a_Out : Real;
    END_VAR
 
    VAR
@@ -1027,7 +1087,7 @@ VERSION : 0.1
       EC_Filtered : Real;
       pH_Filtered : Real;
       Filter_Init : Bool;
-      inst_CommsWatchdog : "FB_CommsWatchdog_LAD";
+      Decoupler_Weight_State : Real;
       inst_RL_F : "RateLimiter";
       inst_RL_A : "RateLimiter";
       tWatchdog {InstructionName := 'TON_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TON_TIME;
@@ -1128,6 +1188,23 @@ VERSION : 0.1
       N_Saturated : Bool;
       P_Saturated : Bool;
       K_Saturated : Bool;
+      Decoupler_Active : Bool;
+      Direct_q_f_Correction : Real;
+      Direct_q_a_Correction : Real;
+      Decoupled_q_f_Correction : Real;
+      Decoupled_q_a_Correction : Real;
+      Decoupled_q_f_Unlimited : Real;
+      Decoupled_q_a_Unlimited : Real;
+      Coupling_EC_A : Real;
+      Coupling_pH_F : Real;
+      Decoupler_Lambda : Real;
+      Decoupler_A11 : Real;
+      Decoupler_A12 : Real;
+      Decoupler_A22 : Real;
+      Decoupler_B1 : Real;
+      Decoupler_B2 : Real;
+      Decoupler_Normal_Det : Real;
+      Decoupler_Weight_Safe : Real;
    END_VAR
 
 BEGIN
@@ -1257,6 +1334,7 @@ BEGIN
       #N_Integral := 0.0;
       #P_Integral := 0.0;
       #K_Integral := 0.0;
+      #Decoupler_Weight_State := 0.0;
       #EC_Error_Last := 0.0;
       #pH_Error_Last := 0.0;
       #N_Error_Last := 0.0;
@@ -1301,6 +1379,8 @@ BEGIN
       #K_PID_Correction_Out := 0.0;
       #NPK_Optimization_Weight_Out := 0.0;
       #NPK_Capacity_Limited_Out := FALSE;
+      #Delta_q_f_Out := 0.0;
+      #Delta_q_a_Out := 0.0;
       #q_f_limited := FALSE;
       #q_a_limited := FALSE;
       RETURN;
@@ -1489,8 +1569,14 @@ BEGIN
    #pH_PID_Integral_Out := #pH_Integral;
    #Adaptive_PID_Active_Out := NOT #Fixed_PID_Test_Enable;
 
-   // 压缩 HIL 只缩短前馈等待；真实设备仍保留 60 s 管道建立时间。
-   IF #Compressed_HIL_Enable THEN #Hold_Time_S := 1.0; ELSE #Hold_Time_S := 60.0; END_IF;
+   // 压缩 HIL 只缩短前馈等待；真实设备使用现场辨识的混合/管道延迟。
+   IF #Compressed_HIL_Enable THEN
+      #Hold_Time_S := 1.0;
+   ELSE
+      #Hold_Time_S := #Mixing_Delay_s;
+      IF #Hold_Time_S < 0.0 THEN #Hold_Time_S := 0.0; END_IF;
+      IF #Hold_Time_S > 600.0 THEN #Hold_Time_S := 600.0; END_IF;
+   END_IF;
    #Feedforward_Only := #Setpoint_Age_S < #Hold_Time_S;
    #Feedforward_Hold_Active_Out := #Feedforward_Only;
 
@@ -1583,6 +1669,98 @@ BEGIN
    ELSIF #pH_Integral < -8.0 THEN
       #pH_Integral := -8.0;
    END_IF;
+
+   // --- 局部 EC/pH 解耦 ---
+   // 两个 PID 先生成与原独立回路一致的流量修正。物理 G 按主通道增益归一化，
+   // 再对无量纲耦合矩阵做 Tikhonov 正则化逆，避免 EC/pH 单位与 L/min 混算。
+   #Direct_q_f_Correction := #q_f_correction;
+   #Direct_q_a_Correction := #q_a_correction;
+   #Decoupled_q_f_Correction := #Direct_q_f_Correction;
+   #Decoupled_q_a_Correction := #Direct_q_a_Correction;
+   #Decoupler_Active := #Decoupler_Enable AND #Decoupler_Valid
+      AND (ABS(#G_EC_F) > 0.000001) AND (ABS(#G_pH_A) > 0.000001);
+
+   IF #Decoupler_Active THEN
+      // q_f 的主通道是 EC，q_a 的主通道是 pH；当前 pH PID 正值表示加酸需求。
+      #Coupling_EC_A := #G_EC_A / #G_EC_F;
+      #Coupling_pH_F := #G_pH_F / #G_pH_A;
+      #Decoupler_Lambda := #Decoupler_Regularization;
+      IF #Decoupler_Lambda < 0.0 THEN #Decoupler_Lambda := 0.0; END_IF;
+      IF #Decoupler_Lambda > 1.0 THEN #Decoupler_Lambda := 1.0; END_IF;
+
+      // Solve (M' * M + lambda*I) * du = M' * v for M=[1 c12; c21 1].
+      #Decoupler_A11 := 1.0 + #Coupling_pH_F * #Coupling_pH_F + #Decoupler_Lambda;
+      #Decoupler_A12 := #Coupling_EC_A + #Coupling_pH_F;
+      #Decoupler_A22 := 1.0 + #Coupling_EC_A * #Coupling_EC_A + #Decoupler_Lambda;
+      #Decoupler_B1 := #Direct_q_f_Correction
+         + #Coupling_pH_F * #Direct_q_a_Correction;
+      #Decoupler_B2 := #Coupling_EC_A * #Direct_q_f_Correction
+         + #Direct_q_a_Correction;
+      #Decoupler_Normal_Det := #Decoupler_A11 * #Decoupler_A22
+         - #Decoupler_A12 * #Decoupler_A12;
+
+      IF #Decoupler_Normal_Det > 0.000001 THEN
+         #Decoupled_q_f_Correction := (#Decoupler_A22 * #Decoupler_B1
+            - #Decoupler_A12 * #Decoupler_B2) / #Decoupler_Normal_Det;
+         #Decoupled_q_a_Correction := (-#Decoupler_A12 * #Decoupler_B1
+            + #Decoupler_A11 * #Decoupler_B2) / #Decoupler_Normal_Det;
+      ELSE
+         #Decoupler_Active := FALSE;
+      END_IF;
+   END_IF;
+
+   #Decoupler_Weight_Safe := #Decoupler_Weight;
+   IF #Decoupler_Weight_Safe < 0.0 THEN #Decoupler_Weight_Safe := 0.0; END_IF;
+   IF #Decoupler_Weight_Safe > 1.0 THEN #Decoupler_Weight_Safe := 1.0; END_IF;
+   // Ramp the applied weight at 0.10/s so enabling or changing a local model is bumpless.
+   IF #Decoupler_Active AND (#CycleTime > 0.0) THEN
+      IF #Decoupler_Weight_State < #Decoupler_Weight_Safe THEN
+         #Decoupler_Weight_State := #Decoupler_Weight_State + 0.10 * #CycleTime;
+         IF #Decoupler_Weight_State > #Decoupler_Weight_Safe THEN
+            #Decoupler_Weight_State := #Decoupler_Weight_Safe;
+         END_IF;
+      ELSIF #Decoupler_Weight_State > #Decoupler_Weight_Safe THEN
+         #Decoupler_Weight_State := #Decoupler_Weight_State - 0.10 * #CycleTime;
+         IF #Decoupler_Weight_State < #Decoupler_Weight_Safe THEN
+            #Decoupler_Weight_State := #Decoupler_Weight_Safe;
+         END_IF;
+      END_IF;
+   ELSE
+      #Decoupler_Weight_State := 0.0;
+   END_IF;
+   IF #Decoupler_Active THEN
+      #q_f_correction := #Direct_q_f_Correction
+         + #Decoupler_Weight_State * (#Decoupled_q_f_Correction - #Direct_q_f_Correction);
+      #q_a_correction := #Direct_q_a_Correction
+         + #Decoupler_Weight_State * (#Decoupled_q_a_Correction - #Direct_q_a_Correction);
+   ELSE
+      #q_f_correction := #Direct_q_f_Correction;
+      #q_a_correction := #Direct_q_a_Correction;
+   END_IF;
+
+   // Cross-coupling compensation is still bounded by each actuator's trim window.
+   #Decoupled_q_f_Unlimited := #q_f_correction;
+   #Decoupled_q_a_Unlimited := #q_a_correction;
+   IF #q_f_correction > #q_f_trim_span THEN #q_f_correction := #q_f_trim_span; END_IF;
+   IF #q_f_correction < -#q_f_trim_span THEN #q_f_correction := -#q_f_trim_span; END_IF;
+   IF #q_a_correction > #q_a_trim_span THEN #q_a_correction := #q_a_trim_span; END_IF;
+   IF #q_a_correction < -#q_a_trim_span THEN #q_a_correction := -#q_a_trim_span; END_IF;
+   IF #Decoupler_Active AND (#CycleTime > 0.0) AND (#Ki_EC_Eff > 0.000001)
+      AND (ABS(#q_f_correction - #Decoupled_q_f_Unlimited) > 0.000001) THEN
+      #EC_Integral := #EC_Integral
+         + 0.50 * (#q_f_correction - #Decoupled_q_f_Unlimited) * #CycleTime / #Ki_EC_Eff;
+   END_IF;
+   IF #Decoupler_Active AND (#CycleTime > 0.0) AND (#Ki_pH_Eff > 0.000001)
+      AND (ABS(#q_a_correction - #Decoupled_q_a_Unlimited) > 0.000001) THEN
+      #pH_Integral := #pH_Integral
+         + 0.50 * (#q_a_correction - #Decoupled_q_a_Unlimited) * #CycleTime / #Ki_pH_Eff;
+   END_IF;
+   IF #EC_Integral > 8.0 THEN #EC_Integral := 8.0; END_IF;
+   IF #EC_Integral < -8.0 THEN #EC_Integral := -8.0; END_IF;
+   IF #pH_Integral > 8.0 THEN #pH_Integral := 8.0; END_IF;
+   IF #pH_Integral < -8.0 THEN #pH_Integral := -8.0; END_IF;
+   #Delta_q_f_Out := #q_f_correction;
+   #Delta_q_a_Out := #q_a_correction;
 
    #q_f_pid := #q_f_feedforward + #q_f_correction;
    #q_a_pid := #q_a_feedforward + #q_a_correction;
@@ -2146,6 +2324,10 @@ BEGIN
       OR "DB_Actuator".K_Flow_Deviation_Alarm
       OR "DB_Actuator".Acid_Flow_Deviation_Alarm);
 
+   "DB1".Actuator_Execution_Enable := "DB_Actuator".Execution_Enable;
+   "DB1".Actuator_Any_Alarm := "DB_Actuator".Any_Alarm;
+   "DB1".Actuator_Any_Trip := "DB_Actuator".Any_Trip;
+
    IF "DB_Actuator".Execution_Enable THEN
       // The total fertilizer AO is forced off in Scheme B to prevent double dosing.
       "DB1".AQ_Valve_F_Raw := 0;
@@ -2160,8 +2342,12 @@ BEGIN
       "DB1".Valve_A_Actual := "DB_Actuator".Acid_Flow_PV;
    END_IF;
 
-   "DB1".System_Alarm_Light := "DB1".System_Alarm_Light
-      OR "DB_Actuator".Any_Alarm;
+   IF "DB1".System_Alarm_Reset THEN
+      "DB1".System_Alarm_Light := FALSE;
+   END_IF;
+   IF "DB_Actuator".Any_Alarm THEN
+      "DB1".System_Alarm_Light := TRUE;
+   END_IF;
 END_FUNCTION
 
 FUNCTION "FC_CallFertigationControl" : Void
@@ -2183,7 +2369,7 @@ BEGIN
    // DB1 输入区 -> FB_FertigationControl -> DB1 输出区。
    // 固定模式表：
    // 1) Emergency_Stop=TRUE -> 急停，所有输出归零。
-   // 2) Emergency_Stop=FALSE 且 Manual_Mode=TRUE -> 人工 EC/pH 目标，PLC PID 执行。
+   // 2) Emergency_Stop=FALSE 且 Manual_Mode=TRUE -> 手动直接流量输出。
    // 3) Emergency_Stop=FALSE 且 Manual_Mode=FALSE 且 Auto_Mode=TRUE 且 SAC_Enable=TRUE -> 远程自动。
    // 4) Emergency_Stop=FALSE 且 Manual_Mode=FALSE 且 Auto_Mode=TRUE 且 SAC_Enable=FALSE 且 Stage_Auto_SP_Enable=TRUE -> 阶段自动。
    // 5) Emergency_Stop=FALSE 且 Manual_Mode=FALSE 且 Auto_Mode=TRUE 且 SAC_Enable=FALSE 且 Stage_Auto_SP_Enable=FALSE -> 本地定值自动。
@@ -2217,7 +2403,36 @@ BEGIN
       Mode_Standby => #Mode_Standby
    );
 
+   // Publish the resolved mode. The previous implementation only exposed the
+   // requested bits, which made a successful manual-mode handshake
+   // indistinguishable from a standby/interlocked state to Python.
+   "DB1".Manual_Active := #Mode_Manual;
+   "DB1".Auto_Active := #Mode_Remote_Auto OR #Mode_Stage_Auto OR #Mode_Local_Auto;
+   "DB1".Manual_PumpValve_Enable := #Mode_Manual AND NOT "DB1".Emergency_Stop;
+   "DB1".Manual_q_f_Selected := "DB1".Manual_q_f_Set;
+   "DB1".Manual_q_a_Selected := "DB1".Manual_q_a_Set;
+
    #PID_Control_Enable := #Mode_Manual OR #Mode_Remote_Auto OR #Mode_Stage_Auto OR #Mode_Local_Auto;
+
+   // Validate the decoupling contract before any mode-specific early return.
+   // This keeps DB1 diagnostics current while the PLC is in standby or E-stop.
+   "DB1".Decoupler_Determinant := "DB1".G_EC_F * "DB1".G_pH_A
+      - "DB1".G_EC_A * "DB1".G_pH_F;
+   "DB1".Decoupler_Valid := ("DB1".Decoupler_Determinant_Min > 0.0)
+      AND (ABS("DB1".Decoupler_Determinant) >= "DB1".Decoupler_Determinant_Min)
+      AND ("DB1".G_EC_F > 0.000001)
+      AND ("DB1".G_pH_A < -0.000001)
+      AND ("DB1".Decoupler_Weight >= 0.0)
+      AND ("DB1".Decoupler_Weight <= 1.0)
+      AND ("DB1".Decoupler_Regularization >= 0.0)
+      AND ("DB1".Decoupler_Regularization <= 1.0)
+      AND ("DB1".Mixing_Delay_s >= 0.0)
+      AND ("DB1".Mixing_Delay_s <= 600.0)
+      AND ("DB1".q_f_max > "DB1".q_f_min)
+      AND ("DB1".q_a_max > "DB1".q_a_min);
+   IF "DB1".Decoupler_Enable AND NOT "DB1".Decoupler_Valid THEN
+      "DB1".Decoupler_Enable := FALSE;
+   END_IF;
 
    IF #Mode_EStop THEN
       "DB1".q_f_cmd := 0.0;
@@ -2320,10 +2535,19 @@ BEGIN
       pH_Trim_Band := "DB1".pH_Trim_Band,
       EC_MaxInputStep := 0.15,
       pH_MaxInputStep := 0.10,
-      q_f_min := 0.0,
-      q_f_max := 10.0,
-      q_a_min := 0.0,
-      q_a_max := 4.0,
+      q_f_min := "DB1".q_f_min,
+      q_f_max := "DB1".q_f_max,
+      q_a_min := "DB1".q_a_min,
+      q_a_max := "DB1".q_a_max,
+      Decoupler_Enable := "DB1".Decoupler_Enable,
+      Decoupler_Valid := "DB1".Decoupler_Valid,
+      G_EC_F := "DB1".G_EC_F,
+      G_EC_A := "DB1".G_EC_A,
+      G_pH_F := "DB1".G_pH_F,
+      G_pH_A := "DB1".G_pH_A,
+      Decoupler_Weight := "DB1".Decoupler_Weight,
+      Decoupler_Regularization := "DB1".Decoupler_Regularization,
+      Mixing_Delay_s := "DB1".Mixing_Delay_s,
       N_Enable := "DB1".N_Enable,
       N_Ratio := "DB1".N_Ratio,
       N_Target := "DB1".N_Target,
@@ -2397,8 +2621,30 @@ BEGIN
       NPK_Optimization_Weight_Out => "DB1".NPK_Optimization_Weight,
       NPK_Capacity_Limited_Out => "DB1".NPK_Capacity_Limited,
       Feedforward_Hold_Active_Out => "DB1".Feedforward_Hold_Active,
-      Adaptive_PID_Active_Out => "DB1".Adaptive_PID_Active
+      Adaptive_PID_Active_Out => "DB1".Adaptive_PID_Active,
+      Delta_q_f_Out => "DB1".Delta_q_f,
+      Delta_q_a_Out => "DB1".Delta_q_a
    );
+
+   // Manual commissioning bypasses EC/pH PID and writes the requested flow
+   // values to the same bounded command variables used by the execution layer.
+   // This is deliberately limited to Manual_Mode; automatic and SAC paths
+   // remain entirely inside FB_FertigationControl.
+   IF #Mode_Manual THEN
+      "DB1".q_f_cmd := "DB1".Manual_q_f_Set;
+      IF "DB1".q_f_cmd < "DB1".q_f_min THEN "DB1".q_f_cmd := "DB1".q_f_min; END_IF;
+      IF "DB1".q_f_cmd > "DB1".q_f_max THEN "DB1".q_f_cmd := "DB1".q_f_max; END_IF;
+      "DB1".q_a_cmd := "DB1".Manual_q_a_Set;
+      IF "DB1".q_a_cmd < "DB1".q_a_min THEN "DB1".q_a_cmd := "DB1".q_a_min; END_IF;
+      IF "DB1".q_a_cmd > "DB1".q_a_max THEN "DB1".q_a_cmd := "DB1".q_a_max; END_IF;
+      "DB1".q_n_cmd := "DB1".Manual_q_n_Set;
+      "DB1".q_p_cmd := "DB1".Manual_q_p_Set;
+      "DB1".q_k_cmd := "DB1".Manual_q_k_Set;
+      "DB1".q_f_limited := ("DB1".q_f_cmd <> "DB1".Manual_q_f_Set);
+      "DB1".q_a_limited := ("DB1".q_a_cmd <> "DB1".Manual_q_a_Set);
+      "DB1".q_f_raw := "DB1".Manual_q_f_Set;
+      "DB1".q_a_raw := "DB1".Manual_q_a_Set;
+   END_IF;
 
    // 测试反馈和压缩 HIL 标志在通信超时后自动恢复真实设备默认。
    IF NOT "DB1".Remote_Comms_OK THEN

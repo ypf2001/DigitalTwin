@@ -10,7 +10,11 @@ import logging
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from plc_client import PLCClient
 from config_loader import load_config
@@ -56,6 +60,9 @@ def diagnose_plc_connection():
     print(f"    Watchdog_Timer   = {state.get('Watchdog_Timer', 0)}")
     print(f"    Remote_Heartbeat = {state.get('Remote_Heartbeat', 0)}")
     print(f"    System_Alarm     = {state.get('System_Alarm_Light', False)}")
+    print(f"    Actuator_Enable  = {state.get('Actuator_Execution_Enable', False)}")
+    print(f"    Actuator_Alarm   = {state.get('Actuator_Any_Alarm', False)}")
+    print(f"    Actuator_Trip    = {state.get('Actuator_Any_Trip', False)}")
 
     # 4. 检查看门狗状态
     print("\n[4] 看门狗状态分析...")

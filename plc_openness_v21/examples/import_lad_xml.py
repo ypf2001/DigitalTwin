@@ -36,6 +36,7 @@ def main() -> int:
     if tia is None:
         tia = start_tia(with_ui=not args.no_ui)
 
+    compile_failed = False
     try:
         if project is None:
             project = open_project(tia, args.project)
@@ -55,6 +56,7 @@ def main() -> int:
         if args.compile:
             result = compile_plc_software(plc_software)
             print_compile_result(result)
+            compile_failed = int(result.ErrorCount) > 0
 
         project.Save()
         print("Project saved.", flush=True)
@@ -67,7 +69,7 @@ def main() -> int:
             project.Close()
         tia.Dispose()
 
-    return 0
+    return 1 if compile_failed else 0
 
 
 if __name__ == "__main__":

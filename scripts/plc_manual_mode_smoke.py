@@ -47,6 +47,8 @@ def main() -> int:
     if not plc.connect():
         return 2
 
+    manual_written = False
+    return_code = 0
     try:
         print_state("initial", plc.read_state())
 
@@ -57,6 +59,17 @@ def main() -> int:
         if not plc.write_emergency_stop(False):
             return 3
 
+        # Keep the PLC communication/watchdog state healthy while the local
+        # manual mode is being verified. This does not grant remote automatic
+        # authority because SAC_Enable remains FALSE.
+        if not plc.write_feedback(ec_actual=0.0, ph_actual=7.0, sac_enable=False):
+            return 4
+        if not plc.write_system_alarm_reset(True):
+            return 5
+        time.sleep(max(plc.cycle_s * 2.0, 0.2))
+        if not plc.write_system_alarm_reset(False):
+            return 6
+
         if not plc.write_manual_mode(
             True,
             q_f=args.q_f,
@@ -65,21 +78,33 @@ def main() -> int:
             q_p=args.q_p,
             q_k=args.q_k,
         ):
-            return 4
+            return 7
+        manual_written = True
 
         time.sleep(max(args.hold_s, 0.0))
-        print_state("manual enabled", plc.read_state())
-
-        if not args.leave_enabled:
-            if not plc.write_manual_mode(False):
-                return 5
-            time.sleep(0.5)
-            print_state("manual disabled", plc.read_state())
+        state = plc.read_state()
+        print_state("manual enabled", state)
+        q_f_actual = float(state.get("q_f_cmd", 0.0))
+        q_a_actual = float(state.get("q_a_cmd", 0.0))
+        if not state.get("Manual_Active", False):
+            print("ERROR: PLC did not resolve Manual_Mode to Manual_Active.")
+            return 8
+        if abs(q_f_actual - args.q_f) > 0.01 or abs(q_a_actual - args.q_a) > 0.01:
+            print(
+                f"ERROR: manual output mismatch: q_f={q_f_actual:.3f}, q_a={q_a_actual:.3f}"
+            )
+            return 9
 
     finally:
+        if manual_written and not args.leave_enabled:
+            if not plc.write_standby():
+                return_code = 10
+            else:
+                time.sleep(0.5)
+                print_state("standby", plc.read_state())
         plc.disconnect()
 
-    return 0
+    return return_code
 
 
 if __name__ == "__main__":
