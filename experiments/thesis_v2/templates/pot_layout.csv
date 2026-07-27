@@ -1,0 +1,17 @@
+block,position,pot_id,treatment
+1,A,P01,T2
+1,B,P02,T0
+1,C,P03,T3
+1,D,P04,T1
+2,A,P05,T1
+2,B,P06,T3
+2,C,P07,T0
+2,D,P08,T2
+3,A,P09,T3
+3,B,P10,T2
+3,C,P11,T1
+3,D,P12,T0
+4,A,P13,T0
+4,B,P14,T1
+4,C,P15,T2
+4,D,P16,T3

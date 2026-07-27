@@ -1,4 +1,7 @@
+import pytest
+
 from experiments.run_full_season_plc import (
+    CROP_TARGETS,
     EC_PH_INTEGRAL_LIMIT,
     STAGE_SEQUENCE,
     STAGES,
@@ -61,6 +64,12 @@ def test_plc_stage_boundaries_follow_paper_irrigation_phases():
     assert _stage_for_day(38.0) == "MID"
     assert _stage_for_day(64.999) == "MID"
     assert _stage_for_day(65.0) == "LATE"
+
+
+def test_four_stage_ec_baseline_matches_plc_stage_table():
+    assert [float(CROP_TARGETS[name][0]) for name in STAGE_SEQUENCE] == pytest.approx(
+        [0.8, 1.1, 1.5, 1.0]
+    )
 
 
 def test_acceptance_metrics_pass_a_stable_coordinated_run():

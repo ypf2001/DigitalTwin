@@ -1,0 +1,100 @@
+﻿{
+    S7_Optimized := "TRUE";
+    S7_PreferredLanguage := "LAD";
+    S7_Version := "0.1"
+}
+FUNCTION "FC_FieldOutput_LAD" : Void
+    { S7_Language := "LAD" }
+    NETWORK
+        // Main-pump final analog output: exactly one mutually exclusive path is active.
+        RUNG wire#powerrail
+            Contact( "DB1".Actuator_Enable_Permitted )
+            { S7_GenerateENO := "TRUE" }
+            Move(
+                in := "DB1".AQ_Water_Pump_Raw,
+                out1 => "DB_FieldIO".AO_Water_Final
+            )
+        END_RUNG
+        RUNG wire#powerrail
+            I_Contact( "DB1".Actuator_Enable_Permitted )
+            { S7_GenerateENO := "TRUE" }
+            Move(
+                in := 0,
+                out1 => "DB_FieldIO".AO_Water_Final
+            )
+        END_RUNG
+    END_NETWORK
+
+    { S7_Language := "LAD" }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "DB1".Actuator_Enable_Permitted )
+            { S7_GenerateENO := "TRUE" }
+            Move(in := "DB_Actuator".N_AO_Command_Raw, out1 => "DB_FieldIO".AO_N_Final)
+        END_RUNG
+        RUNG wire#powerrail
+            I_Contact( "DB1".Actuator_Enable_Permitted )
+            { S7_GenerateENO := "TRUE" }
+            Move(in := 0, out1 => "DB_FieldIO".AO_N_Final)
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( "DB1".Actuator_Enable_Permitted )
+            { S7_GenerateENO := "TRUE" }
+            Move(in := "DB_Actuator".P_AO_Command_Raw, out1 => "DB_FieldIO".AO_P_Final)
+        END_RUNG
+        RUNG wire#powerrail
+            I_Contact( "DB1".Actuator_Enable_Permitted )
+            { S7_GenerateENO := "TRUE" }
+            Move(in := 0, out1 => "DB_FieldIO".AO_P_Final)
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( "DB1".Actuator_Enable_Permitted )
+            { S7_GenerateENO := "TRUE" }
+            Move(in := "DB_Actuator".K_AO_Command_Raw, out1 => "DB_FieldIO".AO_K_Final)
+        END_RUNG
+        RUNG wire#powerrail
+            I_Contact( "DB1".Actuator_Enable_Permitted )
+            { S7_GenerateENO := "TRUE" }
+            Move(in := 0, out1 => "DB_FieldIO".AO_K_Final)
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( "DB1".Actuator_Enable_Permitted )
+            { S7_GenerateENO := "TRUE" }
+            Move(in := "DB_Actuator".Acid_AO_Command_Raw, out1 => "DB_FieldIO".AO_Acid_Final)
+        END_RUNG
+        RUNG wire#powerrail
+            I_Contact( "DB1".Actuator_Enable_Permitted )
+            { S7_GenerateENO := "TRUE" }
+            Move(in := 0, out1 => "DB_FieldIO".AO_Acid_Final)
+        END_RUNG
+    END_NETWORK
+
+    { S7_Language := "LAD" }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "DB1".Actuator_Enable_Permitted )
+            Contact( "DB1".Water_Pump_Run_CMD )
+            Coil( "DB_FieldIO".DO_Water_Run_Final )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( "DB1".Actuator_Enable_Permitted )
+            Contact( "DB_Actuator".N_Run_Command )
+            Coil( "DB_FieldIO".DO_N_Run_Final )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( "DB1".Actuator_Enable_Permitted )
+            Contact( "DB_Actuator".P_Run_Command )
+            Coil( "DB_FieldIO".DO_P_Run_Final )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( "DB1".Actuator_Enable_Permitted )
+            Contact( "DB_Actuator".K_Run_Command )
+            Coil( "DB_FieldIO".DO_K_Run_Final )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( "DB1".Actuator_Enable_Permitted )
+            Contact( "DB_Actuator".Acid_Run_Command )
+            Coil( "DB_FieldIO".DO_Acid_Run_Final )
+        END_RUNG
+    END_NETWORK
+END_FUNCTION

@@ -10,10 +10,16 @@ deployment:
     simulation_plc:
       process_feedback: simulated_outlet
       plc_target: plcsim
+      deployment_mode: 0
+      feedback_owner: python
+      feedback_write_tags: [EC_Actual, pH_Actual]
     # 真实部署阶段：EC/pH 反馈来自真实出口传感器。
     field_plc:
       process_feedback: real_outlet_sensors
       plc_target: real_s7
+      deployment_mode: 1
+      feedback_owner: plc
+      forbidden_remote_write_tags: [EC_Actual, pH_Actual, Emergency_Stop]
 
   db_contract:
     # DB1 是上位机与 PLC 的固定通讯契约。真实部署前不要随意改 offset。
@@ -23,8 +29,6 @@ deployment:
     required_write_tags:
       - EC_Set_SP
       - pH_Set_SP
-      - EC_Actual
-      - pH_Actual
       - SAC_Enable
       - Remote_Heartbeat
       - Water_Enable
@@ -34,6 +38,8 @@ deployment:
       - Pre_Flush_Ratio
       - Post_Flush_Ratio
       - Water_Pump_Reset
+      - Deployment_Mode
+      - Soft_Stop_Request
     # Control parameters are written only during commissioning or a controlled
     # parameter update, never as part of the normal SAC heartbeat frame.
     control_parameter_write_tags:
@@ -56,6 +62,7 @@ deployment:
       - q_a_min
       - q_a_max
       - Decoupler_Enable
+      - Actuator_Enable_Request
     # 上位机至少应读取这些变量，用于监控执行量、安全状态和实际生效目标。
     required_read_tags:
       - Remote_Comms_OK
@@ -64,6 +71,9 @@ deployment:
       - Active_pH_SP
       - q_f_cmd
       - q_a_cmd
+      - q_n_cmd
+      - q_p_cmd
+      - q_k_cmd
       - Qw_Actual
       - Pressure_Actual
       - Water_Pump_Run_CMD
@@ -76,6 +86,12 @@ deployment:
       - Decoupler_Determinant
       - Delta_q_f
       - Delta_q_a
+      - Deployment_Mode
+      - Field_IO_Ready
+      - Actuator_Enable_Permitted
+      - Physical_EStop_OK
+      - Sensor_Fault_Any
+      - Drive_Fault_Any
 
   process_model:
     # 以下参数现在服务于仿真；真实部署时要用现场标定值替换。
@@ -88,11 +104,13 @@ deployment:
       ec_source_ds_m: 0.0
       ph_water: 7.2
     fertilizer_stock:
-      # 当前版本只有 1 路等效复合肥母液，未来可扩展 A/B/C 多路肥液。
-      channels: 1
+      # N/P/K 为三路独立母液，酸液保持独立第四路计量泵。
+      channels: 3
       ec_conc_ds_m: 35.0
       channel_names:
-        - F1_compound
+        - N
+        - P
+        - K
     acid_stock:
       # 当前版本只有 1 路酸液，pH 独立控制。
       channels: 1
@@ -112,6 +130,14 @@ deployment:
     q_a_l_min:
       min: 0.0
       max: 4.0
+    dosing_channels:
+      N: {min_l_min: 0.0, max_l_min: 4.0}
+      P: {min_l_min: 0.0, max_l_min: 4.0}
+      K: {min_l_min: 0.0, max_l_min: 4.0}
+      acid: {min_l_min: 0.0, max_l_min: 4.0}
+    final_outputs:
+      analog: [water_vfd, N_pump, P_pump, K_pump, acid_pump]
+      digital: [water_run, N_run, P_run, K_run, acid_run]
     # 斜坡限速用于保护泵阀，也能减少长管道滞后下的过冲。
     rate_limit_l_min_s:
       q_f_up: 1.5
@@ -145,11 +171,12 @@ deployment:
       ec_mae_max: 0.08
       ph_mae_max: 0.10
 
-  future_multichannel_fertilizer:
-    # 多路肥液扩展规划：当前关闭，后续把 q_f_cmd 视作 q_f_total_cmd 后再拆分。
-    enabled: false
+  multichannel_fertilizer:
+    # 当前投运架构：q_f_cmd 为总肥液需求，PLC 再分配至 N/P/K。
+    enabled: true
     planned_channels:
-      - A_calcium
-      - B_np_k
-      - C_micro
+      - N
+      - P
+      - K
+      - acid
     control_rule: total_ec_by_plc_ratio_split_by_recipe

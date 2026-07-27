@@ -9,6 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SIMULATION_PATH = ROOT / "config" / "simulation.yaml"
 CONTROL_PATH = ROOT / "config" / "control_parameters.yaml"
 SCL_PATH = ROOT / "plc" / "xiaweiji" / "src" / "xiaweiji.scl"
+MODE_INTERLOCK_LAD_PATH = (
+    ROOT / "plc" / "xiaweiji" / "src" / "lad" / "程序块" / "FC_ModeInterlock_LAD.s7dcl"
+)
 
 
 class MemoryPLC:
@@ -106,11 +109,17 @@ def test_disabled_decoupler_preserves_independent_pid_corrections():
 
 def test_manual_mode_publishes_state_and_uses_direct_flow_commands():
     scl = SCL_PATH.read_text(encoding="utf-8")
-    assert '"DB1".Manual_Active := #Mode_Manual;' in scl
-    assert '"DB1".Manual_PumpValve_Enable := #Mode_Manual' in scl
+    lad = MODE_INTERLOCK_LAD_PATH.read_text(encoding="utf-8-sig")
+    assert 'Contact( "DB1".Manual_Mode )\n            Coil( "DB1".Manual_Active )' in lad
+    assert 'Contact( "DB1".Manual_Active )\n            Coil( "DB1".Manual_PumpValve_Enable )' in lad
+    assert 'in := "DB1".Manual_q_f_Set,\n                out1 => "DB1".Manual_q_f_Selected' in lad
+    assert 'in := "DB1".Manual_q_a_Set,\n                out1 => "DB1".Manual_q_a_Selected' in lad
     assert 'IF #Mode_Manual THEN' in scl
-    assert '"DB1".q_f_cmd := "DB1".Manual_q_f_Set;' in scl
-    assert '"DB1".q_a_cmd := "DB1".Manual_q_a_Set;' in scl
+    assert '"DB1".q_f_cmd := "DB1".Manual_q_f_Selected;' in scl
+    assert '"DB1".q_a_cmd := "DB1".Manual_q_a_Selected;' in scl
+    assert '"DB1".q_n_cmd := "DB1".Manual_q_n_Set;' in scl
+    assert '"DB1".q_p_cmd := "DB1".Manual_q_p_Set;' in scl
+    assert '"DB1".q_k_cmd := "DB1".Manual_q_k_Set;' in scl
 
 
 def _solve_normalized_decoupler(c12, c21, v_ec, v_ph, regularization=0.0):

@@ -9,8 +9,8 @@ env:
   theta_fc: 0.32
   theta_wp: 0.04
 water_pump:
-  # The SAC action remains [EC_set, pH_set]. Irrigation scheduling owns this
-  # slower command; the pump model supplies the dynamic carrier-water flow.
+  # SAC supplies a bounded water multiplier. Irrigation scheduling owns the
+  # baseline batch volume and the safety guard projects the final request.
   mode: flow                 # flow | pressure
   enabled_on_reset: true
   q_set_l_min: 136.0
@@ -58,11 +58,23 @@ pipe:
   tau: 8.0
   T: 3.5
 action:
-  # B 方案 SAC 动作空间：上层水肥目标值，不直接输出泵阀流量
-  ec_set_min: 0.8        # SAC 输出滴灌/混肥出口目标 EC 下限 (dS/m)
-  ec_set_max: 2.5        # SAC 输出滴灌/混肥出口目标 EC 上限 (dS/m)
-  ph_set_min: 5.8        # SAC 输出滴灌/混肥出口目标 pH 下限
-  ph_set_max: 6.8        # SAC 输出滴灌/混肥出口目标 pH 上限
+  # V2 residual SAC action: [water_multiplier, ec_residual_ds_m].
+  # pH is no longer learned; PLC owns the acid-only 5.8-6.5 safety band.
+  mode: residual_water_ec
+  water_multiplier_min: 0.8
+  water_multiplier_max: 1.2
+  ec_residual_min: -0.15
+  ec_residual_max: 0.15
+
+  # Absolute EC limits still protect the residual setpoint after it is added
+  # to the stage baseline. Legacy pH limits remain for commissioning scripts.
+  ec_set_min: 0.7
+  ec_set_max: 1.7
+  ph_set_min: 5.8
+  ph_set_max: 6.5
+  ph_band_low: 5.8
+  ph_band_high: 6.5
+  ph_nominal: 6.2
 
   # 执行层限幅：纯仿真由 SetpointToFlowController 使用；真实部署由 PLC-PID 使用
   q_f_min: 0.0
@@ -70,10 +82,15 @@ action:
   q_a_min: 0.0
   q_a_max: 4.0
 
-  # 固定目标策略 [EC_set, pH_set]，用于无 SAC 对比或模型缺失回退
+  # Fixed residual policy [water_multiplier, EC residual].
   fixed_strategy:
-  - 1.5                  # 固定策略目标 EC_set (dS/m)，接近块茎膨大期目标
-  - 6.0                  # 固定策略目标 pH_set
+  - 1.0
+  - 0.0
+
+  # Explicit legacy target for manual setpoint/controllability scripts.
+  legacy_fixed_setpoint:
+  - 1.5
+  - 6.2
 obs:
   history_len: 5
   etc_norm: 10.0
@@ -775,6 +792,158 @@ plc:
       bit: 2
       type: bool
       bytes: 1
+
+    # Thesis V2 residual-policy and controller contract. Existing addresses
+    # above DBD0..529 are frozen; this extension starts on DBD532.
+    Water_Multiplier_SP:
+      offset: 532
+      type: real
+      bytes: 4
+    EC_Residual_SP:
+      offset: 536
+      type: real
+      bytes: 4
+    pH_Band_Low:
+      offset: 540
+      type: real
+      bytes: 4
+    pH_Band_High:
+      offset: 544
+      type: real
+      bytes: 4
+    Recipe_ID:
+      offset: 548
+      type: int
+      bytes: 2
+    Controller_Mode:
+      offset: 550
+      type: int
+      bytes: 2
+    Batch_Water_Target_L:
+      offset: 552
+      type: real
+      bytes: 4
+    Water_Accumulated_L:
+      offset: 556
+      type: real
+      bytes: 4
+    Fertilizer_Accumulated_L:
+      offset: 560
+      type: real
+      bytes: 4
+    Acid_Accumulated_L:
+      offset: 564
+      type: real
+      bytes: 4
+    IMC_Lambda_EC_s:
+      offset: 568
+      type: real
+      bytes: 4
+    IMC_Lambda_pH_s:
+      offset: 572
+      type: real
+      bytes: 4
+    IMC_Tau_EC_s:
+      offset: 576
+      type: real
+      bytes: 4
+    IMC_Tau_pH_s:
+      offset: 580
+      type: real
+      bytes: 4
+    IMC_Delay_s:
+      offset: 584
+      type: real
+      bytes: 4
+    pH_Pulse_On_s:
+      offset: 588
+      type: real
+      bytes: 4
+    pH_Pulse_Off_s:
+      offset: 592
+      type: real
+      bytes: 4
+    pH_Safety_Active:
+      offset: 596
+      bit: 0
+      type: bool
+      bytes: 1
+    pH_Flush_Request:
+      offset: 596
+      bit: 1
+      type: bool
+      bytes: 1
+    Batch_Reject:
+      offset: 596
+      bit: 2
+      type: bool
+      bytes: 1
+    IMC_Smith_Active:
+      offset: 596
+      bit: 3
+      type: bool
+      bytes: 1
+    Smith_EC_Predicted:
+      offset: 600
+      type: real
+      bytes: 4
+    Gain_Low_G_EC_F: {offset: 604, type: real, bytes: 4}
+    Gain_Low_G_EC_A: {offset: 608, type: real, bytes: 4}
+    Gain_Low_G_pH_F: {offset: 612, type: real, bytes: 4}
+    Gain_Low_G_pH_A: {offset: 616, type: real, bytes: 4}
+    Gain_Low_Tau_s: {offset: 620, type: real, bytes: 4}
+    Gain_Low_Delay_s: {offset: 624, type: real, bytes: 4}
+    Gain_Low_q_f: {offset: 628, type: real, bytes: 4}
+    Gain_Low_Valid: {offset: 632, bit: 0, type: bool, bytes: 1}
+    Gain_Mid_G_EC_F: {offset: 636, type: real, bytes: 4}
+    Gain_Mid_G_EC_A: {offset: 640, type: real, bytes: 4}
+    Gain_Mid_G_pH_F: {offset: 644, type: real, bytes: 4}
+    Gain_Mid_G_pH_A: {offset: 648, type: real, bytes: 4}
+    Gain_Mid_Tau_s: {offset: 652, type: real, bytes: 4}
+    Gain_Mid_Delay_s: {offset: 656, type: real, bytes: 4}
+    Gain_Mid_q_f: {offset: 660, type: real, bytes: 4}
+    Gain_Mid_Valid: {offset: 664, bit: 0, type: bool, bytes: 1}
+    Gain_High_G_EC_F: {offset: 668, type: real, bytes: 4}
+    Gain_High_G_EC_A: {offset: 672, type: real, bytes: 4}
+    Gain_High_G_pH_F: {offset: 676, type: real, bytes: 4}
+    Gain_High_G_pH_A: {offset: 680, type: real, bytes: 4}
+    Gain_High_Tau_s: {offset: 684, type: real, bytes: 4}
+    Gain_High_Delay_s: {offset: 688, type: real, bytes: 4}
+    Gain_High_q_f: {offset: 692, type: real, bytes: 4}
+    Gain_High_Valid: {offset: 696, bit: 0, type: bool, bytes: 1}
+    Gain_LM_Threshold: {offset: 700, type: real, bytes: 4}
+    Gain_MH_Threshold: {offset: 704, type: real, bytes: 4}
+    Gain_Schedule_Hysteresis: {offset: 708, type: real, bytes: 4}
+    Gain_Min_Hold_s: {offset: 712, type: real, bytes: 4}
+    pH_Pulse_Flow: {offset: 716, type: real, bytes: 4}
+    E3_Parameter_Version: {offset: 720, type: int, bytes: 2}
+    Active_Gain_Point: {offset: 722, type: int, bytes: 2}
+    E4_Approved: {offset: 724, bit: 0, type: bool, bytes: 1}
+    Gain_Schedule_Enable: {offset: 724, bit: 1, type: bool, bytes: 1}
+    Gain_Schedule_Valid: {offset: 724, bit: 2, type: bool, bytes: 1}
+    Decoupling_Limited: {offset: 724, bit: 3, type: bool, bytes: 1}
+    E4_Test_Enable: {offset: 724, bit: 4, type: bool, bytes: 1}
+    Gain_Switch_Pending: {offset: 724, bit: 5, type: bool, bytes: 1}
+    Decoupler_Active_Diag: {offset: 724, bit: 6, type: bool, bytes: 1}
+    E4_Compressed_Time_Enable: {offset: 724, bit: 7, type: bool, bytes: 1}
+    Decoupler_Weight_Applied: {offset: 728, type: real, bytes: 4}
+    Gain_Hold_Elapsed_s: {offset: 732, type: real, bytes: 4}
+    Gain_Point_Override: {offset: 736, type: int, bytes: 2}
+    Gain_Low_EC_SP: {offset: 740, type: real, bytes: 4}
+    Gain_Mid_EC_SP: {offset: 744, type: real, bytes: 4}
+    Gain_High_EC_SP: {offset: 748, type: real, bytes: 4}
+    Active_Gain_EC_SP: {offset: 752, type: real, bytes: 4}
+    Active_Gain_q_f: {offset: 756, type: real, bytes: 4}
+    E4_Sim_Step_s: {offset: 760, type: real, bytes: 4}
+    # Field deployment extension. DBD0..763 are frozen.
+    Deployment_Mode: {offset: 764, type: int, bytes: 2}
+    Soft_Stop_Request: {offset: 766, bit: 0, type: bool, bytes: 1}
+    Actuator_Enable_Request: {offset: 766, bit: 1, type: bool, bytes: 1}
+    Field_IO_Ready: {offset: 766, bit: 2, type: bool, bytes: 1}
+    Actuator_Enable_Permitted: {offset: 766, bit: 3, type: bool, bytes: 1}
+    Physical_EStop_OK: {offset: 766, bit: 4, type: bool, bytes: 1}
+    Sensor_Fault_Any: {offset: 766, bit: 5, type: bool, bytes: 1}
+    Drive_Fault_Any: {offset: 766, bit: 6, type: bool, bytes: 1}
 
     # PLC/PLCSIM 写回 Python 的执行结果与状态
     Remote_Comms_OK:

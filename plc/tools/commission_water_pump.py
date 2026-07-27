@@ -68,6 +68,29 @@ def main() -> int:
             return 4
         print("Initial:", _water_summary(initial))
 
+        # Establish the PLC communication and authority state before issuing
+        # the carrier-water command.  Without a heartbeat/remote-auto frame,
+        # the PLC safety interlock intentionally keeps the pump stopped.
+        if not plc.write_emergency_stop(False):
+            print("FAIL: could not clear Emergency_Stop.")
+            return 5
+        if not plc.write_remote_auto_mode():
+            print("FAIL: could not select remote automatic mode.")
+            return 5
+        if not plc.write_feedback(0.8, 6.2, sac_enable=False):
+            print("FAIL: could not establish the PLC feedback heartbeat.")
+            return 5
+        if not plc.write_system_alarm_reset(True):
+            print("FAIL: could not acknowledge the PLC system alarm.")
+            return 5
+        time.sleep(args.cycle_s)
+        if not plc.write_system_alarm_reset(False):
+            print("FAIL: could not release the PLC system alarm acknowledge.")
+            return 5
+        if not plc.write_feedback(0.8, 6.2, sac_enable=False):
+            print("FAIL: could not refresh the PLC feedback heartbeat.")
+            return 5
+
         # Establish a known safe baseline and pulse the volume reset for one PLC cycle.
         plc.write_water_command(
             enabled=False,

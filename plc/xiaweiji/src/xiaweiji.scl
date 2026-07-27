@@ -1,4 +1,4 @@
-﻿FUNCTION_BLOCK "RateLimiter"
+FUNCTION_BLOCK "RateLimiter"
 { S7_Optimized_Access := 'TRUE' }
 VERSION : 0.1
    VAR_INPUT 
@@ -546,6 +546,200 @@ BEGIN
    Acid_Flow_Deviation_Rel := 0.20;
 END_DATA_BLOCK
 
+DATA_BLOCK "DB_FieldIO"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+   STRUCT
+      // Logical I/O only. Physical %I/%Q addresses are assigned after hardware selection.
+      // Channel index: 1=EC, 2=pH, 3=pressure, 4=main-pump speed,
+      // 5=N flow, 6=P flow, 7=K flow, 8=acid flow.
+      Raw : Array[1..8] of Int;
+      Raw_Min : Array[1..8] of Int;
+      Raw_Max : Array[1..8] of Int;
+      Eng_Min : Array[1..8] of Real;
+      Eng_Max : Array[1..8] of Real;
+      Filter_Alpha : Array[1..8] of Real;
+      Engineering : Array[1..8] of Real;
+      Filtered : Array[1..8] of Real;
+      Filter_Initialized : Array[1..8] of Bool;
+      Wire_Break : Array[1..8] of Bool;
+      Overrange : Array[1..8] of Bool;
+      Fault : Array[1..8] of Bool;
+      Underrange_Margin : Int;
+      Overrange_Margin : Int;
+
+      // HSC logical input. The mapper will connect this to the selected high-speed counter.
+      HSC_Water_Frequency_Hz : Real;
+      HSC_Pulses_Per_Liter : Real;
+      HSC_Water_Valid : Bool;
+      HSC_Water_Fault : Bool;
+      Water_Flow_L_min : Real;
+
+      // Dry-contact and drive feedback logical inputs.
+      DI_Physical_EStop_OK : Bool;
+      DI_Commissioning_Key_Active : Bool;
+      DI_Water_Run_Feedback : Bool;
+      DI_Water_Drive_Ready : Bool;
+      DI_Water_Drive_Fault : Bool;
+      DI_Water_Source_Low_Level : Bool;
+      DI_N_Run_Feedback : Bool;
+      DI_N_Drive_Ready : Bool;
+      DI_N_Drive_Fault : Bool;
+      DI_N_Tank_Low_Level : Bool;
+      DI_P_Run_Feedback : Bool;
+      DI_P_Drive_Ready : Bool;
+      DI_P_Drive_Fault : Bool;
+      DI_P_Tank_Low_Level : Bool;
+      DI_K_Run_Feedback : Bool;
+      DI_K_Drive_Ready : Bool;
+      DI_K_Drive_Fault : Bool;
+      DI_K_Tank_Low_Level : Bool;
+      DI_Acid_Run_Feedback : Bool;
+      DI_Acid_Drive_Ready : Bool;
+      DI_Acid_Drive_Fault : Bool;
+      DI_Acid_Tank_Low_Level : Bool;
+      Simulation_IO_Ready : Bool;
+
+      // These are the only final logical writers for future physical outputs.
+      AO_Water_Final : Int;
+      AO_N_Final : Int;
+      AO_P_Final : Int;
+      AO_K_Final : Int;
+      AO_Acid_Final : Int;
+      DO_Water_Run_Final : Bool;
+      DO_N_Run_Final : Bool;
+      DO_P_Run_Final : Bool;
+      DO_K_Run_Final : Bool;
+      DO_Acid_Run_Final : Bool;
+   END_STRUCT;
+BEGIN
+   Underrange_Margin := 300;
+   Overrange_Margin := 300;
+   HSC_Pulses_Per_Liter := 100.0;
+   Simulation_IO_Ready := true;
+
+   Raw_Min[1] := 5530; Raw_Max[1] := 27648;
+   Eng_Min[1] := 0.0; Eng_Max[1] := 5.0; Filter_Alpha[1] := 0.10;
+   Raw_Min[2] := 5530; Raw_Max[2] := 27648;
+   Eng_Min[2] := 0.0; Eng_Max[2] := 14.0; Filter_Alpha[2] := 0.10;
+   Raw_Min[3] := 5530; Raw_Max[3] := 27648;
+   Eng_Min[3] := 0.0; Eng_Max[3] := 6.0; Filter_Alpha[3] := 0.15;
+   Raw_Min[4] := 5530; Raw_Max[4] := 27648;
+   Eng_Min[4] := 0.0; Eng_Max[4] := 100.0; Filter_Alpha[4] := 0.15;
+   Raw_Min[5] := 5530; Raw_Max[5] := 27648;
+   Eng_Min[5] := 0.0; Eng_Max[5] := 4.0; Filter_Alpha[5] := 0.15;
+   Raw_Min[6] := 5530; Raw_Max[6] := 27648;
+   Eng_Min[6] := 0.0; Eng_Max[6] := 4.0; Filter_Alpha[6] := 0.15;
+   Raw_Min[7] := 5530; Raw_Max[7] := 27648;
+   Eng_Min[7] := 0.0; Eng_Max[7] := 4.0; Filter_Alpha[7] := 0.15;
+   Raw_Min[8] := 5530; Raw_Max[8] := 27648;
+   Eng_Min[8] := 0.0; Eng_Max[8] := 4.0; Filter_Alpha[8] := 0.15;
+END_DATA_BLOCK
+
+FUNCTION "FC_FieldIO" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_TEMP
+      i : Int;
+      Raw_Clamped : Real;
+      Raw_Span : Real;
+      Eng_Span : Real;
+      Alpha : Real;
+   END_VAR
+BEGIN
+   // SCL is intentionally limited to continuous-value handling and range diagnostics.
+   FOR #i := 1 TO 8 DO
+      "DB_FieldIO".Wire_Break[#i] :=
+         "DB_FieldIO".Raw[#i] < ("DB_FieldIO".Raw_Min[#i]
+         - "DB_FieldIO".Underrange_Margin);
+      "DB_FieldIO".Overrange[#i] :=
+         "DB_FieldIO".Raw[#i] > ("DB_FieldIO".Raw_Max[#i]
+         + "DB_FieldIO".Overrange_Margin);
+      "DB_FieldIO".Fault[#i] := "DB_FieldIO".Wire_Break[#i]
+         OR "DB_FieldIO".Overrange[#i]
+         OR ("DB_FieldIO".Raw_Max[#i] <= "DB_FieldIO".Raw_Min[#i])
+         OR ("DB_FieldIO".Eng_Max[#i] <= "DB_FieldIO".Eng_Min[#i]);
+
+      #Raw_Clamped := INT_TO_REAL("DB_FieldIO".Raw[#i]);
+      IF #Raw_Clamped < INT_TO_REAL("DB_FieldIO".Raw_Min[#i]) THEN
+         #Raw_Clamped := INT_TO_REAL("DB_FieldIO".Raw_Min[#i]);
+      END_IF;
+      IF #Raw_Clamped > INT_TO_REAL("DB_FieldIO".Raw_Max[#i]) THEN
+         #Raw_Clamped := INT_TO_REAL("DB_FieldIO".Raw_Max[#i]);
+      END_IF;
+      #Raw_Span := INT_TO_REAL("DB_FieldIO".Raw_Max[#i]
+         - "DB_FieldIO".Raw_Min[#i]);
+      #Eng_Span := "DB_FieldIO".Eng_Max[#i] - "DB_FieldIO".Eng_Min[#i];
+      IF (#Raw_Span > 0.0) AND (#Eng_Span > 0.0) THEN
+         "DB_FieldIO".Engineering[#i] := "DB_FieldIO".Eng_Min[#i]
+            + (#Raw_Clamped - INT_TO_REAL("DB_FieldIO".Raw_Min[#i]))
+            * #Eng_Span / #Raw_Span;
+      ELSE
+         "DB_FieldIO".Engineering[#i] := 0.0;
+      END_IF;
+
+      #Alpha := "DB_FieldIO".Filter_Alpha[#i];
+      IF #Alpha < 0.0 THEN #Alpha := 0.0; END_IF;
+      IF #Alpha > 1.0 THEN #Alpha := 1.0; END_IF;
+      IF NOT "DB_FieldIO".Filter_Initialized[#i] THEN
+         "DB_FieldIO".Filtered[#i] := "DB_FieldIO".Engineering[#i];
+         "DB_FieldIO".Filter_Initialized[#i] := TRUE;
+      ELSIF NOT "DB_FieldIO".Fault[#i] THEN
+         "DB_FieldIO".Filtered[#i] := "DB_FieldIO".Filtered[#i]
+            + #Alpha * ("DB_FieldIO".Engineering[#i]
+            - "DB_FieldIO".Filtered[#i]);
+      END_IF;
+   END_FOR;
+
+   IF "DB_FieldIO".HSC_Pulses_Per_Liter > 0.0 THEN
+      "DB_FieldIO".Water_Flow_L_min := "DB_FieldIO".HSC_Water_Frequency_Hz
+         * 60.0 / "DB_FieldIO".HSC_Pulses_Per_Liter;
+   ELSE
+      "DB_FieldIO".Water_Flow_L_min := 0.0;
+   END_IF;
+   "DB_FieldIO".HSC_Water_Fault := NOT "DB_FieldIO".HSC_Water_Valid
+      OR ("DB_FieldIO".HSC_Pulses_Per_Liter <= 0.0);
+
+   // In simulation mode Python owns DB1 feedback. In field mode PLC I/O owns it.
+   IF "DB1".Deployment_Mode = 1 THEN
+      "DB1".EC_Actual := "DB_FieldIO".Filtered[1];
+      "DB1".pH_Actual := "DB_FieldIO".Filtered[2];
+      "DB1".Pressure_Actual := "DB_FieldIO".Filtered[3];
+      "DB1".Water_Pump_Speed_Actual := "DB_FieldIO".Filtered[4];
+      "DB1".Qw_Actual := "DB_FieldIO".Water_Flow_L_min;
+      "DB1".N_Actual := "DB_FieldIO".Filtered[5];
+      "DB1".P_Actual := "DB_FieldIO".Filtered[6];
+      "DB1".K_Actual := "DB_FieldIO".Filtered[7];
+
+      "DB1".Water_Pump_Run_Feedback := "DB_FieldIO".DI_Water_Run_Feedback;
+      "DB1".Water_Pump_Drive_Ready := "DB_FieldIO".DI_Water_Drive_Ready;
+      "DB1".Water_Pump_Drive_Fault := "DB_FieldIO".DI_Water_Drive_Fault;
+      "DB1".Water_Source_Low_Level := "DB_FieldIO".DI_Water_Source_Low_Level;
+
+      "DB_Actuator".N_Flow_PV := "DB_FieldIO".Filtered[5];
+      "DB_Actuator".P_Flow_PV := "DB_FieldIO".Filtered[6];
+      "DB_Actuator".K_Flow_PV := "DB_FieldIO".Filtered[7];
+      "DB_Actuator".Acid_Flow_PV := "DB_FieldIO".Filtered[8];
+      "DB_Actuator".N_Run_Feedback := "DB_FieldIO".DI_N_Run_Feedback;
+      "DB_Actuator".N_Drive_Ready := "DB_FieldIO".DI_N_Drive_Ready;
+      "DB_Actuator".N_Drive_Fault := "DB_FieldIO".DI_N_Drive_Fault;
+      "DB_Actuator".N_Tank_Low_Level := "DB_FieldIO".DI_N_Tank_Low_Level;
+      "DB_Actuator".P_Run_Feedback := "DB_FieldIO".DI_P_Run_Feedback;
+      "DB_Actuator".P_Drive_Ready := "DB_FieldIO".DI_P_Drive_Ready;
+      "DB_Actuator".P_Drive_Fault := "DB_FieldIO".DI_P_Drive_Fault;
+      "DB_Actuator".P_Tank_Low_Level := "DB_FieldIO".DI_P_Tank_Low_Level;
+      "DB_Actuator".K_Run_Feedback := "DB_FieldIO".DI_K_Run_Feedback;
+      "DB_Actuator".K_Drive_Ready := "DB_FieldIO".DI_K_Drive_Ready;
+      "DB_Actuator".K_Drive_Fault := "DB_FieldIO".DI_K_Drive_Fault;
+      "DB_Actuator".K_Tank_Low_Level := "DB_FieldIO".DI_K_Tank_Low_Level;
+      "DB_Actuator".Acid_Run_Feedback := "DB_FieldIO".DI_Acid_Run_Feedback;
+      "DB_Actuator".Acid_Drive_Ready := "DB_FieldIO".DI_Acid_Drive_Ready;
+      "DB_Actuator".Acid_Drive_Fault := "DB_FieldIO".DI_Acid_Drive_Fault;
+      "DB_Actuator".Acid_Tank_Low_Level := "DB_FieldIO".DI_Acid_Tank_Low_Level;
+   END_IF;
+END_FUNCTION
+
 DATA_BLOCK "DB1"
 { DB_Accessible_From_OPC_UA := 'FALSE' ;
  S7_Optimized_Access := 'FALSE' }
@@ -760,6 +954,100 @@ NON_RETAIN
        Actuator_Execution_Enable : Bool; // DBX529.0, actuator layer diagnostic
        Actuator_Any_Alarm : Bool;        // DBX529.1, actuator layer diagnostic
        Actuator_Any_Trip : Bool;         // DBX529.2, actuator layer diagnostic
+       Reserved_530 : Word;
+       // Thesis V2 extension. All prior offsets remain frozen.
+       Water_Multiplier_SP : Real;       // DBD532, 0.8..1.2
+       EC_Residual_SP : Real;            // DBD536, -0.15..0.15 dS/m
+       pH_Band_Low : Real;               // DBD540
+       pH_Band_High : Real;              // DBD544
+       Recipe_ID : Int;                  // DBW548, 0=INI..3=LATE
+       Controller_Mode : Int;            // DBW550, 0=fixed PI, 1=gain schedule, 2=IMC-PI/Smith
+       Batch_Water_Target_L : Real;      // DBD552
+       Water_Accumulated_L : Real;       // DBD556
+       Fertilizer_Accumulated_L : Real;  // DBD560
+       Acid_Accumulated_L : Real;        // DBD564
+       IMC_Lambda_EC_s : Real;           // DBD568
+       IMC_Lambda_pH_s : Real;           // DBD572
+       IMC_Tau_EC_s : Real;              // DBD576
+       IMC_Tau_pH_s : Real;              // DBD580
+       IMC_Delay_s : Real;               // DBD584
+       pH_Pulse_On_s : Real;             // DBD588
+       pH_Pulse_Off_s : Real;            // DBD592
+       pH_Safety_Active : Bool;           // DBX596.0
+       pH_Flush_Request : Bool;           // DBX596.1
+       Batch_Reject : Bool;               // DBX596.2
+       IMC_Smith_Active : Bool;           // DBX596.3
+       Reserved_597 : Byte;
+       Reserved_598 : Word;
+       Smith_EC_Predicted : Real;         // DBD600
+       // E3/E4 standalone schedule. Append only; DBD0..603 remain frozen.
+       Gain_Low_G_EC_F : Real;             // DBD604
+       Gain_Low_G_EC_A : Real;             // DBD608
+       Gain_Low_G_pH_F : Real;             // DBD612
+       Gain_Low_G_pH_A : Real;             // DBD616
+       Gain_Low_Tau_s : Real;               // DBD620
+       Gain_Low_Delay_s : Real;             // DBD624
+       Gain_Low_q_f : Real;                 // DBD628
+       Gain_Low_Valid : Bool;               // DBX632.0
+       Reserved_633 : Byte;
+       Reserved_634 : Word;
+       Gain_Mid_G_EC_F : Real;             // DBD636
+       Gain_Mid_G_EC_A : Real;             // DBD640
+       Gain_Mid_G_pH_F : Real;             // DBD644
+       Gain_Mid_G_pH_A : Real;             // DBD648
+       Gain_Mid_Tau_s : Real;               // DBD652
+       Gain_Mid_Delay_s : Real;             // DBD656
+       Gain_Mid_q_f : Real;                 // DBD660
+       Gain_Mid_Valid : Bool;               // DBX664.0
+       Reserved_665 : Byte;
+       Reserved_666 : Word;
+       Gain_High_G_EC_F : Real;            // DBD668
+       Gain_High_G_EC_A : Real;            // DBD672
+       Gain_High_G_pH_F : Real;            // DBD676
+       Gain_High_G_pH_A : Real;            // DBD680
+       Gain_High_Tau_s : Real;              // DBD684
+       Gain_High_Delay_s : Real;            // DBD688
+       Gain_High_q_f : Real;                // DBD692
+       Gain_High_Valid : Bool;              // DBX696.0
+       Reserved_697 : Byte;
+       Reserved_698 : Word;
+       Gain_LM_Threshold : Real;            // DBD700
+       Gain_MH_Threshold : Real;            // DBD704
+       Gain_Schedule_Hysteresis : Real;     // DBD708
+       Gain_Min_Hold_s : Real;              // DBD712
+       pH_Pulse_Flow : Real;                // DBD716
+       E3_Parameter_Version : Int;          // DBW720
+       Active_Gain_Point : Int;             // DBW722, -1 invalid, 0/1/2 low/mid/high
+       E4_Approved : Bool;                   // DBX724.0
+       Gain_Schedule_Enable : Bool;          // DBX724.1
+       Gain_Schedule_Valid : Bool;           // DBX724.2
+       Decoupling_Limited : Bool;            // DBX724.3
+       E4_Test_Enable : Bool;                // DBX724.4, remote commissioning only
+       Gain_Switch_Pending : Bool;           // DBX724.5
+       Decoupler_Active_Diag : Bool;         // DBX724.6
+       E4_Compressed_Time_Enable : Bool;     // DBX724.7, PLCSIM only
+       Reserved_725 : Byte;
+       Reserved_726 : Word;
+       Decoupler_Weight_Applied : Real;      // DBD728
+       Gain_Hold_Elapsed_s : Real;           // DBD732
+       Gain_Point_Override : Int;            // DBW736, -1 automatic
+       Reserved_738 : Word;
+       Gain_Low_EC_SP : Real;                // DBD740, local EC operating point
+       Gain_Mid_EC_SP : Real;                // DBD744
+       Gain_High_EC_SP : Real;               // DBD748
+       Active_Gain_EC_SP : Real;             // DBD752
+       Active_Gain_q_f : Real;               // DBD756
+       E4_Sim_Step_s : Real;                 // DBD760, PLCSIM model time per heartbeat
+       // Field deployment contract. Append only; DBD0..763 remain frozen.
+       Deployment_Mode : Int;                 // DBW764, 0=simulation, 1=field
+       Soft_Stop_Request : Bool;              // DBX766.0, non-safety stop request
+       Actuator_Enable_Request : Bool;        // DBX766.1, engineer-only request
+       Field_IO_Ready : Bool;                 // DBX766.2, resolved by LAD
+       Actuator_Enable_Permitted : Bool;      // DBX766.3, resolved by LAD
+       Physical_EStop_OK : Bool;              // DBX766.4, read-only auxiliary feedback
+       Sensor_Fault_Any : Bool;               // DBX766.5
+       Drive_Fault_Any : Bool;                // DBX766.6
+       Reserved_767 : Byte;
    END_STRUCT;
 
 
@@ -935,6 +1223,96 @@ BEGIN
    Actuator_Execution_Enable := false;
    Actuator_Any_Alarm := false;
    Actuator_Any_Trip := false;
+   Reserved_530 := 0;
+   Water_Multiplier_SP := 1.0;
+   EC_Residual_SP := 0.0;
+   pH_Band_Low := 5.8;
+   pH_Band_High := 6.5;
+   Recipe_ID := 0;
+   Controller_Mode := 2;
+   Batch_Water_Target_L := 0.0;
+   Water_Accumulated_L := 0.0;
+   Fertilizer_Accumulated_L := 0.0;
+   Acid_Accumulated_L := 0.0;
+   IMC_Lambda_EC_s := 240.0;
+   IMC_Lambda_pH_s := 300.0;
+   IMC_Tau_EC_s := 375.0;
+   IMC_Tau_pH_s := 375.0;
+   IMC_Delay_s := 185.0;
+   pH_Pulse_On_s := 5.0;
+   pH_Pulse_Off_s := 30.0;
+   pH_Safety_Active := false;
+   pH_Flush_Request := false;
+   Batch_Reject := false;
+   IMC_Smith_Active := false;
+   Reserved_597 := 0;
+   Reserved_598 := 0;
+   Smith_EC_Predicted := 0.0;
+   Gain_Low_G_EC_F := 0.456;
+   Gain_Low_G_EC_A := 0.104;
+   Gain_Low_G_pH_F := -0.197;
+   Gain_Low_G_pH_A := -1.070;
+   Gain_Low_Tau_s := 300.0;
+   Gain_Low_Delay_s := 180.0;
+   Gain_Low_q_f := 2.0;
+   Gain_Low_Valid := false;
+   Reserved_633 := 0;
+   Reserved_634 := 0;
+   Gain_Mid_G_EC_F := 0.403;
+   Gain_Mid_G_EC_A := 0.105;
+   Gain_Mid_G_pH_F := -0.121;
+   Gain_Mid_G_pH_A := -0.551;
+   Gain_Mid_Tau_s := 300.0;
+   Gain_Mid_Delay_s := 180.0;
+   Gain_Mid_q_f := 4.0;
+   Gain_Mid_Valid := false;
+   Reserved_665 := 0;
+   Reserved_666 := 0;
+   Gain_High_G_EC_F := 0.433;
+   Gain_High_G_EC_A := 0.142;
+   Gain_High_G_pH_F := -0.118;
+   Gain_High_G_pH_A := -0.383;
+   Gain_High_Tau_s := 300.0;
+   Gain_High_Delay_s := 180.0;
+   Gain_High_q_f := 6.0;
+   Gain_High_Valid := false;
+   Reserved_697 := 0;
+   Reserved_698 := 0;
+   Gain_LM_Threshold := 3.0;
+   Gain_MH_Threshold := 5.0;
+   Gain_Schedule_Hysteresis := 0.2;
+   Gain_Min_Hold_s := 60.0;
+   pH_Pulse_Flow := 0.8;
+   E3_Parameter_Version := 0;
+   Active_Gain_Point := -1;
+   E4_Approved := false;
+   Gain_Schedule_Enable := false;
+   Gain_Schedule_Valid := false;
+   Decoupling_Limited := false;
+   E4_Test_Enable := false;
+   Gain_Switch_Pending := false;
+   Decoupler_Active_Diag := false;
+   E4_Compressed_Time_Enable := false;
+   Reserved_725 := 0;
+   Reserved_726 := 0;
+   Decoupler_Weight_Applied := 0.0;
+   Gain_Hold_Elapsed_s := 0.0;
+   Gain_Point_Override := -1;
+   Reserved_738 := 0;
+   Gain_Low_EC_SP := 1.4;
+   Gain_Mid_EC_SP := 1.5;
+   Gain_High_EC_SP := 1.6;
+   Active_Gain_EC_SP := 0.0;
+   Active_Gain_q_f := 0.0;
+    E4_Sim_Step_s := 60.0;
+    Deployment_Mode := 0;
+    Soft_Stop_Request := false;
+    Actuator_Enable_Request := false;
+    Field_IO_Ready := false;
+    Actuator_Enable_Permitted := false;
+    Physical_EStop_OK := false;
+    Sensor_Fault_Any := true;
+    Drive_Fault_Any := true;
 
 END_DATA_BLOCK
 
@@ -953,6 +1331,7 @@ VERSION : 0.1
       Local_pH_Bias : Real := -0.020;
       Remote_Heartbeat : Int;   // 上位机心跳
       CycleTime : Real := 0.1;   // 调用周期，单位 s
+      E4_Compressed_Timing_Enable : Bool := FALSE;
       Kp_EC : Real := 1.10;   // 四阶段本地后备粗调得到的 EC 基准增益
       Ki_EC : Real := 0.030;
       Kd_EC : Real := 0.013;
@@ -1009,6 +1388,17 @@ VERSION : 0.1
       NPK_Feedback_Valid : Bool := FALSE;
       Compressed_HIL_Enable : Bool := FALSE;
       Fixed_PID_Test_Enable : Bool := FALSE;   // TRUE=固定使用基准 Kp/Ki/Kd，仅用于 A/B 验证
+      Controller_Mode : Int := 1;   // 0=固定PI, 1=非线性增益调度PID, 2=IMC-PI+pH脉冲安全带
+      pH_Band_Low : Real := 5.8;
+      pH_Band_High : Real := 6.5;
+      pH_Pulse_On_s : Real := 5.0;
+      pH_Pulse_Off_s : Real := 30.0;
+      pH_Pulse_Flow : Real := 0.8;
+      IMC_Lambda_EC_s : Real := 240.0;
+      IMC_Tau_EC_s : Real := 375.0;
+      IMC_Delay_s : Real := 185.0;
+      IMC_EC_Operating_SP : Real := 0.0;
+      IMC_q_f_Operating : Real := 0.0;
    END_VAR
 
    VAR_OUTPUT
@@ -1060,6 +1450,13 @@ VERSION : 0.1
       Adaptive_PID_Active_Out : Bool;
       Delta_q_f_Out : Real;
       Delta_q_a_Out : Real;
+      pH_Safety_Active_Out : Bool;
+      pH_Flush_Request_Out : Bool;
+      Batch_Reject_Out : Bool;
+      IMC_Smith_Active_Out : Bool;
+      Smith_EC_Predicted_Out : Real;
+      Decoupling_Limited_Out : Bool;
+      Decoupler_Weight_Applied_Out : Real;
    END_VAR
 
    VAR
@@ -1091,6 +1488,9 @@ VERSION : 0.1
       inst_RL_F : "RateLimiter";
       inst_RL_A : "RateLimiter";
       tWatchdog {InstructionName := 'TON_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TON_TIME;
+      pH_Pulse_Remaining_s : Real;
+      pH_Pulse_Off_Remaining_s : Real;
+      pH_Pulse_Count : Int;
    END_VAR
 
    VAR_TEMP
@@ -1205,13 +1605,17 @@ VERSION : 0.1
       Decoupler_B2 : Real;
       Decoupler_Normal_Det : Real;
       Decoupler_Weight_Safe : Real;
+      IMC_Gain_EC : Real;
+      IMC_Integral_Time_EC_s : Real;
+      pH_Pulse_Demand : Real;
+      Acid_EC_Compensation : Real;
    END_VAR
 
 BEGIN
    // ================================================================
    // B 方案 PLC 执行层
    // Python/SAC 只给 EC_set、pH_set；PLC 根据反馈计算 q_f、q_a。
-   // 当前版本为“前馈 + 模糊自适应 PID + 长管道提前停酸/保前馈”。
+   // 当前版本保留固定PI、非线性增益调度PID和IMC-PI/pH安全带三种模式。
    // ================================================================
 
    // --- 心跳监控 ---
@@ -1231,6 +1635,12 @@ BEGIN
    END_IF;
 
    #Watchdog_Timer := #Watchdog_Count;
+
+   // E4 HIL only advances controller states on a new Python heartbeat.
+   // This local edge is reliable even after DB1.Last_Heartbeat is mirrored.
+   IF #E4_Compressed_Timing_Enable AND NOT #Heartbeat_Changed THEN
+      RETURN;
+   END_IF;
 
    // --- 生长阶段固定目标保护 ---
    // 0=INI 出苗期，1=DEV 营养/形成期，2=MID 膨大期，3=LATE 后期/成熟期。
@@ -1383,6 +1793,17 @@ BEGIN
       #Delta_q_a_Out := 0.0;
       #q_f_limited := FALSE;
       #q_a_limited := FALSE;
+      #pH_Safety_Active_Out := FALSE;
+      #pH_Flush_Request_Out := FALSE;
+      #Batch_Reject_Out := FALSE;
+      #IMC_Smith_Active_Out := FALSE;
+      #Smith_EC_Predicted_Out := #EC_Actual;
+      #Decoupling_Limited_Out := FALSE;
+      #Decoupler_Weight_Applied_Out := 0.0;
+      #pH_Pulse_Remaining_s := 0.0;
+      #pH_Pulse_Off_Remaining_s := 0.0;
+      #pH_Pulse_Count := 0;
+      #Filter_Init := FALSE;
       RETURN;
    END_IF;
 
@@ -1523,13 +1944,30 @@ BEGIN
    #EC_Approaching := (#EC_Error_Raw * #EC_Derivative) < 0.0;
    #pH_Approaching := (#pH_Error_Raw * #pH_Derivative) < 0.0;
 
-   IF #Fixed_PID_Test_Enable THEN
+   IF (#Controller_Mode = 0) OR #Fixed_PID_Test_Enable THEN
       #Kp_EC_Eff := #Kp_EC;
       #Ki_EC_Eff := #Ki_EC;
-      #Kd_EC_Eff := #Kd_EC;
+      #Kd_EC_Eff := 0.0;
       #Kp_pH_Eff := #Kp_pH;
       #Ki_pH_Eff := #Ki_pH;
-      #Kd_pH_Eff := #Kd_pH;
+      #Kd_pH_Eff := 0.0;
+      #IMC_Smith_Active_Out := FALSE;
+   ELSIF (#Controller_Mode = 2) AND (ABS(#G_EC_F) > 0.000001)
+      AND (#IMC_Lambda_EC_s > 0.0) AND (#IMC_Tau_EC_s > 0.0) THEN
+      // IMC-PI gains from the active measured FOPDT point. The complete
+      // dead-time queue is the Python/HIL reference until TIA site validation;
+      // the PLC therefore exposes IMC_Smith_Active=FALSE instead of claiming
+      // an unvalidated Smith implementation.
+      #IMC_Gain_EC := #G_EC_F;
+      #IMC_Integral_Time_EC_s := #IMC_Tau_EC_s + 0.5 * #IMC_Delay_s;
+      #Kp_EC_Eff := #IMC_Tau_EC_s /
+         (#IMC_Gain_EC * (#IMC_Lambda_EC_s + #IMC_Delay_s));
+      #Ki_EC_Eff := #Kp_EC_Eff / #IMC_Integral_Time_EC_s;
+      #Kd_EC_Eff := 0.0;
+      #Kp_pH_Eff := 0.0;
+      #Ki_pH_Eff := 0.0;
+      #Kd_pH_Eff := 0.0;
+      #IMC_Smith_Active_Out := FALSE;
    ELSE
       #Kp_EC_Eff := #Kp_EC * (1.00 + 0.70 * #EC_Error_Norm + 0.10 * #EC_Derivative_Norm);
       #Ki_EC_Eff := #Ki_EC * (0.65 + 1.15 * #EC_Persistence_Norm - 0.45 * #EC_Derivative_Norm);
@@ -1558,6 +1996,7 @@ BEGIN
       IF #Ki_pH_Eff > (#Ki_pH * 2.0) THEN #Ki_pH_Eff := #Ki_pH * 2.0; END_IF;
       IF #Kd_pH_Eff < (#Kd_pH * 0.50) THEN #Kd_pH_Eff := #Kd_pH * 0.50; END_IF;
       IF #Kd_pH_Eff > (#Kd_pH * 2.0) THEN #Kd_pH_Eff := #Kd_pH * 2.0; END_IF;
+      #IMC_Smith_Active_Out := FALSE;
    END_IF;
    #Kp_EC_Effective_Out := #Kp_EC_Eff;
    #Ki_EC_Effective_Out := #Ki_EC_Eff;
@@ -1567,7 +2006,8 @@ BEGIN
    #Kd_pH_Effective_Out := #Kd_pH_Eff;
    #EC_PID_Integral_Out := #EC_Integral;
    #pH_PID_Integral_Out := #pH_Integral;
-   #Adaptive_PID_Active_Out := NOT #Fixed_PID_Test_Enable;
+   #Adaptive_PID_Active_Out := (#Controller_Mode = 1) AND NOT #Fixed_PID_Test_Enable;
+   #Smith_EC_Predicted_Out := #EC_Filtered;
 
    // 压缩 HIL 只缩短前馈等待；真实设备使用现场辨识的混合/管道延迟。
    IF #Compressed_HIL_Enable THEN
@@ -1597,11 +2037,23 @@ BEGIN
    END_IF;
    IF #q_a_feedforward < 0.0 THEN #q_a_feedforward := 0.0; END_IF;
    IF #q_a_feedforward > #q_a_max THEN #q_a_feedforward := #q_a_max; END_IF;
-   IF (#Control_EC_SP > 0.0) AND (#Control_EC_SP < 34.0) THEN
+   // Mode 2 does not continuously chase a pH setpoint. Acid is requested only
+   // by the bounded safety-band pulse logic below.
+   IF #Controller_Mode = 2 THEN #q_a_feedforward := 0.0; END_IF;
+   IF (#Controller_Mode = 2) AND (#IMC_EC_Operating_SP > 0.0)
+      AND (#IMC_q_f_Operating >= 0.0) AND (ABS(#G_EC_F) > 0.000001) THEN
+      // Local FOPDT feedforward uses the same E3 gain and operating point as
+      // the active IMC-PI controller. This prevents the global mixing formula
+      // from contradicting the measured local process gain.
+      #q_f_feedforward := #IMC_q_f_Operating
+         + (#Control_EC_SP - #IMC_EC_Operating_SP) / #G_EC_F;
+   ELSIF (#Control_EC_SP > 0.0) AND (#Control_EC_SP < 34.0) THEN
       #q_f_feedforward := (#Control_EC_SP * (136.0 + #q_a_feedforward)) / (35.0 - #Control_EC_SP);
    ELSE
       #q_f_feedforward := 0.0;
    END_IF;
+   IF #q_f_feedforward < #q_f_min THEN #q_f_feedforward := #q_f_min; END_IF;
+   IF #q_f_feedforward > #q_f_max THEN #q_f_feedforward := #q_f_max; END_IF;
    // 压缩 HIL 的一个 PLC 扫描会推进数小时土壤过程，根区蒸发浓缩会使
    // 连续混合公式得到的滴灌 EC 略高。仅在测试标志有效时补偿此前馈偏差；
    // 真实设备不启用该缩放，仍使用原始物理前馈和 60 s 管道等待。
@@ -1670,6 +2122,50 @@ BEGIN
       #pH_Integral := -8.0;
    END_IF;
 
+   // --- pH安全带先生成酸脉冲需求，解耦层随后同步补偿其EC影响 ---
+   #pH_Safety_Active_Out := (#Controller_Mode = 2);
+   #pH_Flush_Request_Out := FALSE;
+   #Batch_Reject_Out := FALSE;
+   #pH_Pulse_Demand := 0.0;
+   IF #Controller_Mode = 2 THEN
+      IF #pH_Pulse_Remaining_s > 0.0 THEN
+         #pH_Pulse_Remaining_s := #pH_Pulse_Remaining_s - #CycleTime;
+         IF #pH_Pulse_Remaining_s <= 0.0 THEN
+            #pH_Pulse_Remaining_s := 0.0;
+            #pH_Pulse_Off_Remaining_s := #pH_Pulse_Off_s;
+         END_IF;
+      ELSIF #pH_Pulse_Off_Remaining_s > 0.0 THEN
+         #pH_Pulse_Off_Remaining_s := #pH_Pulse_Off_Remaining_s - #CycleTime;
+         IF #pH_Pulse_Off_Remaining_s < 0.0 THEN #pH_Pulse_Off_Remaining_s := 0.0; END_IF;
+      END_IF;
+
+      IF #pH_Filtered < #pH_Band_Low THEN
+         #pH_Flush_Request_Out := TRUE;
+         #pH_Pulse_Count := 0;
+         IF #pH_Filtered < 5.5 THEN #Batch_Reject_Out := TRUE; END_IF;
+      ELSIF #pH_Filtered <= #pH_Band_High THEN
+         #pH_Pulse_Count := 0;
+      ELSE
+         IF (#pH_Pulse_Remaining_s <= 0.0) AND (#pH_Pulse_Off_Remaining_s <= 0.0) THEN
+            IF #pH_Pulse_Count < 3 THEN
+               #pH_Pulse_Remaining_s := #pH_Pulse_On_s;
+               #pH_Pulse_Count := #pH_Pulse_Count + 1;
+            ELSE
+               #Batch_Reject_Out := TRUE;
+            END_IF;
+         END_IF;
+         IF (#pH_Pulse_Remaining_s > 0.0) AND NOT #Batch_Reject_Out THEN
+            #pH_Pulse_Demand := #pH_Pulse_Flow;
+            IF #pH_Pulse_Demand < #q_a_min THEN #pH_Pulse_Demand := #q_a_min; END_IF;
+            IF #pH_Pulse_Demand > #q_a_max THEN #pH_Pulse_Demand := #q_a_max; END_IF;
+         END_IF;
+      END_IF;
+   ELSE
+      #pH_Pulse_Remaining_s := 0.0;
+      #pH_Pulse_Off_Remaining_s := 0.0;
+      #pH_Pulse_Count := 0;
+   END_IF;
+
    // --- 局部 EC/pH 解耦 ---
    // 两个 PID 先生成与原独立回路一致的流量修正。物理 G 按主通道增益归一化，
    // 再对无量纲耦合矩阵做 Tikhonov 正则化逆，避免 EC/pH 单位与 L/min 混算。
@@ -1680,7 +2176,13 @@ BEGIN
    #Decoupler_Active := #Decoupler_Enable AND #Decoupler_Valid
       AND (ABS(#G_EC_F) > 0.000001) AND (ABS(#G_pH_A) > 0.000001);
 
-   IF #Decoupler_Active THEN
+   IF #Decoupler_Active AND (#Controller_Mode = 2) THEN
+      // Acid is unilateral. Preserve the full safety pulse and compensate only
+      // its predicted EC contribution through the fertilizer channel.
+      #Acid_EC_Compensation := -(#G_EC_A / #G_EC_F) * #pH_Pulse_Demand;
+      #Decoupled_q_f_Correction := #Direct_q_f_Correction + #Acid_EC_Compensation;
+      #Decoupled_q_a_Correction := #Direct_q_a_Correction;
+   ELSIF #Decoupler_Active THEN
       // q_f 的主通道是 EC，q_a 的主通道是 pH；当前 pH PID 正值表示加酸需求。
       #Coupling_EC_A := #G_EC_A / #G_EC_F;
       #Coupling_pH_F := #G_pH_F / #G_pH_A;
@@ -1713,21 +2215,32 @@ BEGIN
    IF #Decoupler_Weight_Safe < 0.0 THEN #Decoupler_Weight_Safe := 0.0; END_IF;
    IF #Decoupler_Weight_Safe > 1.0 THEN #Decoupler_Weight_Safe := 1.0; END_IF;
    // Ramp the applied weight at 0.10/s so enabling or changing a local model is bumpless.
-   IF #Decoupler_Active AND (#CycleTime > 0.0) THEN
-      IF #Decoupler_Weight_State < #Decoupler_Weight_Safe THEN
-         #Decoupler_Weight_State := #Decoupler_Weight_State + 0.10 * #CycleTime;
-         IF #Decoupler_Weight_State > #Decoupler_Weight_Safe THEN
-            #Decoupler_Weight_State := #Decoupler_Weight_Safe;
-         END_IF;
-      ELSIF #Decoupler_Weight_State > #Decoupler_Weight_Safe THEN
-         #Decoupler_Weight_State := #Decoupler_Weight_State - 0.10 * #CycleTime;
+   IF #Decoupler_Active THEN
+      // In compressed E4 HIL, CycleTime is zero on scans between two Python
+      // heartbeats. Keep the last applied weight on those scans; otherwise the
+      // output correction is cleared before it can reach the simulated plant.
+      IF #CycleTime > 0.0 THEN
          IF #Decoupler_Weight_State < #Decoupler_Weight_Safe THEN
-            #Decoupler_Weight_State := #Decoupler_Weight_Safe;
+            #Decoupler_Weight_State := #Decoupler_Weight_State + 0.10 * #CycleTime;
+            IF #Decoupler_Weight_State > #Decoupler_Weight_Safe THEN
+               #Decoupler_Weight_State := #Decoupler_Weight_Safe;
+            END_IF;
+         ELSIF #Decoupler_Weight_State > #Decoupler_Weight_Safe THEN
+            #Decoupler_Weight_State := #Decoupler_Weight_State - 0.10 * #CycleTime;
+            IF #Decoupler_Weight_State < #Decoupler_Weight_Safe THEN
+               #Decoupler_Weight_State := #Decoupler_Weight_Safe;
+            END_IF;
          END_IF;
+      ELSE
+         // A compressed HIL scan has no elapsed physical time.  It still must
+         // reproduce the already selected E4 weight while waiting for the
+         // next heartbeat; hardware cycles always take the ramp branch above.
+         #Decoupler_Weight_State := #Decoupler_Weight_Safe;
       END_IF;
    ELSE
       #Decoupler_Weight_State := 0.0;
    END_IF;
+   #Decoupler_Weight_Applied_Out := #Decoupler_Weight_State;
    IF #Decoupler_Active THEN
       #q_f_correction := #Direct_q_f_Correction
          + #Decoupler_Weight_State * (#Decoupled_q_f_Correction - #Direct_q_f_Correction);
@@ -1760,10 +2273,18 @@ BEGIN
    IF #pH_Integral > 8.0 THEN #pH_Integral := 8.0; END_IF;
    IF #pH_Integral < -8.0 THEN #pH_Integral := -8.0; END_IF;
    #Delta_q_f_Out := #q_f_correction;
-   #Delta_q_a_Out := #q_a_correction;
+   IF #Controller_Mode = 2 THEN
+      #Delta_q_a_Out := #pH_Pulse_Demand;
+   ELSE
+      #Delta_q_a_Out := #q_a_correction;
+   END_IF;
 
    #q_f_pid := #q_f_feedforward + #q_f_correction;
-   #q_a_pid := #q_a_feedforward + #q_a_correction;
+   IF #Controller_Mode = 2 THEN
+      #q_a_pid := #pH_Pulse_Demand;
+   ELSE
+      #q_a_pid := #q_a_feedforward + #q_a_correction;
+   END_IF;
    #q_f_raw := #q_f_pid;
    #q_a_raw := #q_a_pid;
    #q_f_Feedforward_Out := #q_f_feedforward;
@@ -1777,6 +2298,9 @@ BEGIN
    IF #q_f_target > #q_f_max THEN #q_f_target := #q_f_max; END_IF;
    IF #q_a_target < #q_a_min THEN #q_a_target := #q_a_min; END_IF;
    IF #q_a_target > #q_a_max THEN #q_a_target := #q_a_max; END_IF;
+
+   #Decoupling_Limited_Out := #Decoupler_Active AND (#pH_Pulse_Demand > 0.0)
+      AND ((#q_f_raw < #q_f_min) OR (#q_f_raw > #q_f_max));
 
    // 反算 anti-windup：原始需求越过物理边界时把积分缓慢拉回。
    IF ((#q_f_raw > #q_f_max) AND (#EC_Error_Raw > 0.0)) OR ((#q_f_raw < #q_f_min) AND (#EC_Error_Raw < 0.0)) THEN
@@ -1796,6 +2320,9 @@ BEGIN
    #q_a_cmd := #inst_RL_A.output;
    #q_f_limited := #inst_RL_F.isLimited OR (#q_f_raw <> #q_f_target);
    #q_a_limited := #inst_RL_A.isLimited OR (#q_a_raw <> #q_a_target);
+   IF #Decoupler_Active AND (#pH_Pulse_Demand > 0.0) AND #q_f_limited THEN
+      #Decoupling_Limited_Out := TRUE;
+   END_IF;
    #EC_Error_Last := #EC_Error_Raw;
    #pH_Error_Last := #pH_Error_Raw;
 
@@ -2362,6 +2889,10 @@ VERSION : 0.1
       Mode_Standby : Bool;
       Remote_Auto_Available : Bool;
       PID_Control_Enable : Bool;
+      Gain_Desired_Point : Int;
+      Gain_q_f_Estimate : Real;
+      Effective_Decoupler_Enable : Bool;
+      Control_CycleTime : Real;
    END_VAR
 
 BEGIN
@@ -2403,16 +2934,110 @@ BEGIN
       Mode_Standby => #Mode_Standby
    );
 
-   // Publish the resolved mode. The previous implementation only exposed the
-   // requested bits, which made a successful manual-mode handshake
-   // indistinguishable from a standby/interlocked state to Python.
-   "DB1".Manual_Active := #Mode_Manual;
-   "DB1".Auto_Active := #Mode_Remote_Auto OR #Mode_Stage_Auto OR #Mode_Local_Auto;
-   "DB1".Manual_PumpValve_Enable := #Mode_Manual AND NOT "DB1".Emergency_Stop;
-   "DB1".Manual_q_f_Selected := "DB1".Manual_q_f_Set;
-   "DB1".Manual_q_a_Selected := "DB1".Manual_q_a_Set;
+   // Manual_Active, Auto_Active, Manual_PumpValve_Enable and the two manual
+   // flow selections are discrete interlocks owned by FC_ModeInterlock_LAD.
+   // Do not assign them again in SCL; one tag must have one logic owner.
 
    #PID_Control_Enable := #Mode_Manual OR #Mode_Remote_Auto OR #Mode_Stage_Auto OR #Mode_Local_Auto;
+
+   // PLC-native low/medium/high gain schedule. Python only commissions the
+   // table; normal selection, hysteresis and bumpless handoff run in the CPU.
+   "DB1".Gain_Schedule_Valid := "DB1".Gain_Low_Valid
+      AND "DB1".Gain_Mid_Valid AND "DB1".Gain_High_Valid
+      AND ("DB1".Gain_Low_G_EC_F > 0.000001) AND ("DB1".Gain_Low_G_pH_A < -0.000001)
+      AND ("DB1".Gain_Mid_G_EC_F > 0.000001) AND ("DB1".Gain_Mid_G_pH_A < -0.000001)
+      AND ("DB1".Gain_High_G_EC_F > 0.000001) AND ("DB1".Gain_High_G_pH_A < -0.000001)
+      AND ("DB1".Gain_Low_EC_SP > 0.0)
+      AND ("DB1".Gain_Mid_EC_SP > 0.0)
+      AND ("DB1".Gain_High_EC_SP > 0.0)
+      AND ("DB1".Gain_Low_q_f < "DB1".Gain_Mid_q_f)
+      AND ("DB1".Gain_Mid_q_f < "DB1".Gain_High_q_f)
+      AND ("DB1".Gain_LM_Threshold < "DB1".Gain_MH_Threshold)
+      AND ("DB1".Gain_Schedule_Hysteresis >= 0.0)
+      AND ("DB1".Gain_Min_Hold_s >= 0.0);
+
+   IF ("DB1".EC_Set_SP > 0.0) AND ("DB1".EC_Set_SP < 34.0) THEN
+      #Gain_q_f_Estimate := ("DB1".EC_Set_SP * 136.0) / (35.0 - "DB1".EC_Set_SP);
+   ELSE
+      #Gain_q_f_Estimate := 0.0;
+   END_IF;
+   IF ("DB1".Gain_Point_Override >= 0) AND ("DB1".Gain_Point_Override <= 2) THEN
+      #Gain_Desired_Point := "DB1".Gain_Point_Override;
+   ELSIF "DB1".Active_Gain_Point = 0 THEN
+      IF #Gain_q_f_Estimate > ("DB1".Gain_LM_Threshold + "DB1".Gain_Schedule_Hysteresis) THEN
+         #Gain_Desired_Point := 1;
+      ELSE
+         #Gain_Desired_Point := 0;
+      END_IF;
+   ELSIF "DB1".Active_Gain_Point = 2 THEN
+      IF #Gain_q_f_Estimate < ("DB1".Gain_MH_Threshold - "DB1".Gain_Schedule_Hysteresis) THEN
+         #Gain_Desired_Point := 1;
+      ELSE
+         #Gain_Desired_Point := 2;
+      END_IF;
+   ELSE
+      IF #Gain_q_f_Estimate < ("DB1".Gain_LM_Threshold - "DB1".Gain_Schedule_Hysteresis) THEN
+         #Gain_Desired_Point := 0;
+      ELSIF #Gain_q_f_Estimate > ("DB1".Gain_MH_Threshold + "DB1".Gain_Schedule_Hysteresis) THEN
+         #Gain_Desired_Point := 2;
+      ELSE
+         #Gain_Desired_Point := 1;
+      END_IF;
+   END_IF;
+
+   IF "DB1".Gain_Schedule_Enable AND "DB1".Gain_Schedule_Valid THEN
+      IF "DB1".Gain_Hold_Elapsed_s < 3600.0 THEN
+         "DB1".Gain_Hold_Elapsed_s := "DB1".Gain_Hold_Elapsed_s + 0.1;
+      END_IF;
+      IF "DB1".Active_Gain_Point < 0 THEN
+         "DB1".Gain_Switch_Pending := TRUE;
+      ELSIF (#Gain_Desired_Point <> "DB1".Active_Gain_Point)
+         AND ("DB1".Gain_Hold_Elapsed_s >= "DB1".Gain_Min_Hold_s) THEN
+         "DB1".Gain_Switch_Pending := TRUE;
+      END_IF;
+
+      // Pending makes the effective enable FALSE below. The FB ramps its
+      // applied weight to zero before this block replaces the active matrix.
+      IF "DB1".Gain_Switch_Pending AND ("DB1".Decoupler_Weight_Applied <= 0.01) THEN
+         IF #Gain_Desired_Point = 0 THEN
+            "DB1".G_EC_F := "DB1".Gain_Low_G_EC_F;
+            "DB1".G_EC_A := "DB1".Gain_Low_G_EC_A;
+            "DB1".G_pH_F := "DB1".Gain_Low_G_pH_F;
+            "DB1".G_pH_A := "DB1".Gain_Low_G_pH_A;
+            "DB1".IMC_Tau_EC_s := "DB1".Gain_Low_Tau_s;
+            "DB1".IMC_Delay_s := "DB1".Gain_Low_Delay_s;
+            "DB1".Mixing_Delay_s := "DB1".Gain_Low_Delay_s;
+            "DB1".Active_Gain_EC_SP := "DB1".Gain_Low_EC_SP;
+            "DB1".Active_Gain_q_f := "DB1".Gain_Low_q_f;
+         ELSIF #Gain_Desired_Point = 1 THEN
+            "DB1".G_EC_F := "DB1".Gain_Mid_G_EC_F;
+            "DB1".G_EC_A := "DB1".Gain_Mid_G_EC_A;
+            "DB1".G_pH_F := "DB1".Gain_Mid_G_pH_F;
+            "DB1".G_pH_A := "DB1".Gain_Mid_G_pH_A;
+            "DB1".IMC_Tau_EC_s := "DB1".Gain_Mid_Tau_s;
+            "DB1".IMC_Delay_s := "DB1".Gain_Mid_Delay_s;
+            "DB1".Mixing_Delay_s := "DB1".Gain_Mid_Delay_s;
+            "DB1".Active_Gain_EC_SP := "DB1".Gain_Mid_EC_SP;
+            "DB1".Active_Gain_q_f := "DB1".Gain_Mid_q_f;
+         ELSE
+            "DB1".G_EC_F := "DB1".Gain_High_G_EC_F;
+            "DB1".G_EC_A := "DB1".Gain_High_G_EC_A;
+            "DB1".G_pH_F := "DB1".Gain_High_G_pH_F;
+            "DB1".G_pH_A := "DB1".Gain_High_G_pH_A;
+            "DB1".IMC_Tau_EC_s := "DB1".Gain_High_Tau_s;
+            "DB1".IMC_Delay_s := "DB1".Gain_High_Delay_s;
+            "DB1".Mixing_Delay_s := "DB1".Gain_High_Delay_s;
+            "DB1".Active_Gain_EC_SP := "DB1".Gain_High_EC_SP;
+            "DB1".Active_Gain_q_f := "DB1".Gain_High_q_f;
+         END_IF;
+         "DB1".Active_Gain_Point := #Gain_Desired_Point;
+         "DB1".Gain_Hold_Elapsed_s := 0.0;
+         "DB1".Gain_Switch_Pending := FALSE;
+      END_IF;
+   ELSE
+      "DB1".Gain_Switch_Pending := FALSE;
+      "DB1".Gain_Hold_Elapsed_s := 0.0;
+   END_IF;
 
    // Validate the decoupling contract before any mode-specific early return.
    // This keeps DB1 diagnostics current while the PLC is in standby or E-stop.
@@ -2433,6 +3058,11 @@ BEGIN
    IF "DB1".Decoupler_Enable AND NOT "DB1".Decoupler_Valid THEN
       "DB1".Decoupler_Enable := FALSE;
    END_IF;
+   #Effective_Decoupler_Enable := "DB1".Decoupler_Enable
+      AND ("DB1".Controller_Mode = 2)
+      AND NOT "DB1".Gain_Switch_Pending
+      AND ("DB1".E4_Approved OR ("DB1".E4_Test_Enable AND "DB1".Remote_Comms_OK));
+   "DB1".Decoupler_Active_Diag := #Effective_Decoupler_Enable AND "DB1".Decoupler_Valid;
 
    IF #Mode_EStop THEN
       "DB1".q_f_cmd := 0.0;
@@ -2479,6 +3109,28 @@ BEGIN
       RETURN;
    END_IF;
 
+   // Remote residual command: clamp first, then resolve the absolute EC target.
+   // Legacy HMIs may still write EC_Set_SP directly when residual fields are 0.
+   IF #Mode_Remote_Auto THEN
+      IF "DB1".Water_Multiplier_SP < 0.8 THEN "DB1".Water_Multiplier_SP := 0.8; END_IF;
+      IF "DB1".Water_Multiplier_SP > 1.2 THEN "DB1".Water_Multiplier_SP := 1.2; END_IF;
+      IF "DB1".EC_Residual_SP < -0.15 THEN "DB1".EC_Residual_SP := -0.15; END_IF;
+      IF "DB1".EC_Residual_SP > 0.15 THEN "DB1".EC_Residual_SP := 0.15; END_IF;
+      IF "DB1".Growth_Stage = 0 THEN
+         "DB1".EC_Set_SP := 0.8 + "DB1".EC_Residual_SP;
+      ELSIF "DB1".Growth_Stage = 1 THEN
+         "DB1".EC_Set_SP := 1.1 + "DB1".EC_Residual_SP;
+      ELSIF "DB1".Growth_Stage = 2 THEN
+         "DB1".EC_Set_SP := 1.5 + "DB1".EC_Residual_SP;
+      ELSE
+         "DB1".EC_Set_SP := 1.0 + "DB1".EC_Residual_SP;
+      END_IF;
+      "DB1".pH_Set_SP := ("DB1".pH_Band_Low + "DB1".pH_Band_High) * 0.5;
+      IF "DB1".Batch_Water_Target_L > 0.0 THEN
+         "DB1".Water_Volume_SP := "DB1".Batch_Water_Target_L;
+      END_IF;
+   END_IF;
+
    IF #Mode_Stage_Auto THEN
       IF "DB1".Growth_Stage = 0 THEN
          "DB1".EC_Set_SP := 0.8;
@@ -2509,6 +3161,15 @@ BEGIN
       END_IF;
    END_IF;
 
+   // Accelerated E4 HIL advances controller dynamics once per new Python
+   // heartbeat. Hardware and all normal PLC modes keep the real 0.1 s cycle.
+   IF "DB1".E4_Test_Enable AND "DB1".E4_Compressed_Time_Enable
+      AND ("DB1".E4_Sim_Step_s >= 0.1) AND ("DB1".E4_Sim_Step_s <= 300.0) THEN
+      #Control_CycleTime := "DB1".E4_Sim_Step_s;
+   ELSE
+      #Control_CycleTime := 0.1;
+   END_IF;
+
    "inst_FertigationControl"(
       EC_Set_SP := "DB1".EC_Set_SP,
       pH_Set_SP := "DB1".pH_Set_SP,
@@ -2520,7 +3181,9 @@ BEGIN
       Local_EC_Bias := 0.0,
       Local_pH_Bias := 0.0,
       Remote_Heartbeat := "DB1".Remote_Heartbeat,
-      CycleTime := 0.1,
+      CycleTime := #Control_CycleTime,
+      E4_Compressed_Timing_Enable := "DB1".E4_Test_Enable
+         AND "DB1".E4_Compressed_Time_Enable,
       Kp_EC := "DB1".Kp_EC_Set,
       Ki_EC := "DB1".Ki_EC_Set,
       Kd_EC := "DB1".Kd_EC_Set,
@@ -2539,7 +3202,7 @@ BEGIN
       q_f_max := "DB1".q_f_max,
       q_a_min := "DB1".q_a_min,
       q_a_max := "DB1".q_a_max,
-      Decoupler_Enable := "DB1".Decoupler_Enable,
+      Decoupler_Enable := #Effective_Decoupler_Enable,
       Decoupler_Valid := "DB1".Decoupler_Valid,
       G_EC_F := "DB1".G_EC_F,
       G_EC_A := "DB1".G_EC_A,
@@ -2577,6 +3240,17 @@ BEGIN
       NPK_Feedback_Valid := "DB1".NPK_Feedback_Valid AND "DB1".Remote_Comms_OK,
       Compressed_HIL_Enable := "DB1".Compressed_HIL_Enable AND "DB1".Remote_Comms_OK,
       Fixed_PID_Test_Enable := "DB1".Fixed_PID_Test_Enable AND "DB1".Remote_Comms_OK,
+      Controller_Mode := "DB1".Controller_Mode,
+      pH_Band_Low := "DB1".pH_Band_Low,
+      pH_Band_High := "DB1".pH_Band_High,
+      pH_Pulse_On_s := "DB1".pH_Pulse_On_s,
+      pH_Pulse_Off_s := "DB1".pH_Pulse_Off_s,
+      pH_Pulse_Flow := "DB1".pH_Pulse_Flow,
+      IMC_Lambda_EC_s := "DB1".IMC_Lambda_EC_s,
+      IMC_Tau_EC_s := "DB1".IMC_Tau_EC_s,
+      IMC_Delay_s := "DB1".IMC_Delay_s,
+      IMC_EC_Operating_SP := "DB1".Active_Gain_EC_SP,
+      IMC_q_f_Operating := "DB1".Active_Gain_q_f,
       Remote_Comms_OK => "DB1".Remote_Comms_OK,
       Watchdog_Timer => "DB1".Watchdog_Timer,
       Stage_EC_SP => "DB1".Stage_EC_SP,
@@ -2623,27 +3297,48 @@ BEGIN
       Feedforward_Hold_Active_Out => "DB1".Feedforward_Hold_Active,
       Adaptive_PID_Active_Out => "DB1".Adaptive_PID_Active,
       Delta_q_f_Out => "DB1".Delta_q_f,
-      Delta_q_a_Out => "DB1".Delta_q_a
+      Delta_q_a_Out => "DB1".Delta_q_a,
+      pH_Safety_Active_Out => "DB1".pH_Safety_Active,
+      pH_Flush_Request_Out => "DB1".pH_Flush_Request,
+      Batch_Reject_Out => "DB1".Batch_Reject,
+      IMC_Smith_Active_Out => "DB1".IMC_Smith_Active,
+      Smith_EC_Predicted_Out => "DB1".Smith_EC_Predicted,
+      Decoupling_Limited_Out => "DB1".Decoupling_Limited,
+      Decoupler_Weight_Applied_Out => "DB1".Decoupler_Weight_Applied
    );
+
+   // Volume diagnostics are reset with the batch and integrated only while
+   // the batch is active. Values are engineering-unit estimates until E1 pump
+   // calibration replaces command flow with measured flow.
+   "DB1".Water_Accumulated_L := "DB1".Water_Volume_Actual;
+   IF "DB1".Water_Pump_Reset THEN
+      "DB1".Fertilizer_Accumulated_L := 0.0;
+      "DB1".Acid_Accumulated_L := 0.0;
+   ELSIF "DB1".Water_Batch_Active THEN
+      "DB1".Fertilizer_Accumulated_L := "DB1".Fertilizer_Accumulated_L
+         + "DB1".q_f_cmd * 0.1 / 60.0;
+      "DB1".Acid_Accumulated_L := "DB1".Acid_Accumulated_L
+         + "DB1".q_a_cmd * 0.1 / 60.0;
+   END_IF;
 
    // Manual commissioning bypasses EC/pH PID and writes the requested flow
    // values to the same bounded command variables used by the execution layer.
    // This is deliberately limited to Manual_Mode; automatic and SAC paths
    // remain entirely inside FB_FertigationControl.
    IF #Mode_Manual THEN
-      "DB1".q_f_cmd := "DB1".Manual_q_f_Set;
+      "DB1".q_f_cmd := "DB1".Manual_q_f_Selected;
       IF "DB1".q_f_cmd < "DB1".q_f_min THEN "DB1".q_f_cmd := "DB1".q_f_min; END_IF;
       IF "DB1".q_f_cmd > "DB1".q_f_max THEN "DB1".q_f_cmd := "DB1".q_f_max; END_IF;
-      "DB1".q_a_cmd := "DB1".Manual_q_a_Set;
+      "DB1".q_a_cmd := "DB1".Manual_q_a_Selected;
       IF "DB1".q_a_cmd < "DB1".q_a_min THEN "DB1".q_a_cmd := "DB1".q_a_min; END_IF;
       IF "DB1".q_a_cmd > "DB1".q_a_max THEN "DB1".q_a_cmd := "DB1".q_a_max; END_IF;
       "DB1".q_n_cmd := "DB1".Manual_q_n_Set;
       "DB1".q_p_cmd := "DB1".Manual_q_p_Set;
       "DB1".q_k_cmd := "DB1".Manual_q_k_Set;
-      "DB1".q_f_limited := ("DB1".q_f_cmd <> "DB1".Manual_q_f_Set);
-      "DB1".q_a_limited := ("DB1".q_a_cmd <> "DB1".Manual_q_a_Set);
-      "DB1".q_f_raw := "DB1".Manual_q_f_Set;
-      "DB1".q_a_raw := "DB1".Manual_q_a_Set;
+      "DB1".q_f_limited := ("DB1".q_f_cmd <> "DB1".Manual_q_f_Selected);
+      "DB1".q_a_limited := ("DB1".q_a_cmd <> "DB1".Manual_q_a_Selected);
+      "DB1".q_f_raw := "DB1".Manual_q_f_Selected;
+      "DB1".q_a_raw := "DB1".Manual_q_a_Selected;
    END_IF;
 
    // 测试反馈和压缩 HIL 标志在通信超时后自动恢复真实设备默认。

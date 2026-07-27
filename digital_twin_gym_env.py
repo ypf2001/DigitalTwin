@@ -4,10 +4,11 @@ Gymnasium 标准环境封装 — DigitalTwinGymEnv
 
 将 DigitalTwinEnv 封装为标准 Gymnasium 环境。
 
-B 方案：SAC 动作不再是 q_f/q_a，而是上层水肥目标值：
-    action = [EC_set, pH_set]
+B 方案 V2：SAC 只做阶段基线附近的残差决策：
+    action = [water_multiplier, EC_residual]
 
-底层 q_f/q_a 由 DigitalTwinEnv 内部的执行层模型计算，真实部署时由 PLC-PID 计算。
+底层 EC/pH 和泵阀控制由 DigitalTwinEnv/PLC 完成；pH 维持安全带，
+不再作为 SAC 动作。
 """
 
 import gymnasium as gym
@@ -16,6 +17,7 @@ import numpy as np
 
 from digital_twin_env import DigitalTwinEnv, GrowthStage
 from config_loader import load_config
+from residual_action import ResidualActionProjector
 
 
 STAGE_MAP = {
@@ -53,10 +55,14 @@ class DigitalTwinGymEnv(gym.Env):
                  reward_scale: float = 1.0,
                  seed: int = None,
                  soil_model: str = None,
-                 domain_randomization: bool = False):
+                 domain_randomization: bool = False,
+                 stage_aware: bool = False):
         super().__init__()
 
-        if isinstance(growth_stage, str):
+        self.stage_aware = bool(stage_aware or str(growth_stage).upper() == "ALL")
+        if self.stage_aware:
+            stage = STAGE_MAP["MID"]
+        elif isinstance(growth_stage, str):
             stage = STAGE_MAP[growth_stage.upper()]
         else:
             stage = growth_stage
@@ -82,16 +88,10 @@ class DigitalTwinGymEnv(gym.Env):
             low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32
         )
 
-        act = load_config().action()
+        self._action_projector = ResidualActionProjector()
         self.action_space = spaces.Box(
-            low=np.array([
-                act.get("ec_set_min", 0.8),
-                act.get("ph_set_min", 5.8),
-            ], dtype=np.float32),
-            high=np.array([
-                act.get("ec_set_max", 2.5),
-                act.get("ph_set_max", 6.8),
-            ], dtype=np.float32),
+            low=self._action_projector.low,
+            high=self._action_projector.high,
             dtype=np.float32,
         )
 
@@ -104,8 +104,15 @@ class DigitalTwinGymEnv(gym.Env):
     def reset(self, seed=None, options=None):
         if seed is not None:
             self._env._rng = np.random.RandomState(seed)
+        if self.stage_aware:
+            names = list(STAGE_MAP)
+            selected = names[int(self._env._rng.randint(0, len(names)))]
+            self._env.set_growth_stage(STAGE_MAP[selected])
         obs = self._env.reset()
-        return self._normalize_obs(obs), {}
+        return self._normalize_obs(obs), {
+            "growth_stage": self.current_stage.value,
+            "stage_aware": self.stage_aware,
+        }
 
     def step(self, action):
         obs, reward, done, info = self._env.step(action)

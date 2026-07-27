@@ -1,21 +1,6 @@
-"""
-PLC 在环 Gymnasium 环境 — PLCGymEnv
-=====================================
-
-B 方案 HIL/PLCSIM 闭环：
-
-    Agent action [EC_set, pH_set]
-        ↓
-    Python 写入 PLC/PLCSIM：EC_Set_SP、pH_Set_SP、EC_Actual、pH_Actual
-        ↓
-    PLC/PLCSIM 内部 EC-PID、pH-PID 计算 q_f_cmd、q_a_cmd
-        ↓
-    Python 回读 q_f_cmd、q_a_cmd，并驱动数字孪生模型推进田间状态
-
-说明
+""" 
 ----
-DigitalTwinGymEnv 纯仿真模式仍使用内部 SetpointToFlowController；
-PLCGymEnv 则用 PLC/PLCSIM 作为执行层，更接近真实系统。
+PLCGymEnv 用 PLC/PLCSIM 作为执行层，更接近真实系统。
 """
 
 import logging
@@ -70,20 +55,6 @@ class PLCGymEnv(gym.Env):
         self.feedback_filter_enabled = bool(feedback_filter_cfg.get("enabled", True))
         self.feedback_filter_alpha = float(feedback_filter_cfg.get("alpha", 0.8))
         self.feedback_filter_alpha = float(np.clip(self.feedback_filter_alpha, 0.0, 0.99))
-        self.plc_action_low = np.array(
-            [
-                float(action_cfg.get("plc_ec_set_min", 0.5)),
-                float(action_cfg.get("plc_ph_set_min", 5.5)),
-            ],
-            dtype=np.float32,
-        )
-        self.plc_action_high = np.array(
-            [
-                float(action_cfg.get("ec_set_max", 2.5)),
-                float(action_cfg.get("ph_set_max", 6.8)),
-            ],
-            dtype=np.float32,
-        )
         self._ec_actual_filtered = None
         self._ph_actual_filtered = None
         self._soil_ph_est = 7.0
@@ -176,21 +147,25 @@ class PLCGymEnv(gym.Env):
     def step(self, action):
         """执行一个 PLC 在环控制步。
 
-        action 为 SAC 输出的 [EC_set, pH_set]。如果启用 PLC，则 PLC 执行层计算 q_f/q_a；
+        action 为 SAC 输出的 [water_multiplier, EC_residual]。如果启用 PLC，
+        PLC 执行层计算 q_f/q_a；
         如果未启用 PLC，则退化为 DigitalTwinGymEnv 的纯仿真执行层。
         """
         action = np.asarray(action, dtype=np.float32).flatten()
-        clip_low = self.plc_action_low if self.plc_enabled else self.action_space.low
-        clip_high = self.plc_action_high if self.plc_enabled else self.action_space.high
-        action_clipped = np.clip(action, clip_low, clip_high)
-        ec_set = float(action_clipped[0])
-        ph_set = float(action_clipped[1])
+        action_clipped = np.clip(action, self.action_space.low, self.action_space.high)
 
         if not self.plc_enabled:
             obs, reward, terminated, truncated, sim_info = self._sim_env.step(action_clipped)
             return obs, reward, terminated, truncated, self._build_info(sim_info)
 
         base = self._sim_env.unwrapped_env
+        projected = base.action_projector.project(
+            action_clipped,
+            stage_ec=base.crop.get_target_ec(base.current_stage),
+        )
+        ec_set = projected.ec_set
+        ph_set = projected.ph_nominal
+        base.water_pump.q_set_l_min = base._base_q_w * projected.water_multiplier
 
         # 1. 写入目标值和当前虚拟传感器值，供 PLC-PID 使用
         # EC target tracking is evaluated on root-zone soil EC, so feed the PLC
@@ -199,7 +174,14 @@ class PLCGymEnv(gym.Env):
         ph_actual = float(self._soil_ph_est)
         ec_actual, ph_actual = self._filter_feedback(ec_actual, ph_actual)
         self._sync_water_pump(base)
-        self._sync_plc_inputs(ec_set, ph_set, ec_actual, ph_actual)
+        self._sync_plc_inputs(
+            ec_set,
+            ph_set,
+            ec_actual,
+            ph_actual,
+            water_multiplier=projected.water_multiplier,
+            ec_residual=projected.ec_residual_ds_m,
+        )
         self._maybe_update_gain_schedule(self._stage_name(base.current_stage), self._last_plc_state)
         npk_targets_for_plc = self._npk_targets_for_stage(base.current_stage)
         self.plc.write_fertilizer_feedback(
@@ -252,6 +234,9 @@ class PLCGymEnv(gym.Env):
         obs, reward, terminated, truncated, sim_info = self._step_with_plc_flows(
             ec_set=ec_set,
             ph_set=ph_set,
+            water_multiplier=projected.water_multiplier,
+            ec_residual=projected.ec_residual_ds_m,
+            action_was_clipped=projected.clipped,
             q_f=q_f,
             q_a=q_a,
             q_n=q_n,
@@ -264,6 +249,8 @@ class PLCGymEnv(gym.Env):
         return obs, reward, terminated, truncated, info
 
     def _step_with_plc_flows(self, ec_set: float, ph_set: float, q_f: float, q_a: float,
+                             water_multiplier: float = 1.0, ec_residual: float = 0.0,
+                             action_was_clipped: bool = False,
                              q_n: float = 0.0, q_p: float = 0.0, q_k: float = 0.0,
                              q_w: float = None, pump_state=None):
         """绕过内部 SetpointToFlowController，直接使用 PLC 输出 q_f/q_a 推进模型。"""
@@ -352,6 +339,16 @@ class PLCGymEnv(gym.Env):
             "soil_ph_est": self._soil_ph_est,
             "ec_set": ec_set,
             "ph_set": ph_set,
+            "water_multiplier": float(water_multiplier),
+            "ec_residual": float(ec_residual),
+            "action_clipped": bool(action_was_clipped),
+            "ph_band_low": base.ph_band_controller.lower,
+            "ph_band_high": base.ph_band_controller.upper,
+            "ph_band_violation": max(
+                base.ph_band_controller.lower - ph_drip,
+                ph_drip - base.ph_band_controller.upper,
+                0.0,
+            ),
             "etc_mm_h": et_mm_h,
             "target_ec": base.crop.get_target_ec(base.current_stage),
             "irrigation_mm_h": irrigation_mm_h,
@@ -550,6 +547,8 @@ class PLCGymEnv(gym.Env):
                          ph_set: float,
                          ec_actual: float,
                          ph_actual: float,
+                         water_multiplier: float | None = None,
+                         ec_residual: float | None = None,
                          automatic_enable: bool = True) -> bool:
         """Synchronize one cycle without fighting PLC local manual mode."""
         mode_state = self.plc.read_control_mode()
@@ -562,6 +561,29 @@ class PLCGymEnv(gym.Env):
                 ec_actual=ec_actual,
                 ph_actual=ph_actual,
                 sac_enable=False,
+            )
+
+        write_residual = getattr(self.plc, "write_residual_command", None)
+        if water_multiplier is not None and ec_residual is not None and callable(write_residual):
+            experiment = load_config().thesis_experiment_v2()
+            ph_band = experiment.get("ph_band", {})
+            controller = experiment.get("controller", {})
+            stage_name = self._stage_name(self._sim_env.unwrapped_env.current_stage)
+            recipe_ids = {"INI": 0, "DEV": 1, "MID": 2, "LATE": 3}
+            return write_residual(
+                water_multiplier=water_multiplier,
+                ec_residual=ec_residual,
+                stage_ec=ec_set - ec_residual,
+                ec_actual=ec_actual,
+                ph_actual=ph_actual,
+                ph_band_low=float(ph_band.get("lower", 5.8)),
+                ph_band_high=float(ph_band.get("upper", 6.5)),
+                recipe_id=recipe_ids.get(stage_name, 0),
+                controller_mode=int(controller.get("modes", {}).get(
+                    controller.get("default_mode", "imc_pi_smith"), 2
+                )),
+                batch_water_target_l=self._sim_env.unwrapped_env.water_pump.target_volume_l,
+                sac_enable=automatic_enable,
             )
 
         return self._safe_write_setpoints(

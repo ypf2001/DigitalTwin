@@ -68,7 +68,7 @@ def test_no_carrier_water_forces_fertilizer_and_acid_off():
     env.reset()
     env.set_irrigation_command(enabled=False)
 
-    _, reward, _, info = env.step(np.array([1.5, 6.0], dtype=np.float32))
+    _, reward, _, info = env.step(np.array([1.0, 0.0], dtype=np.float32))
 
     assert np.isfinite(reward)
     assert info["q_w_actual"] == 0.0
@@ -91,18 +91,18 @@ def test_pre_and_post_flush_force_dosing_off_in_the_digital_twin():
         reset_volume=True,
     )
 
-    _, _, _, pre_info = env.step(np.array([1.5, 6.0], dtype=np.float32))
+    _, _, _, pre_info = env.step(np.array([1.0, 0.0], dtype=np.float32))
     assert pre_info["water_batch_phase"] == "pre_flush"
     assert pre_info["q_f"] == 0.0
     assert pre_info["q_a"] == 0.0
 
-    _, _, _, fert_info = env.step(np.array([1.5, 6.0], dtype=np.float32))
+    _, _, _, fert_info = env.step(np.array([1.0, 0.0], dtype=np.float32))
     assert fert_info["water_batch_phase"] == "fertigating"
     assert fert_info["fertigation_active"]
     assert fert_info["q_f"] > 0.0
 
     env.water_pump.volume_l = 9000.0
-    _, _, _, post_info = env.step(np.array([1.5, 6.0], dtype=np.float32))
+    _, _, _, post_info = env.step(np.array([1.0, 0.0], dtype=np.float32))
     assert post_info["water_batch_phase"] == "post_flush"
     assert post_info["q_f"] == 0.0
     assert post_info["q_a"] == 0.0
@@ -112,7 +112,7 @@ def test_default_environment_uses_dynamic_measured_water_flow():
     env = DigitalTwinEnv(obs_noise_std=0.0, ep_len_days=0.05)
     env.reset()
 
-    _, _, _, info = env.step(np.array([1.5, 6.0], dtype=np.float32))
+    _, _, _, info = env.step(np.array([1.0, 0.0], dtype=np.float32))
 
     assert info["q_w_set"] == 136.0
     assert 0.0 < info["q_w_actual"] <= info["q_w_set"]

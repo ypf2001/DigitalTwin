@@ -1,0 +1,28 @@
+PointID,SignalType,LogicalSource,Service,RangeOrState,Critical,PhysicalAddress,HardwareModel,CommissioningStatus
+AI-01,AI,DB_FieldIO.Raw[1],Outlet EC,4-20mA / 0-5dS/m,Yes,TBD,TBD,Not assigned
+AI-02,AI,DB_FieldIO.Raw[2],Outlet pH,4-20mA / 0-14pH,Yes,TBD,TBD,Not assigned
+AI-03,AI,DB_FieldIO.Raw[3],Mainline pressure,4-20mA / 0-6bar,Yes,TBD,TBD,Not assigned
+AI-04,AI,DB_FieldIO.Raw[4],Main pump speed feedback,4-20mA / 0-100%,Yes,TBD,TBD,Not assigned
+AI-05,AI,DB_FieldIO.Raw[5],N dosing flow,4-20mA / 0-4L/min,Yes,TBD,TBD,Not assigned
+AI-06,AI,DB_FieldIO.Raw[6],P dosing flow,4-20mA / 0-4L/min,Yes,TBD,TBD,Not assigned
+AI-07,AI,DB_FieldIO.Raw[7],K dosing flow,4-20mA / 0-4L/min,Yes,TBD,TBD,Not assigned
+AI-08,AI,DB_FieldIO.Raw[8],Acid dosing flow,4-20mA / 0-4L/min,Yes,TBD,TBD,Not assigned
+HSC-01,HSC,DB_FieldIO.HSC_Water_Frequency_Hz,Carrier-water flow,Pulse frequency / calibrated K factor,Yes,TBD,TBD,Not assigned
+AO-01,AO,DB_FieldIO.AO_Water_Final,Main pump VFD,0/4-20mA,Yes,TBD,TBD,Disabled
+AO-02,AO,DB_FieldIO.AO_N_Final,N metering pump,0/4-20mA,Yes,TBD,TBD,Disabled
+AO-03,AO,DB_FieldIO.AO_P_Final,P metering pump,0/4-20mA,Yes,TBD,TBD,Disabled
+AO-04,AO,DB_FieldIO.AO_K_Final,K metering pump,0/4-20mA,Yes,TBD,TBD,Disabled
+AO-05,AO,DB_FieldIO.AO_Acid_Final,Acid metering pump,0/4-20mA,Yes,TBD,TBD,Disabled
+DO-01,DO,DB_FieldIO.DO_Water_Run_Final,Main pump run,Run/stop,Yes,TBD,TBD,Disabled
+DO-02,DO,DB_FieldIO.DO_N_Run_Final,N pump run,Run/stop,Yes,TBD,TBD,Disabled
+DO-03,DO,DB_FieldIO.DO_P_Run_Final,P pump run,Run/stop,Yes,TBD,TBD,Disabled
+DO-04,DO,DB_FieldIO.DO_K_Run_Final,K pump run,Run/stop,Yes,TBD,TBD,Disabled
+DO-05,DO,DB_FieldIO.DO_Acid_Run_Final,Acid pump run,Run/stop,Yes,TBD,TBD,Disabled
+DI-ESTOP,DI,DB_FieldIO.DI_Physical_EStop_OK,E-stop auxiliary feedback,Healthy=1,Yes,TBD,TBD,Not assigned
+DI-KEY,DI,DB_FieldIO.DI_Commissioning_Key_Active,Commissioning key,Active=1,Yes,TBD,TBD,Not assigned
+DI-WATER,DI,DB_FieldIO.DI_Water_*,Main pump ready/run/fault/source low,Multiple dry contacts,Yes,TBD,TBD,Not assigned
+DI-N,DI,DB_FieldIO.DI_N_*,N pump ready/run/fault/tank low,Multiple dry contacts,Yes,TBD,TBD,Not assigned
+DI-P,DI,DB_FieldIO.DI_P_*,P pump ready/run/fault/tank low,Multiple dry contacts,Yes,TBD,TBD,Not assigned
+DI-K,DI,DB_FieldIO.DI_K_*,K pump ready/run/fault/tank low,Multiple dry contacts,Yes,TBD,TBD,Not assigned
+DI-ACID,DI,DB_FieldIO.DI_Acid_*,Acid pump ready/run/fault/tank low,Multiple dry contacts,Yes,TBD,TBD,Not assigned
+RESERVE,Capacity,TBD,Expansion reserve,At least 20% per signal family,No,TBD,TBD,Reserved

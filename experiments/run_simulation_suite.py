@@ -74,7 +74,7 @@ def run_short_fixed(stage: GrowthStage, out_dir: Path, image_dir: Path) -> dict[
 
     作用：
     - 用 config/simulation.yaml 中的默认环境参数创建 DigitalTwinEnv；
-    - 使用 action.fixed_strategy 作为固定 EC/pH 设定动作；
+    - 使用 action.fixed_strategy 作为固定残差动作 [water_multiplier, EC_residual]；
     - 导出 5 天左右的时序数据和图表。
 
     注意：
@@ -84,7 +84,7 @@ def run_short_fixed(stage: GrowthStage, out_dir: Path, image_dir: Path) -> dict[
     cfg = load_config()
     env_cfg = cfg.env()
     short_dt_min = cfg.get("experiment.short_dt_min", env_cfg.get("dt_min", 60.0))
-    action = np.array(cfg.action().get("fixed_strategy", [1.5, 6.0]), dtype=np.float32)
+    action = np.array(cfg.action().get("fixed_strategy", [1.0, 0.0]), dtype=np.float32)
 
     env = DigitalTwinEnv(
         growth_stage=stage,
@@ -185,7 +185,7 @@ def run_season_compare(out_dir: Path, image_dir: Path) -> dict[str, Any]:
 
     for strategy in ("T1", "T2"):
         # 每个策略单独创建环境，保证初始条件一致。
-        fixed_action = np.array(cfg.action().get("fixed_strategy", [1.5, 6.0]), dtype=np.float32)
+        fixed_action = np.array(cfg.action().get("fixed_strategy", [1.0, 0.0]), dtype=np.float32)
         env = DigitalTwinEnv(
             growth_stage=schedule[0].growth_stage,
             area_ha=season_cfg.get("area_ha", 0.1),

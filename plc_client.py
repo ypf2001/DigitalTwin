@@ -2,8 +2,9 @@
 PLC 通讯客户端 — PLCClient
 ============================
 
-B 方案通讯约定：
-- Python/SAC 写入上层目标值 EC_Set_SP、pH_Set_SP，以及数字孪生/传感器反馈 EC_Actual、pH_Actual；
+- Python/SAC 写入 water_multiplier、EC residual 和批次参数；
+- PLC 将阶段 EC 基线与残差合成绝对目标，pH 只执行 5.8~6.5 安全带；
+- EC_Set_SP/pH_Set_SP 继续保留，供旧调试脚本和兼容模式使用；
 - PLC/PLCSIM 内部运行 EC-PID、pH-PID，输出 q_f_cmd、q_a_cmd 或阀门开度；
 - Python 回读 PLC 执行结果，用于驱动数字孪生模型或记录半实物在环试验。
 """
@@ -178,6 +179,11 @@ class PLCClient:
         addr = self._addr(name)
         raw = self._client.db_read(self.db_number, int(addr["offset"]), 4)
         return float(get_real(raw, 0))
+
+    def _read_int(self, name: str) -> int:
+        addr = self._addr(name)
+        raw = self._client.db_read(self.db_number, int(addr["offset"]), 2)
+        return int(get_int(raw, 0))
 
     def _read_bool(self, name: str) -> bool:
         addr = self._addr(name)
@@ -404,6 +410,179 @@ class PLCClient:
             return False
         except Exception as exc:
             logger.error("[PLC] active gain write failed: %s", exc)
+            return False
+
+    def write_gain_schedule_table(self, schedule: dict, *, parameter_version: int = 1,
+                                  pulse_flow: float = 0.8, verify: bool = True) -> bool:
+        """Write a passed three-point E3 table without approving E4."""
+        try:
+            stages = schedule.get("stages", schedule.get("gain_schedule", {}).get("stages", {}))
+            points = {str(point["id"]): point for point in stages["MID"]["points"]}
+            if set(points) != {"low", "medium", "high"}:
+                raise ValueError("gain schedule requires exactly low/medium/high MID points")
+            if not bool(schedule.get("e3_passed", schedule.get("gain_schedule", {}).get("e3_passed", False))):
+                raise ValueError("refusing a gain schedule that has not passed E3")
+            if not 0 <= int(parameter_version) <= 32767:
+                raise ValueError("parameter_version must fit a PLC Int")
+            if not math.isfinite(float(pulse_flow)) or not 0.0 <= float(pulse_flow) <= 4.0:
+                raise ValueError("pulse_flow must be within [0, 4] L/min")
+            selection = schedule.get("selection", schedule.get("gain_schedule", {}).get("selection", {}))
+            prefixes = {"low": "Gain_Low", "medium": "Gain_Mid", "high": "Gain_High"}
+            required = [
+                "Gain_LM_Threshold", "Gain_MH_Threshold", "Gain_Schedule_Hysteresis",
+                "Gain_Min_Hold_s", "pH_Pulse_Flow", "E3_Parameter_Version",
+                "Active_Gain_Point", "E4_Approved", "Gain_Schedule_Enable",
+                "E4_Test_Enable", "Gain_Point_Override",
+            ]
+            for prefix in prefixes.values():
+                required.extend([
+                    f"{prefix}_G_EC_F", f"{prefix}_G_EC_A", f"{prefix}_G_pH_F",
+                    f"{prefix}_G_pH_A", f"{prefix}_Tau_s", f"{prefix}_Delay_s",
+                    f"{prefix}_q_f", f"{prefix}_EC_SP", f"{prefix}_Valid",
+                ])
+            missing = [name for name in required if name not in self.addr_map]
+            if missing:
+                raise ValueError(f"gain schedule DB1 mapping missing: {missing}")
+
+            self._ensure_connected()
+            self._write_bool("Decoupler_Enable", False)
+            self._write_bool("E4_Approved", False)
+            self._write_bool("E4_Test_Enable", False)
+            self._write_bool("Gain_Schedule_Enable", False)
+            for prefix in prefixes.values():
+                self._write_bool(f"{prefix}_Valid", False)
+            for name, prefix in prefixes.items():
+                point = points[name]
+                diagnostics = __import__("plc_control.gain_schedule", fromlist=["gain_diagnostics"]).gain_diagnostics(point)
+                if not point.get("valid", False) or not diagnostics["valid"] or diagnostics["condition_number"] > 10.0:
+                    raise ValueError(f"invalid {name} gain point")
+                gains = point["gains"]
+                for suffix, key in (
+                    ("G_EC_F", "g_ec_f"), ("G_EC_A", "g_ec_a"),
+                    ("G_pH_F", "g_ph_f"), ("G_pH_A", "g_ph_a"),
+                ):
+                    self._write_real(f"{prefix}_{suffix}", float(gains[key]))
+                self._write_real(f"{prefix}_Tau_s", float(point["tau_s"]))
+                self._write_real(f"{prefix}_Delay_s", float(point["delay_s"]))
+                self._write_real(f"{prefix}_q_f", float(point["q_f"]))
+                self._write_real(f"{prefix}_EC_SP", float(point["ec"]))
+            self._write_real("Gain_LM_Threshold", float(selection["low_medium_threshold"]))
+            self._write_real("Gain_MH_Threshold", float(selection["medium_high_threshold"]))
+            self._write_real("Gain_Schedule_Hysteresis", float(selection.get("hysteresis", 0.0)))
+            self._write_real("Gain_Min_Hold_s", float(selection.get("minimum_hold_s", 60.0)))
+            self._write_real("pH_Pulse_Flow", float(pulse_flow))
+            self._write_int("E3_Parameter_Version", int(parameter_version))
+            self._write_int("Active_Gain_Point", -1)
+            self._write_int("Gain_Point_Override", -1)
+            for prefix in prefixes.values():
+                self._write_bool(f"{prefix}_Valid", True)
+            self._write_bool("Gain_Schedule_Enable", True)
+            if not verify:
+                return True
+            return (
+                self._read_bool("Gain_Schedule_Enable")
+                and all(self._read_bool(f"{prefix}_Valid") for prefix in prefixes.values())
+                and self._read_int("E3_Parameter_Version") == int(parameter_version)
+            )
+        except Exception as exc:
+            logger.error("[PLC] gain schedule table write failed: %s", exc)
+            try:
+                self._write_bool("Gain_Schedule_Enable", False)
+                self._write_bool("Decoupler_Enable", False)
+            except Exception:
+                pass
+            return False
+
+    def set_gain_point_override(self, point: int | None, verify: bool = True) -> bool:
+        value = -1 if point is None else int(point)
+        if value not in (-1, 0, 1, 2):
+            raise ValueError("gain point override must be None, 0, 1, or 2")
+        try:
+            self._write_int("Gain_Point_Override", value)
+            return not verify or self._read_int("Gain_Point_Override") == value
+        except Exception as exc:
+            logger.error("[PLC] gain point override write failed: %s", exc)
+            return False
+
+    def set_e4_test_enabled(self, enabled: bool, verify: bool = True) -> bool:
+        """Open the temporary E4 gate; final approval remains FALSE."""
+        try:
+            self._write_bool("E4_Approved", False)
+            self._write_bool("E4_Test_Enable", bool(enabled))
+            if not enabled and "E4_Compressed_Time_Enable" in self.addr_map:
+                self._write_bool("E4_Compressed_Time_Enable", False)
+            return not verify or self._read_bool("E4_Test_Enable") == bool(enabled)
+        except Exception as exc:
+            logger.error("[PLC] E4 test gate write failed: %s", exc)
+            return False
+
+    def set_e4_compressed_time(self, enabled: bool, sim_step_s: float = 60.0,
+                               verify: bool = True) -> bool:
+        """Enable heartbeat-gated accelerated time for PLCSIM E4 only."""
+        if "E4_Compressed_Time_Enable" not in self.addr_map or "E4_Sim_Step_s" not in self.addr_map:
+            logger.error("[PLC] E4 compressed-time mappings are incomplete")
+            return False
+        step = float(sim_step_s)
+        if not math.isfinite(step) or not 0.1 <= step <= 300.0:
+            raise ValueError("E4 sim_step_s must be within [0.1, 300] seconds")
+        try:
+            self._write_bool("E4_Compressed_Time_Enable", False)
+            self._write_real("E4_Sim_Step_s", step)
+            self._write_bool("E4_Compressed_Time_Enable", bool(enabled))
+            if not verify:
+                return True
+            return (
+                self._read_bool("E4_Compressed_Time_Enable") == bool(enabled)
+                and abs(self._read_real("E4_Sim_Step_s") - step) <= 1e-5
+            )
+        except Exception as exc:
+            logger.error("[PLC] E4 compressed-time write failed: %s", exc)
+            return False
+
+    def write_e4_approval(self, approved: bool, verify: bool = True) -> bool:
+        """Close commissioning mode and persist the final E4 verdict."""
+        try:
+            self._write_bool("E4_Test_Enable", False)
+            if "E4_Compressed_Time_Enable" in self.addr_map:
+                self._write_bool("E4_Compressed_Time_Enable", False)
+            self._write_bool("E4_Approved", bool(approved))
+            if not approved:
+                self._write_bool("Decoupler_Enable", False)
+            return not verify or self._read_bool("E4_Approved") == bool(approved)
+        except Exception as exc:
+            logger.error("[PLC] E4 approval write failed: %s", exc)
+            return False
+
+    def write_controller_mode(self, mode: int, verify: bool = True) -> bool:
+        if int(mode) not in (0, 1, 2):
+            raise ValueError("controller mode must be 0, 1, or 2")
+        try:
+            self._write_int("Controller_Mode", int(mode))
+            return not verify or self._read_int("Controller_Mode") == int(mode)
+        except Exception as exc:
+            logger.error("[PLC] controller mode write failed: %s", exc)
+            return False
+
+    def write_ph_pulse_parameters(self, flow: float, on_s: float, off_s: float,
+                                  verify: bool = True) -> bool:
+        values = (float(flow), float(on_s), float(off_s))
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("pH pulse parameters must be finite")
+        if not 0.0 <= values[0] <= 4.0 or values[1] <= 0.0 or values[2] < 0.0:
+            raise ValueError("invalid pH pulse parameters")
+        try:
+            self._write_real("pH_Pulse_Flow", values[0])
+            self._write_real("pH_Pulse_On_s", values[1])
+            self._write_real("pH_Pulse_Off_s", values[2])
+            if not verify:
+                return True
+            return (
+                abs(self._read_real("pH_Pulse_Flow") - values[0]) <= 1e-5
+                and abs(self._read_real("pH_Pulse_On_s") - values[1]) <= 1e-5
+                and abs(self._read_real("pH_Pulse_Off_s") - values[2]) <= 1e-5
+            )
+        except Exception as exc:
+            logger.error("[PLC] pH pulse parameter write failed: %s", exc)
             return False
 
     def write_decoupler_weight(self, weight: float, verify: bool = True) -> bool:
@@ -769,15 +948,35 @@ class PLCClient:
             logger.error(f"[PLC] compact experiment frame write failed: {e}")
             return False
 
+    def write_gain_experiment_commands(self, q_f: float, q_a: float) -> bool:
+        """Update E3 commands and heartbeat without overwriting real sensors."""
+        if not self.write_manual_flow(q_f, q_a):
+            return False
+        try:
+            self._ensure_connected()
+            self._write_int("Remote_Heartbeat", self._advance_heartbeat())
+            if "SAC_Enable" in self.addr_map:
+                self._write_bool("SAC_Enable", False)
+            return True
+        except Exception as exc:
+            logger.error("[PLC] hardware E3 command write failed: %s", exc)
+            return False
+
     def read_gain_experiment_state(self) -> dict:
         """Read only the compact DB1 fields needed by the identification loop."""
         try:
             self._ensure_connected()
             state = {}
-            feedback_start = int(self.addr_map["Remote_Comms_OK"]["offset"])
+            feedback_start = min(
+                int(self.addr_map["EC_Actual"]["offset"]),
+                int(self.addr_map["Remote_Comms_OK"]["offset"]),
+            )
             feedback_end = int(self.addr_map["q_a_cmd"]["offset"]) + 4
             raw = self._client.db_read(self.db_number, feedback_start, feedback_end - feedback_start)
-            for name in ("Remote_Comms_OK", "Watchdog_Timer", "q_f_cmd", "q_a_cmd"):
+            for name in (
+                "EC_Actual", "pH_Actual", "Remote_Comms_OK", "Watchdog_Timer",
+                "q_f_cmd", "q_a_cmd",
+            ):
                 addr = self.addr_map[name]
                 rel = int(addr["offset"]) - feedback_start
                 if addr["type"] == "bool":
@@ -900,6 +1099,72 @@ class PLCClient:
             return False
         except Exception as e:
             logger.error(f"[PLC] 写入异常: {e}")
+            return False
+
+        return self.write_feedback(
+            ec_actual=ec_actual,
+            ph_actual=ph_actual,
+            sac_enable=sac_enable,
+        )
+
+    def write_residual_command(
+        self,
+        water_multiplier: float,
+        ec_residual: float,
+        stage_ec: float,
+        ec_actual: float,
+        ph_actual: float,
+        *,
+        ph_band_low: float = 5.8,
+        ph_band_high: float = 6.5,
+        recipe_id: int = 0,
+        controller_mode: int = 2,
+        batch_water_target_l: float = 0.0,
+        sac_enable: bool = True,
+    ) -> bool:
+        """Write one V2 residual action and its explicit safety contract."""
+
+        if not 0.8 <= float(water_multiplier) <= 1.2:
+            raise ValueError("water_multiplier must be within [0.8, 1.2]")
+        if not -0.15 <= float(ec_residual) <= 0.15:
+            raise ValueError("ec_residual must be within [-0.15, 0.15]")
+        if not 5.0 <= float(ph_band_low) < float(ph_band_high) <= 8.0:
+            raise ValueError("invalid pH safety band")
+        if int(controller_mode) not in (0, 1, 2):
+            raise ValueError("controller_mode must be 0, 1, or 2")
+
+        required = (
+            "Water_Multiplier_SP", "EC_Residual_SP", "pH_Band_Low",
+            "pH_Band_High", "Recipe_ID", "Controller_Mode",
+            "Batch_Water_Target_L",
+        )
+        missing = [name for name in required if name not in self.addr_map]
+        if missing:
+            logger.error("[PLC] V2 residual address mapping missing: %s", missing)
+            return False
+
+        ec_set = float(stage_ec) + float(ec_residual)
+        ph_nominal = 0.5 * (float(ph_band_low) + float(ph_band_high))
+        try:
+            self._ensure_connected()
+            self._write_real("Water_Multiplier_SP", water_multiplier)
+            self._write_real("EC_Residual_SP", ec_residual)
+            self._write_real("pH_Band_Low", ph_band_low)
+            self._write_real("pH_Band_High", ph_band_high)
+            self._write_int("Recipe_ID", recipe_id)
+            self._write_int("Controller_Mode", controller_mode)
+            self._write_real("Batch_Water_Target_L", max(float(batch_water_target_l), 0.0))
+            # Mirror the resolved absolute targets for legacy HMIs and for a
+            # controlled rollback to the previous DB1 contract.
+            self._write_real("EC_Set_SP", ec_set)
+            self._write_real("pH_Set_SP", ph_nominal)
+        except (OSError, ConnectionError, AttributeError) as exc:
+            logger.error("[PLC] residual command write failed (connection lost): %s", exc)
+            self._connected = False
+            self.reconnect()
+            return False
+        except Exception as exc:
+            logger.error("[PLC] residual command write failed: %s", exc)
             return False
 
         return self.write_feedback(
@@ -1041,6 +1306,29 @@ class PLCClient:
             "Manual_Mode", "Auto_Mode", "Emergency_Stop", "Manual_Active", "Auto_Active",
             "Comm_Normal", "Manual_PumpValve_Enable",
             "Actuator_Execution_Enable", "Actuator_Any_Alarm", "Actuator_Any_Trip",
+            "Water_Multiplier_SP", "EC_Residual_SP", "pH_Band_Low", "pH_Band_High",
+            "Recipe_ID", "Controller_Mode", "Batch_Water_Target_L",
+            "Water_Accumulated_L", "Fertilizer_Accumulated_L", "Acid_Accumulated_L",
+            "IMC_Lambda_EC_s", "IMC_Lambda_pH_s", "IMC_Tau_EC_s", "IMC_Tau_pH_s",
+            "IMC_Delay_s", "pH_Pulse_On_s", "pH_Pulse_Off_s",
+            "pH_Safety_Active", "pH_Flush_Request", "Batch_Reject", "IMC_Smith_Active",
+            "Smith_EC_Predicted",
+            "Gain_Low_G_EC_F", "Gain_Low_G_EC_A", "Gain_Low_G_pH_F", "Gain_Low_G_pH_A",
+            "Gain_Low_Tau_s", "Gain_Low_Delay_s", "Gain_Low_q_f", "Gain_Low_EC_SP", "Gain_Low_Valid",
+            "Gain_Mid_G_EC_F", "Gain_Mid_G_EC_A", "Gain_Mid_G_pH_F", "Gain_Mid_G_pH_A",
+            "Gain_Mid_Tau_s", "Gain_Mid_Delay_s", "Gain_Mid_q_f", "Gain_Mid_EC_SP", "Gain_Mid_Valid",
+            "Gain_High_G_EC_F", "Gain_High_G_EC_A", "Gain_High_G_pH_F", "Gain_High_G_pH_A",
+            "Gain_High_Tau_s", "Gain_High_Delay_s", "Gain_High_q_f", "Gain_High_EC_SP", "Gain_High_Valid",
+            "Gain_LM_Threshold", "Gain_MH_Threshold", "Gain_Schedule_Hysteresis",
+            "Gain_Min_Hold_s", "pH_Pulse_Flow", "E3_Parameter_Version", "Active_Gain_Point",
+            "E4_Approved", "Gain_Schedule_Enable", "Gain_Schedule_Valid", "Decoupling_Limited",
+            "E4_Test_Enable", "Gain_Switch_Pending", "Decoupler_Active_Diag",
+            "E4_Compressed_Time_Enable", "Decoupler_Weight_Applied",
+            "Gain_Hold_Elapsed_s", "Gain_Point_Override", "Active_Gain_EC_SP",
+            "Active_Gain_q_f", "E4_Sim_Step_s",
+            "Deployment_Mode", "Soft_Stop_Request", "Actuator_Enable_Request",
+            "Field_IO_Ready", "Actuator_Enable_Permitted", "Physical_EStop_OK",
+            "Sensor_Fault_Any", "Drive_Fault_Any",
             "Manual_q_f_Set", "Manual_q_a_Set",
             "Manual_q_f_Selected", "Manual_q_a_Selected",
             "Manual_q_n_Set", "Manual_q_p_Set", "Manual_q_k_Set",
@@ -1065,8 +1353,13 @@ class PLCClient:
             read_vars = [name for name in legacy if name in self.addr_map]
 
         # Keep older PLCSIM DB1 schemas observable while updated SCL is being
-        # compiled and downloaded. The adaptive schema ends at byte 396 and the
-        # optional water-pump extension begins at byte 400.
+        # compiled and downloaded. The V2 extension begins at byte 532, the
+        # actuator/decoupler schema ends at byte 530, and the adaptive schema
+        # ends at byte 396.
+        pre_v2_schema_vars = [
+            name for name in read_vars
+            if int(self.addr_map[name]["offset"]) + int(self.addr_map[name]["bytes"]) <= 530
+        ]
         adaptive_schema_vars = [
             name for name in read_vars
             if int(self.addr_map[name]["offset"]) + int(self.addr_map[name]["bytes"]) <= 397
@@ -1114,7 +1407,21 @@ class PLCClient:
                     for name in ("Kp_EC_Effective", "Kp_pH_Effective", "Adaptive_PID_Active")
                 )
             except Exception as full_read_error:
-                if adaptive_schema_vars and adaptive_schema_vars != read_vars:
+                if pre_v2_schema_vars and pre_v2_schema_vars != read_vars:
+                    try:
+                        fallback_start, fallback_size = self._calc_read_range(pre_v2_schema_vars)
+                        raw = self._client.db_read(self.db_number, fallback_start, fallback_size)
+                        state = decode(pre_v2_schema_vars, raw, fallback_start)
+                        state["adaptive_schema_available"] = all(
+                            name in state
+                            for name in ("Kp_EC_Effective", "Kp_pH_Effective", "Adaptive_PID_Active")
+                        )
+                    except Exception:
+                        state = None
+                else:
+                    state = None
+
+                if state is None and adaptive_schema_vars and adaptive_schema_vars != read_vars:
                     try:
                         adaptive_start, adaptive_size = self._calc_read_range(adaptive_schema_vars)
                         raw = self._client.db_read(self.db_number, adaptive_start, adaptive_size)
@@ -1126,8 +1433,6 @@ class PLCClient:
                         state["water_schema_available"] = False
                     except Exception:
                         state = None
-                else:
-                    state = None
 
                 if state is None:
                     if not legacy_schema_vars or legacy_schema_vars == read_vars:
@@ -1150,6 +1455,20 @@ class PLCClient:
                 for name in (
                     "Pre_Flush_Ratio", "Post_Flush_Ratio", "Water_Batch_Phase",
                     "Batch_Fertigation_Active",
+                )
+            )
+            state["controller_v2_schema_available"] = all(
+                name in state
+                for name in (
+                    "Water_Multiplier_SP", "EC_Residual_SP", "Controller_Mode",
+                    "pH_Band_Low", "pH_Band_High", "Batch_Water_Target_L",
+                )
+            )
+            state["field_io_schema_available"] = all(
+                name in state
+                for name in (
+                    "Deployment_Mode", "Field_IO_Ready", "Actuator_Enable_Permitted",
+                    "Physical_EStop_OK", "Sensor_Fault_Any", "Drive_Fault_Any",
                 )
             )
 

@@ -1,0 +1,28 @@
+field,description,unit,type,frequency,source_status,valid_range,required
+timestamp,ISO 8601 timestamp,,datetime,continuous,measured,,yes
+experiment_id,E0-E9 identifier,,string,per_record,experimental_design,E0-E9,yes
+batch_id,unique batch identifier,,string,per_batch,measured,,yes
+pot_id,pot identifier P01-P16,,string,per_record,experimental_design,P01-P16,conditional
+block,randomized block,integer,integer,per_pot,experimental_design,1-4,conditional
+treatment,T0-T3 treatment,,category,per_pot,experimental_design,T0-T3,conditional
+biological_stage,biological observation stage,,category,per_record,experimental_design,INI|DEV|MID|LATE,yes
+recipe_stage,stock-solution recipe stage,,category,per_batch,experimental_design,INI|DEV|MID|LATE,yes
+water_multiplier,SAC water multiplier,ratio,float,per_event,measured,0.8-1.2,conditional
+ec_residual_ds_m,SAC EC residual,dS/m,float,per_event,measured,-0.15-0.15,conditional
+ec_set_ds_m,resolved outlet EC target,dS/m,float,continuous,measured,0-5,yes
+ec_actual_ds_m,temperature-compensated outlet EC,dS/m,float,continuous,measured,0-10,yes
+ph_actual,outlet pH,,float,continuous,measured,0-14,yes
+temperature_c,solution temperature,degC,float,continuous,measured,0-50,yes
+water_flow_l_min,carrier-water flow,L/min,float,continuous,measured,0-200,yes
+fertilizer_flow_l_min,stock-solution flow,L/min,float,continuous,measured,0-10,yes
+acid_flow_l_min,dilute-acid flow,L/min,float,continuous,measured,0-4,yes
+water_volume_l,cumulative water volume,L,float,continuous,measured,0-50,yes
+fertilizer_volume_l,cumulative stock volume,L,float,continuous,measured,0-10,yes
+acid_volume_l,cumulative acid volume,L,float,continuous,measured,0-5,yes
+controller_mode,0 fixed PI; 1 scheduled PID; 2 IMC-PI/Smith,,integer,continuous,experimental_design,0-2,yes
+decoupler_enable,matrix decoupler command,,boolean,continuous,measured,0-1,yes
+safety_event,safety event code,,string,event,measured,,conditional
+soil_vwc,soil volumetric water content,m3/m3,float,continuous,measured,0-0.6,conditional
+soil_ec_ds_m,soil EC,dS/m,float,day0_35_65_90,measured,0-10,conditional
+soil_ph,soil pH,,float,day0_35_65_90,measured,0-14,conditional
+yield_g,per-plant tuber yield,g,float,harvest,measured,0-10000,conditional

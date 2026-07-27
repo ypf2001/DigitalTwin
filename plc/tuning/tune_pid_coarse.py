@@ -114,7 +114,7 @@ class PLCLikePID:
         self.rl_a = RateLimiter(max_up=0.40, max_down=0.45)
 
     @staticmethod
-    def _fuzzy_gains(
+    def _scheduled_gains(
         kp: float,
         ki: float,
         kd: float,
@@ -123,7 +123,7 @@ class PLCLikePID:
         error_ref: float,
         deriv_ref: float,
     ) -> tuple[float, float, float]:
-        """Scale base PID gains with the same fuzzy rules used in PLC SCL."""
+        """Scale base PID gains with the nonlinear schedule used in PLC SCL."""
         e = float(np.clip(abs(error) / max(error_ref, 1e-6), 0.0, 1.0))
         de = float(np.clip(abs(derivative) / max(deriv_ref, 1e-6), 0.0, 1.0))
 
@@ -163,7 +163,7 @@ class PLCLikePID:
         else:
             q_f_ff = 0.0
 
-        kp_ec, ki_ec, kd_ec = self._fuzzy_gains(
+        kp_ec, ki_ec, kd_ec = self._scheduled_gains(
             self.c.kp_ec, self.c.ki_ec, self.c.kd_ec, ec_error, ec_d, error_ref=0.35, deriv_ref=0.20
         )
 
@@ -176,7 +176,7 @@ class PLCLikePID:
         else:
             q_f_corr = 0.0
 
-        kp_ph, ki_ph, kd_ph = self._fuzzy_gains(
+        kp_ph, ki_ph, kd_ph = self._scheduled_gains(
             self.c.kp_ph, self.c.ki_ph, self.c.kd_ph, ph_error, ph_d, error_ref=0.45, deriv_ref=0.20
         )
 

@@ -190,7 +190,7 @@ def run_simulation(model_type: str = "none", mode: str = "1",
 
         step_count += 1
         if use_rl and (step_count <= 10 or step_count % 20 == 0):
-            logger.info(f"  step {step_count:3d}: q_f={action[0]:.4f}, q_a={action[1]:.4f}, "
+            logger.info(f"  step {step_count:3d}: m_w={action[0]:.3f}, dEC={action[1]:+.3f}, "
                         f"EC={info['ec_soil']:.3f}, target={info['target_ec']:.2f}, "
                         f"irr={info['irrigation_mm_h']:.3f} mm/h")
 

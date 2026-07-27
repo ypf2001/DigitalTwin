@@ -345,7 +345,7 @@ def run_experiment(args: argparse.Namespace) -> tuple[Path, Path]:
     ec_risk_threshold = float(reward_cfg["ec_burn_threshold"])
     ph_burn_threshold = float(reward_cfg["ph_burn_threshold"])
     q_w = float(env_cfg["q_w"])
-    fixed_ec_set, fixed_ph_set = (float(v) for v in action_cfg["fixed_strategy"])
+    fixed_ec_set, fixed_ph_set = (float(v) for v in action_cfg["legacy_fixed_setpoint"])
     fixed_flow = SetpointToFlowController().to_flow(fixed_ec_set, fixed_ph_set, q_w=q_w)
     fixed_q_f = fixed_flow.q_f
     fixed_q_a = fixed_flow.q_a

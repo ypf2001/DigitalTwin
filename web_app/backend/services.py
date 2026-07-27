@@ -225,7 +225,7 @@ def get_config_data():
         },
         "mixing_tank": cfg.mixing_tank(),
         "pipe": cfg.pipe(),
-        "action_fixed": cfg.action().get("fixed_strategy", [1.5, 6.0]),
+        "action_fixed": cfg.action().get("fixed_strategy", [1.0, 0.0]),
         "reward": cfg.reward(),
         "sac": cfg.sac(),
         "irrigation": cfg.irrigation(),
@@ -234,7 +234,7 @@ def get_config_data():
 
 
 def run_simulation(mode: str, stage_key: str, use_weather: bool):
-    """运行 5 天短时仿真。B 方案中 action=[EC_set, pH_set]。"""
+    """运行 5 天短时仿真。V2 中 action=[water_multiplier, EC_residual]。"""
     from digital_twin_env import DigitalTwinEnv
     from digital_twin_gym_env import DigitalTwinGymEnv
     from crop_model import GrowthStage
@@ -278,7 +278,7 @@ def run_simulation(mode: str, stage_key: str, use_weather: bool):
         if use_rl and model is not None:
             action, _ = model.predict(obs, deterministic=True)
         else:
-            action = np.array(load_config().action().get("fixed_strategy", [1.5, 6.0]), dtype=np.float32)
+            action = np.array(load_config().action().get("fixed_strategy", [1.0, 0.0]), dtype=np.float32)
 
         if hasattr(env, "action_space"):
             obs, _reward, terminated, truncated, info = env.step(action)

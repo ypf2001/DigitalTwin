@@ -114,7 +114,7 @@ def run_policy(
     """运行单个策略并返回时序数据与统计指标。"""
     cfg = load_config()
     irr_cfg = cfg.irrigation()
-    fixed_action = np.array(cfg.action().get("fixed_strategy", [1.5, 6.0]), dtype=np.float32)
+    fixed_action = np.array(cfg.action().get("fixed_strategy", [1.0, 0.0]), dtype=np.float32)
     env = _make_env(stage, dt_min, duration_days, et0_mm_day, seed, soil_model)
     obs = env.reset()
     dt_hours = dt_min / 60.0

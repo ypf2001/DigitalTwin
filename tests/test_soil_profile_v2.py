@@ -1,3 +1,4 @@
+import pytest
 import numpy as np
 
 from soil_profile_v2 import LayeredSoilProfile, sample_soil_config
@@ -22,7 +23,7 @@ def test_legacy_ec_soil_setter_updates_profile_and_salt_mass():
 
     soil.ec_soil = 0.78
 
-    assert soil.ec_soil == 0.78
+    assert soil.ec_soil == pytest.approx(0.78)
     assert np.allclose(soil.ec_profile, 0.78)
     assert np.allclose(soil.salt_mass, soil.ec_profile * soil.water_mm)
     assert np.allclose(soil.diagnostics()["ec_profile"], 0.78)

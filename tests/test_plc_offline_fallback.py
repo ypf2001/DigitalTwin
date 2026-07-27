@@ -33,7 +33,8 @@ def test_offline_adaptive_pid_uses_precision_deadbands():
     assert '#Kp_EC_Eff := #Kp_EC *' in scl
     assert '#Ki_EC_Eff := #Ki_EC *' in scl
     assert '#Kd_EC_Eff := #Kd_EC *' in scl
-    assert '#Adaptive_PID_Active_Out := NOT #Fixed_PID_Test_Enable;' in scl
+    assert '#Adaptive_PID_Active_Out := (#Controller_Mode = 1) AND NOT #Fixed_PID_Test_Enable;' in scl
+    assert 'Controller_Mode := "DB1".Controller_Mode,' in scl
     assert 'Fixed_PID_Test_Enable := "DB1".Fixed_PID_Test_Enable AND "DB1".Remote_Comms_OK,' in scl
 
 

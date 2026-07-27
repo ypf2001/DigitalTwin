@@ -1,6 +1,6 @@
 # KTP900 HMI 界面设计
 
-更新日期：2026-07-07
+更新日期：2026-07-24
 
 适用对象：
 
@@ -58,11 +58,12 @@ PLC 通信 DB：DB1
 2. `手动调试`
 3. `参数设置`
 4. `报警诊断`
-5. `趋势`
+最终投运画面固定为 `主监控`、`手动调试`、`报警诊断`、`PID 参数` 四页；趋势保留为可选诊断页。
 
 ### 统一交互规则
 
-- 进入手动页时，如果 `Emergency_Stop=TRUE`，所有手动输入域只读。
+- `Emergency_Stop` 和 `Physical_EStop_OK` 始终只读；HMI 停机命令只写 `Soft_Stop_Request`。
+- `Actuator_Enable_Request`、PID、量程和标定参数仅工程师权限可写。
 - 只有 `Manual_Mode=TRUE` 且 `Comm_Normal=TRUE` 时，手动泵阀输入区域高亮。
 - 参数设置页默认只允许工程师修改，建议加密码等级。
 - 报警页始终允许访问，不做权限限制。
@@ -115,6 +116,9 @@ Screen_01_MainOverview
 - `Comm_Normal`
 - `System_Alarm_Light`
 - `Emergency_Stop`
+- `Physical_EStop_OK`
+- `Field_IO_Ready`
+- `Actuator_Enable_Permitted`
 - `Manual_Active`
 - `Auto_Active`
 
@@ -133,6 +137,7 @@ Screen_01_MainOverview
 - `Valve_A_Actual`
 - `AQ_Valve_F_Raw`
 - `AQ_Valve_A_Raw`
+- `Qw_Actual` / `Pressure_Actual` / `Water_Pump_Run_CMD`
 
 补充显示：
 
@@ -171,12 +176,14 @@ Screen_02_ManualControl
 
 - `手动模式按钮` -> 绑定 `Manual_Mode`
 - `自动模式按钮` -> 绑定 `Auto_Mode`
-- `急停状态指示` -> 绑定 `Emergency_Stop`
+- `实体急停状态指示` -> 绑定只读 `Physical_EStop_OK`
+- `软停按钮` -> 绑定 `Soft_Stop_Request`
 
 按钮规则：
 
 - `Manual_Mode` 和 `Auto_Mode` 使用两态按钮或切换按钮，不用普通瞬时按钮。
-- `Emergency_Stop` 在 HMI 上只做状态显示和软件测试按钮，不替代实体急停。
+- HMI 不得写 `Emergency_Stop`；实体急停硬接接触器或驱动 STO，PLC 只读辅助反馈。
+- `Actuator_Enable_Request` 仅工程师登录后可写，且不能绕过钥匙、急停和 I/O 许可。
 
 ### 区块 B：手动输入区
 
@@ -324,6 +331,10 @@ Screen_04_AlarmsDiagnostics
 - `Emergency_Stop`
 - `Remote_Comms_OK`
 - `Comm_Normal`
+- `Field_IO_Ready`
+- `Actuator_Enable_Permitted`
+- `Sensor_Fault_Any`
+- `Drive_Fault_Any`
 
 报警文字建议：
 

@@ -1,0 +1,2 @@
+timestamp,day_after_emergence,pot_id,block,treatment,biological_stage,recipe_stage,measurement_type,value,unit,operator,data_status,notes
+,0,P01,1,T2,INI,INI,soil_ec,,dS/m,,measured,

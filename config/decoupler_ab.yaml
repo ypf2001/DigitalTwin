@@ -1,16 +1,24 @@
 ab_validation:
-  schema_version: 1
+  schema_version: 2
+  method: acid_to_ec_constrained_decoupling
   baseline_weight: 0.0
-  candidate_weights:
-    - 0.1
-    - 0.25
-    - 0.5
-  require_all_disturbances: true
-  min_cross_coupling_reduction_fraction: 0.10
-  max_ec_mae_degradation_abs: 0.01
-  max_ph_mae_degradation_abs: 0.01
-  max_q_f_saturation_increase: 0
-  max_q_a_saturation_increase: 0
-  max_alarm_increase: 0
-  max_communication_failure_increase: 0
-  max_setpoint_protection_count: 0
+  candidate_weights: [0.1, 0.25]
+  repetitions: 3
+  baseline_window_s: 120.0
+  ph_band_low: 5.8
+  ph_band_high: 6.5
+  ph_high_disturbance: 6.65
+  ph_low_disturbance: 5.70
+  ec_step_ds_m: 0.15
+  min_cross_coupling_reduction_fraction: 0.20
+  max_main_loop_iae_degradation_fraction: 0.10
+  max_ph_recovery_degradation_fraction: 0.10
+  ph_band_occupancy_min: 0.95
+  hil:
+    ec_mae_max: 0.03
+    ec_tail_mae_max: 0.03
+  measured:
+    ec_mae_max: 0.08
+    ec_tail_mae_max: 0.05
+    sensor_ec_uncertainty_max: 0.02
+    sensor_ph_uncertainty_max: 0.05

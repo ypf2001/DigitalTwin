@@ -3,7 +3,7 @@
 This script bypasses the field/root-zone lifecycle model. It only closes the
 loop around the PLC controller with a simple outlet process:
 
-    fixed EC/pH setpoint -> PLC fuzzy adaptive PID -> q_f/q_a
+    fixed EC/pH setpoint -> PLC nonlinear gain-scheduled PID -> q_f/q_a
     -> mixing tank + pipe dynamics -> EC_Actual/pH_Actual feedback
 
 Use it before full-season runs to tune the PLC execution layer until the outlet

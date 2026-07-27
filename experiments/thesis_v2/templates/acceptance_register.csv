@@ -1,0 +1,2 @@
+experiment_id,run_id,candidate,criterion,threshold,observed,passed,reviewer,date,data_status,notes
+E4,,weight_0.1,gain_cv,<=0.20,,,,,measured,

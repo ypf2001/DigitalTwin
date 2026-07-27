@@ -3,7 +3,6 @@
 ================================
 
 功能：
-- 项目信息读取（Openness）
 - PLC 实时监控
 - 控制参数设置
 - 运行状态可视化
@@ -20,78 +19,22 @@ from typing import Optional
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from plc_control.project_reader import TIAProjectReader
 from plc_control.controller import PLCController, PLCState, ControlMode
 
 
 class PLCControlPanel:
     """PLC 上位机控制面板"""
 
-    def __init__(self,
-                 project_path: str = r"D:\dw_plc\xiaweiji\xiaweiji.ap21",
-                 plc_ip: str = "127.0.0.1"):
+    def __init__(self, plc_ip: str = "127.0.0.1"):
         """
         初始化控制面板
 
         参数:
-            project_path: TIA 项目路径
             plc_ip: PLC IP 地址
         """
-        self.project_path = project_path
         self.plc_ip = plc_ip
 
-        # 组件
-        self._project_reader: Optional[TIAProjectReader] = None
         self._controller: Optional[PLCController] = None
-
-        # 项目信息缓存
-        self._project_info: dict = {}
-
-    # ================================================================
-    #  项目管理
-    # ================================================================
-
-    def open_project(self) -> dict:
-        """打开并读取 TIA 项目"""
-        print(f"[Panel] 正在打开项目: {self.project_path}")
-
-        try:
-            self._project_reader = TIAProjectReader(self.project_path, with_ui=True)
-            self._project_reader.connect()
-
-            # 收集项目信息
-            plcs = self._project_reader.list_plcs()
-            blocks = self._project_reader.list_blocks()
-            tables = self._project_reader.list_tag_tables()
-
-            self._project_info = {
-                "path": self.project_path,
-                "plcs": plcs,
-                "blocks": blocks,
-                "tables": tables,
-            }
-
-            print(f"[Panel] 项目已打开，包含 {len(plcs)} 个 PLC，{len(blocks)} 个程序块")
-            return self._project_info
-
-        except Exception as e:
-            print(f"[Panel] 项目打开失败: {e}")
-            return {}
-
-    def close_project(self):
-        """关闭项目"""
-        if self._project_reader:
-            self._project_reader.disconnect()
-            self._project_reader = None
-        print("[Panel] 项目已关闭")
-
-    def get_project_blocks(self) -> list:
-        """获取项目程序块列表"""
-        return self._project_info.get("blocks", [])
-
-    def get_project_tags(self) -> list:
-        """获取项目标签表"""
-        return self._project_info.get("tables", [])
 
     # ================================================================
     #  PLC 通信
@@ -303,15 +246,14 @@ def interactive_panel():
 
     while True:
         print("\n可用命令:")
-        print("  1. open     - 打开 TIA 项目")
-        print("  2. connect  - 连接 PLC")
-        print("  3. status   - 显示当前状态")
-        print("  4. monitor  - 启动监控")
-        print("  5. set EC pH - 设置目标值")
-        print("  6. stage N  - 设置生长阶段")
-        print("  7. npk N P K - 设置配比")
-        print("  8. test     - 运行控制测试")
-        print("  9. estop    - 紧急停止")
+        print("  1. connect  - 连接 PLC")
+        print("  2. status   - 显示当前状态")
+        print("  3. monitor  - 启动监控")
+        print("  4. set EC pH - 设置目标值")
+        print("  5. stage N  - 设置生长阶段")
+        print("  6. npk N P K - 设置配比")
+        print("  7. test     - 运行控制测试")
+        print("  8. estop    - 紧急停止")
         print("  0. quit     - 退出")
 
         try:
@@ -322,19 +264,16 @@ def interactive_panel():
         if cmd == "quit" or cmd == "0":
             break
 
-        elif cmd == "open" or cmd == "1":
-            panel.open_project()
-
-        elif cmd == "connect" or cmd == "2":
+        elif cmd == "connect" or cmd == "1":
             panel.connect_plc()
 
-        elif cmd == "status" or cmd == "3":
+        elif cmd == "status" or cmd == "2":
             panel.print_status()
 
-        elif cmd == "monitor" or cmd == "4":
+        elif cmd == "monitor" or cmd == "3":
             panel.run_monitoring()
 
-        elif cmd.startswith("set ") or cmd.startswith("5"):
+        elif cmd.startswith("set ") or cmd.startswith("4"):
             try:
                 parts = cmd.split()
                 if len(parts) >= 3:
@@ -345,7 +284,7 @@ def interactive_panel():
             except (ValueError, IndexError):
                 print("[Panel] 用法: set EC值 pH值")
 
-        elif cmd.startswith("stage ") or cmd.startswith("6"):
+        elif cmd.startswith("stage ") or cmd.startswith("5"):
             try:
                 stage = int(cmd.split()[1])
                 panel.set_growth_stage(stage)
@@ -353,7 +292,7 @@ def interactive_panel():
             except (ValueError, IndexError):
                 print("[Panel] 用法: stage 阶段号(0-3)")
 
-        elif cmd.startswith("npk ") or cmd.startswith("7"):
+        elif cmd.startswith("npk ") or cmd.startswith("6"):
             try:
                 parts = cmd.split()
                 if len(parts) >= 4:
@@ -365,10 +304,10 @@ def interactive_panel():
             except (ValueError, IndexError):
                 print("[Panel] 用法: npk N值 P值 K值")
 
-        elif cmd == "test" or cmd == "8":
+        elif cmd == "test" or cmd == "7":
             panel.run_control_test()
 
-        elif cmd == "estop" or cmd == "9":
+        elif cmd == "estop" or cmd == "8":
             panel.emergency_stop()
 
         else:
@@ -376,7 +315,6 @@ def interactive_panel():
 
     # 清理
     panel.disconnect_plc()
-    panel.close_project()
     print("\n[Panel] 已退出")
 
 

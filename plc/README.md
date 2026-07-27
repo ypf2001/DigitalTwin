@@ -94,26 +94,9 @@
    .\.venv\Scripts\python.exe .\experiments\run_full_season_plc.py
    ```
 
-## Openness 编译导入
+## TIA Portal 编译导入
 
-当前 Openness 工具仍在：
-
-```text
-D:\Digital Twin\plc_openness_v21
-```
-
-编译导入命令：
-
-```powershell
-cd "D:\Digital Twin"
-powershell -ExecutionPolicy Bypass -File "D:\Digital Twin\plc_openness_v21\run_import_xiaweiji.ps1"
-```
-
-注意：TIA Portal 必须切到离线状态，否则 Openness 会报：
-
-```text
-This function is not supported in online mode.
-```
+编译导入统一使用 `tia_portal` MCP。调用 `$tia-portal-openness` 后，先运行 `Bootstrap` 和 `GetProjectTree` 获取真实路径，再执行导入、`CompileAndDiagnosePlc` 和 `SaveProject`。原 Python Openness 调用层已移除；`plc_openness_v21` 目录只保留 SCL、LAD、HMI 资产和离线转换工具。
 
 ## 原则
 

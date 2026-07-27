@@ -1,0 +1,108 @@
+thesis_experiment_v2:
+  schema_version: 1
+  status: planned_pending_physical_calibration
+  crop:
+    variety: Favorita
+    production_system: soil_pot
+    control_days_after_emergence:
+      INI: [0, 20]
+      DEV: [21, 35]
+      MID: [36, 65]
+      LATE: [66, 90]
+  pot:
+    diameter_m: 0.35
+    height_m: 0.40
+    surface_area_m2: 0.0962113
+    soil_mass_kg_range: [25.0, 30.0]
+    treatments: [T0, T1, T2, T3]
+    blocks: 4
+  irrigation:
+    source_status: literature_scaled
+    event_days: [5, 15, 24, 31, 38, 45, 55, 65]
+    field_amount_m3_ha: [90, 90, 195, 195, 345, 345, 345, 195]
+    volume_l_per_pot: [0.866, 0.866, 1.876, 1.876, 3.319, 3.319, 3.319, 1.876]
+    season_volume_l_per_pot: 17.316
+    control_recipe_by_event: [INI, INI, DEV, DEV, MID, MID, MID, LATE]
+    day65_boundary_rule: >-
+      Biological observations on day 65 remain MID, but the day-65 irrigation
+      batch uses the LATE stock solution so the preregistered LATE nutrient
+      allocation can be delivered without adding a ninth irrigation event.
+  nutrient_budget:
+    source_status: literature_scaled
+    field_kg_ha: {n: 300.0, p2o5: 180.0, k2o: 300.0}
+    per_pot_g: {n: 2.886, p2o5: 1.732, k2o: 2.886}
+    fertilizer_sources:
+      urea: {n_fraction: 0.46}
+      monopotassium_phosphate: {p2o5_fraction: 0.52, k2o_fraction: 0.34}
+      potassium_sulfate: {k2o_fraction: 0.50}
+    nominal_fertilizer_g_per_pot:
+      urea: 6.274
+      monopotassium_phosphate: 3.331
+      potassium_sulfate: 3.508
+    stage_fraction:
+      source_status:
+        n: literature_uptake_prior
+        p2o5: literature_uptake_prior
+        k2o: preregistered_experimental_design
+      INI: {n: 0.15, p2o5: 0.08, k2o: 0.05}
+      DEV: {n: 0.40, p2o5: 0.26, k2o: 0.20}
+      MID: {n: 0.40, p2o5: 0.42, k2o: 0.35}
+      LATE: {n: 0.05, p2o5: 0.24, k2o: 0.40}
+  residual_policy:
+    action_order: [water_multiplier, ec_residual_ds_m]
+    water_multiplier_min: 0.80
+    water_multiplier_max: 1.20
+    ec_residual_min: -0.15
+    ec_residual_max: 0.15
+    season_water_multiplier_min: 0.90
+    season_water_multiplier_max: 1.10
+    stage_nutrient_deviation_max: 0.10
+    season_nutrient_error_max: 0.02
+  ph_band:
+    lower: 5.8
+    upper: 6.5
+    nominal: 6.2
+    hard_low: 5.5
+    acid_only: true
+    pulse_on_s: 5.0
+    pulse_off_s: 30.0
+    maximum_pulses_before_reject: 3
+    reset_count_on_recovery: true
+  controller:
+    modes:
+      fixed_pi: 0
+      nonlinear_gain_scheduled_pid: 1
+      imc_pi_smith: 2
+    default_mode: 2
+    imc:
+      parameter_status: literature_placeholder
+      lambda_ec_s: 240.0
+      lambda_ph_s: 300.0
+      tau_ec_s: 375.0
+      tau_ph_s: 375.0
+      delay_s: 185.0
+    release_hold_s: 60.0
+    ec_band_ds_m: 0.05
+  decoupling_acceptance:
+    max_gain_cv: 0.20
+    max_condition_number: 10.0
+    min_cross_coupling_reduction: 0.20
+    max_main_loop_iae_degradation: 0.10
+    require_no_saturation_increase: true
+    require_no_safety_event_increase: true
+  data_status_labels:
+    literature_original: Paper original value
+    literature_scaled: Geometrically scaled from paper value
+    experimental_design: Preregistered engineering design value
+    measured: Physical calibration result
+  experiment_matrix:
+    E0: {name: baseline_assay, repetitions: 3, output: baseline_assay.csv}
+    E1: {name: sensor_and_pump_calibration, repetitions: 3, output: calibration.csv}
+    E2: {name: stock_solution_compatibility, repetitions: 3, output: stock_solution_pretest.csv}
+    E3: {name: fopdt_step_identification, batches_l: [5, 10, 15], repetitions: 3, output: step_response.csv}
+    E4: {name: decoupling_screen, weights: [0.0, 0.1, 0.25], repetitions: 3, output: decoupling_acceptance.csv}
+    E5: {name: controller_benchmark, controllers: [feedforward, fixed_pi, nonlinear_gain_scheduled_pid, imc_pi_smith], repetitions: 3, output: controller_benchmark.csv}
+    E6: {name: digital_twin_calibration, train_fraction: 0.70, validation_fraction: 0.30, output: twin_validation.csv}
+    E7: {name: residual_rl_benchmark, policies: [fixed, rule, td3, sac], paired_scenarios: 100, output: rl_benchmark.csv}
+    E8: {name: plc_hil_acceptance, output: hil_acceptance.csv}
+    E9: {name: pot_validation, treatments: [T0, T1, T2, T3], blocks: 4, output: pot_observations.csv}

@@ -37,10 +37,10 @@ if __name__ == "__main__":
     parser.add_argument("--et0", type=float, default=5.0)
     parser.add_argument("--manual-test", action="store_true",
                         help="不加载 SAC，直接用固定 EC/pH 目标测试 PLC 执行层")
-    parser.add_argument("--ec-set", type=float, default=1.5,
-                        help="--manual-test 时写入 PLC 的目标 EC")
-    parser.add_argument("--ph-set", type=float, default=6.0,
-                        help="--manual-test 时写入 PLC 的目标 pH")
+    parser.add_argument("--water-multiplier", type=float, default=1.0,
+                        help="--manual-test 时写入 PLC 的灌水倍率")
+    parser.add_argument("--ec-residual", type=float, default=0.0,
+                        help="--manual-test 时写入 PLC 的阶段 EC 残差")
     args = parser.parse_args()
 
     try:
@@ -106,9 +106,9 @@ if __name__ == "__main__":
 
     try:
         for step in range(args.steps):
-            # B 方案动作含义：[EC_set, pH_set]，不是 q_f/q_a。
+            # V2 动作含义：[water_multiplier, EC_residual]。
             if args.manual_test:
-                action = np.array([args.ec_set, args.ph_set], dtype=np.float32)
+                action = np.array([args.water_multiplier, args.ec_residual], dtype=np.float32)
             else:
                 action, _ = model.predict(obs, deterministic=True)
 
@@ -122,7 +122,7 @@ if __name__ == "__main__":
 
             logger.info(
                 f"[{step+1:3d}/{args.steps}] "
-                f"EC_set={action[0]:5.2f} pH_set={action[1]:5.2f} | "
+                f"m_w={action[0]:5.2f} dEC={action[1]:+5.2f} | "
                 f"PLC: q_f={plc_state.get('q_f_cmd', 0):5.3f} "
                 f"q_a={plc_state.get('q_a_cmd', 0):5.3f} "
                 f"CommOK={plc_state.get('Remote_Comms_OK')} "

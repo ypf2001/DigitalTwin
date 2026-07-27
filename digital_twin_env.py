@@ -5,18 +5,19 @@
 将 MixingTank、PipeDynamics、SoilTransport、CropModel 整合为一个仿 Gym 接口的
 数字孪生环境，用于马铃薯水肥一体化闭环控制仿真。
 
-B 方案控制结构
---------------
-SAC 不再直接输出施肥泵/酸泵流量，而是输出上层目标值：
+B 方案 V2 控制结构
+------------------
+SAC 只输出固定阶段策略附近的残差动作：
 
-    action = [EC_set, pH_set]
+    action = [water_multiplier, EC_residual]
 
-环境内部通过 SetpointToFlowController 模拟 PLC-PID 执行层，将 EC_set/pH_set 转换为
-母液流量 q_f 和酸液流量 q_a，再驱动混合罐、管道和根区水盐模型。
+环境把 EC_residual 加到阶段 EC 基线上，并通过 SetpointToFlowController 模拟 EC
+执行层。pH 不作为 SAC 动作；酸泵仅在出口 pH 高于安全带时脉冲动作。
 
 状态流:
-    动作 [EC_set, pH_set]
-        → SetpointToFlowController → [q_f, q_a]
+    动作 [water_multiplier, EC_residual]
+        → 安全投影/阶段基线 → [EC_set, pH安全带]
+        → SetpointToFlowController + 酸脉冲 → [q_f, q_a]
         → MixingTank → [ec_tank, ph_tank]
         → PipeDynamics → [ec_drip, ph_drip]
         → SoilTransport → [theta, ec_soil]
@@ -35,6 +36,8 @@ from crop_model import CropModel, GrowthStage
 from config_loader import load_config
 from setpoint_controller import SetpointToFlowController
 from water_pump import WaterPump
+from residual_action import ResidualActionProjector
+from plc_control.imc_smith import PHPulseBandController
 
 
 class DigitalTwinEnv:
@@ -61,9 +64,9 @@ class DigitalTwinEnv:
 
     动作空间
     --------
-    action = [EC_set, pH_set]
-        EC_set : 滴灌/混肥出口目标 EC (dS/m)
-        pH_set : 滴灌/混肥出口目标 pH
+    action = [water_multiplier, EC_residual]
+        water_multiplier : 阶段基准灌水量倍率
+        EC_residual : 阶段 EC 基线残差 (dS/m)
 
     观测空间 (维度 = 23)
     -------------------
@@ -114,6 +117,7 @@ class DigitalTwinEnv:
             self.soil = SoilTransport()
         self.crop = CropModel(growth_stage)
         self.current_stage = growth_stage
+        self.control_stage = growth_stage
         root_depth = self.crop.get_root_depth(growth_stage)
         if self.soil_model == "layered_v2":
             self.soil.set_growth_stage(growth_stage, root_depth)
@@ -121,6 +125,21 @@ class DigitalTwinEnv:
             self.soil.root_depth = root_depth
         self.executor = SetpointToFlowController()
         self.water_pump = WaterPump(q_set_l_min=self.q_w)
+        self._base_q_w = float(self.q_w)
+        self.action_projector = ResidualActionProjector()
+        ph_cfg = cfg.thesis_experiment_v2().get("ph_band", {})
+        self.ph_band_controller = PHPulseBandController(
+            lower=float(ph_cfg.get("lower", 5.8)),
+            upper=float(ph_cfg.get("upper", 6.5)),
+            hard_low=float(ph_cfg.get("hard_low", 5.5)),
+            pulse_on_s=float(ph_cfg.get("pulse_on_s", 5.0)),
+            pulse_off_s=float(ph_cfg.get("pulse_off_s", 30.0)),
+            maximum_pulses=int(ph_cfg.get("maximum_pulses_before_reject", 3)),
+            reset_count_on_recovery=bool(ph_cfg.get("reset_count_on_recovery", True)),
+        )
+        # 仿真以分钟级离散步推进，记录上一步是否处于夜间，用于把每个
+        # 灌溉日视为独立批次。真实 PLC 以秒级扫描执行脉冲，不使用该折算。
+        self._previous_nighttime = False
 
         # ---- 观测历史缓冲 ----
         self.history_len = obs_cfg["history_len"]
@@ -169,22 +188,49 @@ class DigitalTwinEnv:
         return max(0.0, et_actual)
 
     def _setpoint_to_flow(self, action):
-        """将动作 [EC_set, pH_set] 转换为执行流量与灌溉强度。
+        """将残差动作转换为执行流量与灌溉强度。
 
         夜间停肥停酸，但保留清水灌溉，用于维持土壤湿度。
         """
-        ec_set = float(action[0])
-        ph_set = float(action[1])
+        stage_ec = self.crop.get_target_ec(self.control_stage)
+        projected = self.action_projector.project(action, stage_ec=stage_ec)
+        # In continuous training the multiplier scales carrier flow.  During a
+        # scheduled event its primary effect is also applied to batch volume by
+        # irrigation_schedule.py, so total delivered water remains explicit.
+        self.water_pump.q_set_l_min = self._base_q_w * projected.water_multiplier
         pump_state = self.water_pump.step(self.dt_min)
         q_w_actual = pump_state.q_actual_l_min
-        result = self.executor.to_flow(ec_set, ph_set, q_w=q_w_actual)
+        result = self.executor.to_flow(
+            projected.ec_set,
+            projected.ph_nominal,
+            q_w=q_w_actual,
+        )
+
+        is_night = self._is_nighttime(self._time_min)
+        # 夜间停止施肥后，下一次日间灌溉重新开始 pH 批次计数；否则一次
+        # 无法恢复的批次会错误地把整季运行永久锁死。
+        if self._previous_nighttime and not is_night:
+            self.ph_band_controller.reset()
+        self._previous_nighttime = is_night
+
+        ph_feedback = float(self.pipe.ph_filt)
+        ph_band = self.ph_band_controller.step(ph_feedback, self.dt_min * 60.0)
 
         q_f = result.q_f
-        q_a = result.q_a
+        # PHPulseBandController 的 duty 是给秒级 PLC 输出的占空比。分钟级
+        # 数字孪真每一步代表一个完整控制批次，脉冲触发时应用完整酸液流量，
+        # 否则 5 秒/300 秒的平均化会让模型看不到酸化作用。
+        simulation_acid_duty = 1.0 if ph_band.acid_pulse else ph_band.acid_duty
+        q_a = result.q_a * simulation_acid_duty
+        # Recalculate fertilizer flow after the pulse decision so the EC
+        # target includes the acid solution's hydraulic contribution.
+        q_f = self.executor._solve_q_f(result.ec_set, q_w_actual, q_a)
         if (
             self._is_nighttime(self._time_min)
             or not pump_state.flow_ok
             or not pump_state.fertigation_active
+            or ph_band.flush_requested
+            or ph_band.reject_batch
         ):
             q_f = 0.0
             q_a = 0.0
@@ -203,13 +249,15 @@ class DigitalTwinEnv:
 
         return (
             result.ec_set,
-            result.ph_set,
+            projected.ph_nominal,
             q_f,
             q_a,
             q_w_actual,
             irrigation_mm_h,
             carrier_irrigation_mm_h,
             pump_state,
+            projected,
+            ph_band,
         )
 
     def set_irrigation_command(self,
@@ -232,6 +280,8 @@ class DigitalTwinEnv:
             post_flush_ratio=post_flush_ratio,
             reset_volume=reset_volume,
         )
+        if q_set_l_min is not None:
+            self._base_q_w = float(q_set_l_min)
 
     def _get_obs(self):
         """返回 23 维观测向量。"""
@@ -273,9 +323,9 @@ class DigitalTwinEnv:
                         control_active=True):
         """计算奖励函数（多目标）。
 
-        SAC 动作已经变成 EC_set/pH_set，所以奖励同时考虑：
+        SAC 动作已经变成水量倍率/EC残差，所以奖励同时考虑：
         - 根区土壤 EC 是否接近当前生育期目标；
-        - 出口 pH 是否接近 SAC 给定目标；
+        - 出口 pH 是否保持在 PLC 安全带内；
         - 出口 EC 是否跟踪 SAC 给定目标；
         - 执行流量是否过大；
         - 是否触发盐害/酸害硬约束。
@@ -287,7 +337,9 @@ class DigitalTwinEnv:
         ec_error = abs(ec_soil - target_ec)
         ec_reward = -w1 * ec_error * ec_error if control_active else 0.0
 
-        ph_error = abs(ph_drip - ph_set)
+        ph_low = self.ph_band_controller.lower
+        ph_high = self.ph_band_controller.upper
+        ph_error = max(ph_low - ph_drip, ph_drip - ph_high, 0.0)
         ph_reward = -w2 * ph_error * ph_error if control_active else 0.0
 
         setpoint_track_error = abs(ec_drip - ec_set)
@@ -297,7 +349,7 @@ class DigitalTwinEnv:
         wue_bonus = max(0.0, 1.0 - actuator_flow_Lmin / rw["wue_norm"]) * w4
 
         hard_penalty = 0.0
-        if ec_soil > rw["ec_burn_threshold"] or ph_drip < rw["ph_burn_threshold"]:
+        if ec_soil > rw["ec_burn_threshold"] or ph_drip < self.ph_band_controller.hard_low:
             hard_penalty = rw["hard_penalty"]
 
         reward = ec_reward + ph_reward + setpoint_reward - flow_penalty + wue_bonus + hard_penalty
@@ -333,7 +385,7 @@ class DigitalTwinEnv:
         参数
         ----------
         action : array_like
-            [EC_set (dS/m), pH_set]
+            [water_multiplier, EC_residual (dS/m)]
 
         返回
         ----------
@@ -349,6 +401,8 @@ class DigitalTwinEnv:
             irrigation_mm_h,
             carrier_irrigation_mm_h,
             pump_state,
+            projected_action,
+            ph_band,
         ) = self._setpoint_to_flow(action)
         actuator_flow_Lmin = q_f + q_a
 
@@ -415,6 +469,21 @@ class DigitalTwinEnv:
             "ph_drip": ph_drip,
             "ec_set": ec_set,
             "ph_set": ph_set,
+            "water_multiplier": projected_action.water_multiplier,
+            "ec_residual": projected_action.ec_residual_ds_m,
+            "action_clipped": projected_action.clipped,
+            "ph_band_low": self.ph_band_controller.lower,
+            "ph_band_high": self.ph_band_controller.upper,
+            "ph_band_violation": max(
+                self.ph_band_controller.lower - ph_drip,
+                ph_drip - self.ph_band_controller.upper,
+                0.0,
+            ),
+            "ph_acid_pulse": ph_band.acid_pulse,
+            "ph_acid_duty": ph_band.acid_duty,
+            "ph_flush_requested": ph_band.flush_requested,
+            "ph_batch_reject": ph_band.reject_batch,
+            "ph_pulse_count": ph_band.pulse_count,
             "etc_mm_h": et_mm_h,
             "target_ec": self.crop.get_target_ec(self.current_stage),
             "irrigation_mm_h": irrigation_mm_h,
@@ -451,6 +520,9 @@ class DigitalTwinEnv:
         self.tank.reset()
         self.pipe.reset()
         self.water_pump.reset()
+        self._base_q_w = float(self.q_w)
+        self.ph_band_controller.reset()
+        self._previous_nighttime = self._is_nighttime(0.0)
         if self.soil_model == "layered_v2" and self.domain_randomization:
             sampled_cfg = sample_soil_config(self._soil_v2_cfg, self._rng)
             self.soil = LayeredSoilProfile(config=sampled_cfg, area_ha=self.area_ha)
@@ -479,9 +551,10 @@ class DigitalTwinEnv:
 
         return self._get_obs()
 
-    def set_growth_stage(self, stage: GrowthStage):
-        """切换生育阶段，同步更新作物模型、根系深度和目标 EC 参考。"""
+    def set_growth_stage(self, stage: GrowthStage, control_stage: GrowthStage = None):
+        """切换生物学阶段，并可单独指定本批次控制配方阶段。"""
         self.current_stage = stage
+        self.control_stage = control_stage if control_stage is not None else stage
         self.crop.current_stage = stage
         root_depth = self.crop.get_root_depth(stage)
         if self.soil_model == "layered_v2":

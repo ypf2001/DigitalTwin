@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import hashlib
+import os
 import sys
 from pathlib import Path
 
@@ -22,6 +25,8 @@ REQUIRED_WRITE_TAGS = [
     "pH_Actual",
     "SAC_Enable",
     "Remote_Heartbeat",
+    "Deployment_Mode",
+    "Soft_Stop_Request",
 ]
 
 # 上位机至少要读回这些变量，才能判断 PLC 是否接收命令、执行量是否正常。
@@ -33,6 +38,11 @@ REQUIRED_READ_TAGS = [
     "q_f_cmd",
     "q_a_cmd",
     "System_Alarm_Light",
+    "Field_IO_Ready",
+    "Actuator_Enable_Permitted",
+    "Physical_EStop_OK",
+    "Sensor_Fault_Any",
+    "Drive_Fault_Any",
 ]
 
 # PID 参数仍然暴露在 DB1，便于离线/在线调参和部署前检查。
@@ -67,6 +77,10 @@ REQUIRED_FERTILIZER_CHANNEL_TAGS = [
     "Kd_K_Set",
     "K_Max",
     "q_k_cmd",
+]
+
+REQUIRED_ENGINEER_WRITE_TAGS = [
+    "Actuator_Enable_Request",
 ]
 
 REQUIRED_WATER_PUMP_TAGS = [
@@ -106,7 +120,8 @@ def _check_addresses(addr_map: dict, errors: list[str]) -> None:
     # 只检查通讯契约是否完整，不在这里判断每个 offset 的物理含义。
     required = (
         REQUIRED_WRITE_TAGS + REQUIRED_READ_TAGS + REQUIRED_PID_TAGS
-        + REQUIRED_FERTILIZER_CHANNEL_TAGS + REQUIRED_WATER_PUMP_TAGS
+        + REQUIRED_ENGINEER_WRITE_TAGS + REQUIRED_FERTILIZER_CHANNEL_TAGS
+        + REQUIRED_WATER_PUMP_TAGS
     )
     for tag in required:
         _check(
@@ -124,13 +139,98 @@ def _check_addresses(addr_map: dict, errors: list[str]) -> None:
             if field not in spec:
                 errors.append(f"Address {tag} missing field: {field}")
 
+    occupied: dict[tuple[int, int | None], str] = {}
+    occupied_bytes: dict[int, str] = {}
+    for tag, spec in addr_map.items():
+        if not isinstance(spec, dict) or not all(k in spec for k in ("offset", "type", "bytes")):
+            continue
+        offset = int(spec["offset"])
+        if spec["type"] == "bool":
+            bit = int(spec.get("bit", 0))
+            key = (offset, bit)
+            owner = occupied.get(key) or occupied_bytes.get(offset)
+            if owner:
+                errors.append(f"DB address overlap: {tag} and {owner} at DBX{offset}.{bit}")
+            occupied[key] = tag
+        else:
+            for byte in range(offset, offset + int(spec["bytes"])):
+                bit_owner = next((owner for (used_byte, _), owner in occupied.items() if used_byte == byte), None)
+                owner = occupied_bytes.get(byte) or bit_owner
+                if owner:
+                    errors.append(f"DB address overlap: {tag} and {owner} at DBB{byte}")
+                occupied_bytes[byte] = tag
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _check_source_sync(errors: list[str]) -> None:
+    canonical = Path(os.environ.get(
+        "PLC_CANONICAL_SOURCE",
+        r"D:\dw_plc\xiaweiji\src\xiaweiji.scl",
+    ))
+    mirror = ROOT / "plc" / "xiaweiji" / "src" / "xiaweiji.scl"
+    if not canonical.exists() or not mirror.exists():
+        errors.append("PLC canonical source or Digital Twin mirror is missing")
+        return
+    _check(
+        _sha256(canonical) == _sha256(mirror),
+        "PLC canonical source and Digital Twin mirror hashes match.",
+        "PLC canonical source and Digital Twin mirror hashes differ.",
+        errors,
+    )
+
+
+def _check_data_ownership(deployment_cfg: dict, errors: list[str]) -> None:
+    modes = deployment_cfg.get("modes", {})
+    simulation = modes.get("simulation_plc", {})
+    field = modes.get("field_plc", {})
+    _check(
+        simulation.get("feedback_owner") == "python"
+        and {"EC_Actual", "pH_Actual"}.issubset(simulation.get("feedback_write_tags", [])),
+        "Simulation feedback ownership is Python.",
+        "Simulation profile must assign EC/pH feedback writes to Python.",
+        errors,
+    )
+    _check(
+        field.get("feedback_owner") == "plc"
+        and {"EC_Actual", "pH_Actual", "Emergency_Stop"}.issubset(
+            field.get("forbidden_remote_write_tags", [])
+        ),
+        "Field feedback and E-stop ownership are PLC/physical.",
+        "Field profile must forbid remote EC/pH and Emergency_Stop writes.",
+        errors,
+    )
+
+
+def _check_hmi_coverage(addr_map: dict, errors: list[str]) -> None:
+    path = ROOT / "docs" / "HMI标签清单_KTP900.csv"
+    if not path.exists():
+        errors.append(f"Missing HMI tag manifest: {path}")
+        return
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        tags = {row["TagName"] for row in csv.DictReader(handle)}
+    required = set(REQUIRED_READ_TAGS + REQUIRED_ENGINEER_WRITE_TAGS)
+    required.update({"Soft_Stop_Request", "Deployment_Mode"})
+    missing = sorted(required - tags)
+    _check(not missing, "HMI tag manifest covers required deployment tags.",
+           f"HMI tag manifest missing: {', '.join(missing)}", errors)
+    unknown = sorted(tag for tag in tags if tag not in addr_map)
+    _check(not unknown, "All HMI tags exist in DB1 contract.",
+           f"HMI tags absent from DB1 contract: {', '.join(unknown)}", errors)
+
 
 def _check_files(errors: list[str]) -> None:
     files = [
         ROOT / "plc" / "xiaweiji" / "src" / "xiaweiji.scl",
-        ROOT / "plc_openness_v21" / "run_import_xiaweiji.ps1",
         ROOT / "experiments" / "run_plc_setpoint_step.py",
         ROOT / "config" / "deployment.yaml",
+        ROOT / "docs" / "PLC现场IO点表.csv",
+        ROOT / "docs" / "PLC现场验收表.md",
+        Path(r"D:\dw_plc\xiaweiji\src\lad\程序块\Main.s7dcl"),
+        Path(r"D:\dw_plc\xiaweiji\src\lad\程序块\FC_FieldSafety_LAD.s7dcl"),
+        Path(r"D:\dw_plc\xiaweiji\src\lad\程序块\FC_FieldOutput_LAD.s7dcl"),
     ]
     for path in files:
         _check(path.exists(), f"Required file exists: {path}", f"Missing file: {path}", errors)
@@ -172,6 +272,9 @@ def main() -> int:
     _check(bool(deployment_cfg), "deployment config loaded.", "deployment config is empty.", errors)
 
     _check_addresses(plc_cfg.get("addresses", {}), errors)
+    _check_source_sync(errors)
+    _check_data_ownership(deployment_cfg, errors)
+    _check_hmi_coverage(plc_cfg.get("addresses", {}), errors)
     _check_files(errors)
 
     if args.connect:

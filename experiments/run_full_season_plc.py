@@ -1,15 +1,15 @@
 r"""90 天 SAC + PLC 全生命周期压缩仿真。
 
 这个脚本通过 PLCGymEnv 驱动 PLCSIM/PLC：
-SAC 输出 EC/pH 目标值，PLC 根据 EC_Actual/pH_Actual 计算 q_f/q_a，
+SAC 输出水量倍率/EC残差，PLC 合成阶段EC目标并维持pH安全带，
 Python 再用 PLC 输出推动数字孪生模型继续运行。
 
 默认运行模式是 SAC + PLC，不加参数会跑 90 天生命周期，并压缩到约 20 分钟完成。
 当 PLC 等待时间为 1 秒时，默认约 1080 步，所以 1 步约等于 0.083 天。
 
 注意：
-- 不加 --manual-test：使用 SAC 模型输出 EC_Set_SP / pH_Set_SP。
-- 加上 --manual-test：不用 SAC，改用四个生长阶段的固定 EC/pH 目标。
+- 不加 --manual-test：使用单一阶段感知残差SAC输出 [water_multiplier, EC_residual]。
+- 加上 --manual-test：不用 SAC，改用四个生长阶段的固定 EC 目标；pH由PLC安全带控制。
 
 PowerShell 常用运行命令：
 
@@ -21,14 +21,14 @@ PowerShell 常用运行命令：
 2. 固定四阶段 PLC 策略全生命周期仿真：
 
    cd "D:\Digital Twin"
-   .\.venv\Scripts\python.exe .\experiments\run_full_season_plc.py `
+python.exe .\experiments\run_full_season_plc.py `
      --manual-test `
      --fixed-ini-ec 0.8 --fixed-ini-ph 6.2 `
      --fixed-dev-ec 1.1 --fixed-dev-ph 6.1 `
      --fixed-mid-ec 1.5 --fixed-mid-ph 5.9 `
      --fixed-late-ec 1.0 --fixed-late-ph 6.1
    cd "D:\Digital Twin"
-   .\.venv\Scripts\python.exe .\experiments\run_full_season_plc.py `
+ python.exe .\experiments\run_full_season_plc.py `
      --manual-test `
      --fixed-ini-ec 0.8 --fixed-ini-ph 6.2 `
      --fixed-dev-ec 1.1 --fixed-dev-ph 6.1 `
@@ -36,7 +36,7 @@ PowerShell 常用运行命令：
      --fixed-late-ec 1.0 --fixed-late-ph 6.1
 
         cd "D:\Digital Twin"
-   .\.venv\Scripts\python.exe .\experiments\run_full_season_plc.py `
+  python.exe .\experiments\run_full_season_plc.py `
      --fixed-ini-ec 0.8 --fixed-ini-ph 6.2 `
      --fixed-dev-ec 1.1 --fixed-dev-ph 6.1 `
      --fixed-mid-ec 1.5 --fixed-mid-ph 5.9 `
@@ -95,8 +95,8 @@ logger = logging.getLogger(__name__)
 
 
 STAGES = {
-    # The four PLC control phases follow the paper's irrigation phases:
-    # seedling, tuber formation, tuber bulking, and starch accumulation.
+    # PLC的四个控制阶段对应论文中的灌溉阶段：
+    # 幼苗期、块茎形成期、块茎膨大期和淀粉积累期。
     "INI": {"idx": 0, "tag": "ini", "start_day": 0.0, "end_day": 24.0},
     "DEV": {"idx": 1, "tag": "dev", "start_day": 24.0, "end_day": 38.0},
     "MID": {"idx": 2, "tag": "mid", "start_day": 38.0, "end_day": 65.0},
@@ -112,18 +112,15 @@ FIXED_ACTIONS = {
 
 CROP_TARGETS = {
     "INI": np.array([0.8, 6.2], dtype=np.float32),
-    "DEV": np.array([1.2, 6.1], dtype=np.float32),
+    # 四阶段控制基准必须与PLC阶段表保持一致。
+    "DEV": np.array([1.1, 6.1], dtype=np.float32),
     "MID": np.array([1.5, 5.9], dtype=np.float32),
     "LATE": np.array([1.0, 6.1], dtype=np.float32),
 }
 
 
 def _enable_compressed_hil_after_handshake(plc, *, max_attempts: int = 8) -> bool:
-    """Enable the test-only flag only after the PLC heartbeat is accepted.
-
-    The PLC intentionally clears test flags while Remote_Comms_OK is false.
-    A successful Snap7 write alone therefore is not sufficient: wait for the
-    heartbeat handshake, write the flag, and verify the value after a scan.
+    """心跳握手
     """
     for attempt in range(1, max_attempts + 1):
         state = plc.read_state() or {}
@@ -169,10 +166,10 @@ def _fixed_actions_from_args(args: argparse.Namespace) -> dict[str, np.ndarray]:
 
 
 def _estimate_soil_ph(prev_ph: float, ph_drip: float, irrigation_mm_h: float, dt_hours: float) -> float:
-    """Estimate root-zone pH from drip pH.
+    """根据滴头pH估算根区pH。
 
-    The current soil model tracks water and EC but not pH. This lightweight
-    estimate gives a buffered root-zone pH curve for deployment plots.
+    当前土壤模型跟踪水分和EC，但尚未单独建立土壤pH动力学模型。
+    这里使用轻量的缓冲估算，为部署和绘图提供根区pH变化曲线。
     """
     root_depth_mm = 300.0
     exchange = np.clip((irrigation_mm_h * dt_hours) / root_depth_mm, 0.0, 0.25)
@@ -318,8 +315,8 @@ def _plot_soil_ec_ph(path: Path, rows: list[dict[str, Any]]) -> None:
     raw_target_ec = np.array([row["target_ec"] for row in rows], dtype=float)
     raw_target_ph = np.array([row.get("target_ph", 6.0) for row in rows], dtype=float)
 
-    # The compressed run records sub-daily control steps. Plot daily averages
-    # with a short rolling mean so irrigation pulses do not dominate the chart.
+    # 压缩仿真按日内控制步长记录数据。绘图时先计算日均值，
+    # 再使用短窗口滚动平均，避免灌溉脉冲主导曲线。
     day_index = np.floor(raw_day).astype(int)
     days = np.arange(0, int(np.ceil(max(raw_day.max(), 90.0))) + 1)
     time_day = []
@@ -416,7 +413,7 @@ def _set_stage(env, plc, stage: str) -> bool:
 
 
 def _tail_rows_by_stage(rows: list[dict[str, Any]], fraction: float = 0.25) -> dict[str, list[dict[str, Any]]]:
-    """Return the final part of every stage for steady-state acceptance checks."""
+    """提取每个阶段末段数据，用于稳态验收检查。"""
     result: dict[str, list[dict[str, Any]]] = {}
     for stage in STAGE_SEQUENCE:
         stage_rows = [row for row in rows if row.get("stage") == stage]
@@ -452,7 +449,7 @@ def _sustained_oscillation(errors: list[float], tolerance: float) -> bool:
 
 
 def _build_acceptance_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Build auditable steady-state and protection metrics for summary.json."""
+    """构建可审计的稳态指标和保护指标，并写入summary.json。"""
     steady_groups = _tail_rows_by_stage(rows)
     per_stage: dict[str, Any] = {}
     ec_errors_all: list[float] = []
@@ -603,6 +600,13 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
                 "PLCSIM is reachable, but DB1 is still the old schema. Import/compile/download "
                 "the updated xiaweiji.scl and DB1 in TIA Portal before running this test."
             )
+        if not initial_state.get("controller_v2_schema_available", False):
+            plc.disconnect()
+            raise RuntimeError(
+                "PLCSIM is reachable, but DB1 does not contain the Thesis V2 extension "
+                "starting at DBD532. Download the complete updated DB1 and all program "
+                "blocks to PLCSIM, reinitialize DB1, and put the CPU in RUN."
+            )
 
     models = None if args.manual_test else _load_models(Path(args.model_dir), args.model)
     fixed_actions = _fixed_actions_from_args(args)
@@ -632,8 +636,8 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
     obs, _ = env.reset()
     if plc is not None:
-        # reset() starts the heartbeat handshake. Enable and read back the
-        # test-only flag only after PLC communications are confirmed valid.
+        # reset()会启动心跳握手。只有确认PLC通信有效后，
+        # 才允许写入并回读仅用于测试的压缩HIL标志。
         if not _enable_compressed_hil_after_handshake(plc):
             env.close()
             raise RuntimeError(
@@ -657,7 +661,7 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
                 logger.info("Stage changed: day %.1f -> %s", day, stage)
 
             if args.manual_test:
-                action = _ramped_stage_pair_custom(
+                legacy_target = _ramped_stage_pair_custom(
                     day,
                     fixed_actions,
                     args.transition_days,
@@ -666,18 +670,15 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
                     ph_down_transition_days=args.ph_down_transition_days,
                     ph_up_transition_days=args.ph_up_transition_days,
                 )
-                ec_min = action_cfg.get("plc_ec_set_min", 0.5)
-                ph_min = action_cfg.get("plc_ph_set_min", 5.5)
+                action = np.array([1.0, legacy_target[0] - CROP_TARGETS[stage][0]], dtype=np.float32)
             else:
                 action, _ = models[stage].predict(obs, deterministic=True)
                 action = np.asarray(action, dtype=np.float32).flatten()
-                ec_min = action_cfg.get("ec_set_min", 0.8)
-                ph_min = action_cfg.get("ph_set_min", 5.8)
 
             action = np.array(
                 [
-                    np.clip(action[0], ec_min, action_cfg.get("ec_set_max", 2.5)),
-                    np.clip(action[1], ph_min, action_cfg.get("ph_set_max", 6.8)),
+                    np.clip(action[0], action_cfg.get("water_multiplier_min", 0.8), action_cfg.get("water_multiplier_max", 1.2)),
+                    np.clip(action[1], action_cfg.get("ec_residual_min", -0.15), action_cfg.get("ec_residual_max", 0.15)),
                 ],
                 dtype=np.float32,
             )
@@ -705,8 +706,10 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
                     "time_day": float(info.get("time_day", day)),
                     "stage": stage,
                     "plc_stage": STAGES[stage]["idx"],
-                    "ec_set": float(action[0]),
-                    "ph_set": float(action[1]),
+                    "water_multiplier": float(action[0]),
+                    "ec_residual": float(action[1]),
+                    "ec_set": float(info.get("ec_set", 0.0)),
+                    "ph_set": float(info.get("ph_set", 6.2)),
                     "ec_drip": float(info.get("ec_drip", 0.0)),
                     "ph_drip": float(info.get("ph_drip", 7.0)),
                     "soil_ph_est": soil_ph_est,
@@ -716,8 +719,8 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
                     "target_ec": float(crop_target[0]),
                     "raw_target_ec": float(info.get("target_ec", 0.0)),
                     "target_ph": float(crop_target[1]),
-                    "plc_ec_target": float(plc_state.get("Active_EC_SP", action[0])),
-                    "plc_ph_target": float(plc_state.get("Active_pH_SP", action[1])),
+                    "plc_ec_target": float(plc_state.get("Active_EC_SP", info.get("ec_set", 0.0))),
+                    "plc_ph_target": float(plc_state.get("Active_pH_SP", info.get("ph_set", 6.2))),
                     "plc_ec_actual": float(plc_state.get("EC_Actual", info.get("ec_soil", 0.0))),
                     "plc_ph_actual": float(plc_state.get("pH_Actual", soil_ph_est)),
                     "ec_pid_error": float(plc_state.get("EC_PID_Error", 0.0)),
@@ -863,15 +866,31 @@ def main() -> int:
     parser.add_argument("--plc-wait-s", type=float, default=1.0, help="Seconds to wait for PLC scan/PID each step.")
     parser.add_argument("--model-dir", default=str(ROOT / "rl_models"))
     parser.add_argument("--model", default=None, help="Optional single SAC model path, with or without .zip.")
-    parser.add_argument("--manual-test", action="store_true", help="Use fixed four-stage EC/pH targets instead of SAC.")
+    parser.add_argument(
+        "--manual-test",
+        action="store_true",
+        help="Use fixed four-stage EC targets instead of SAC; PLC owns the pH safety band.",
+    )
     parser.add_argument("--fixed-ini-ec", type=float, default=float(FIXED_ACTIONS["INI"][0]))
     parser.add_argument("--fixed-dev-ec", type=float, default=float(FIXED_ACTIONS["DEV"][0]))
     parser.add_argument("--fixed-mid-ec", type=float, default=float(FIXED_ACTIONS["MID"][0]))
     parser.add_argument("--fixed-late-ec", type=float, default=float(FIXED_ACTIONS["LATE"][0]))
-    parser.add_argument("--fixed-ini-ph", type=float, default=float(FIXED_ACTIONS["INI"][1]))
-    parser.add_argument("--fixed-dev-ph", type=float, default=float(FIXED_ACTIONS["DEV"][1]))
-    parser.add_argument("--fixed-mid-ph", type=float, default=float(FIXED_ACTIONS["MID"][1]))
-    parser.add_argument("--fixed-late-ph", type=float, default=float(FIXED_ACTIONS["LATE"][1]))
+    parser.add_argument(
+        "--fixed-ini-ph", type=float, default=float(FIXED_ACTIONS["INI"][1]),
+        help="兼容旧命令的参数；当前PLC使用统一pH安全带，不执行该单点值。",
+    )
+    parser.add_argument(
+        "--fixed-dev-ph", type=float, default=float(FIXED_ACTIONS["DEV"][1]),
+        help="兼容旧命令的参数；当前PLC使用统一pH安全带，不执行该单点值。",
+    )
+    parser.add_argument(
+        "--fixed-mid-ph", type=float, default=float(FIXED_ACTIONS["MID"][1]),
+        help="兼容旧命令的参数；当前PLC使用统一pH安全带，不执行该单点值。",
+    )
+    parser.add_argument(
+        "--fixed-late-ph", type=float, default=float(FIXED_ACTIONS["LATE"][1]),
+        help="兼容旧命令的参数；当前PLC使用统一pH安全带，不执行该单点值。",
+    )
     parser.add_argument(
         "--transition-days",
         type=float,

@@ -1,0 +1,2 @@
+experiment_id,instrument_id,channel,reference_level,reference_unit,command_percent,replicate,raw_reading,corrected_reading,error,ambient_temperature_c,operator,timestamp,data_status,notes
+E1,,,,,20,1,,,,,,,measured,

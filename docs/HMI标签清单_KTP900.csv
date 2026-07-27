@@ -1,71 +1,101 @@
-Screen,TagName,Address,DataType,Access,Use
-MainOverview,EC_Set_SP,DB1.DBD0,Real,ReadWrite,EC target setpoint
-MainOverview,pH_Set_SP,DB1.DBD4,Real,ReadWrite,pH target setpoint
-MainOverview,EC_Actual,DB1.DBD8,Real,ReadOnly,Outlet EC feedback
-MainOverview,pH_Actual,DB1.DBD12,Real,ReadOnly,Outlet pH feedback
-MainOverview,Remote_Comms_OK,DB1.DBX20.0,Bool,ReadOnly,Upper computer communication OK
-MainOverview,Watchdog_Timer,DB1.DBW22,Int,ReadOnly,Communication watchdog timer
-MainOverview,q_f_cmd,DB1.DBD24,Real,ReadOnly,Fertilizer flow command
-MainOverview,q_a_cmd,DB1.DBD28,Real,ReadOnly,Acid flow command
-MainOverview,Valve_F_Actual,DB1.DBD32,Real,ReadOnly,Fertilizer valve actual output
-MainOverview,Valve_A_Actual,DB1.DBD36,Real,ReadOnly,Acid valve actual output
-MainOverview,AQ_Valve_F_Raw,DB1.DBW40,Int,ReadOnly,Fertilizer analog raw output
-MainOverview,AQ_Valve_A_Raw,DB1.DBW42,Int,ReadOnly,Acid analog raw output
-MainOverview,System_Alarm_Light,DB1.DBX44.0,Bool,ReadOnly,System alarm lamp
-MainOverview,Growth_Stage,DB1.DBW106,Int,ReadWrite,Current growth stage
-MainOverview,Stage_EC_SP,DB1.DBD108,Real,ReadOnly,Stage EC setpoint
-MainOverview,Stage_pH_SP,DB1.DBD112,Real,ReadOnly,Stage pH setpoint
-MainOverview,Active_EC_SP,DB1.DBD116,Real,ReadOnly,Actual EC setpoint in use
-MainOverview,Active_pH_SP,DB1.DBD120,Real,ReadOnly,Actual pH setpoint in use
-MainOverview,Setpoint_Protection_Active,DB1.DBX124.0,Bool,ReadOnly,Setpoint protection active
-ManualControl,Manual_Mode,DB1.DBX278.0,Bool,ReadWrite,Enable manual mode
-ManualControl,Auto_Mode,DB1.DBX278.1,Bool,ReadWrite,Enable auto mode
-ManualControl,Emergency_Stop,DB1.DBX278.2,Bool,ReadWrite,Software emergency stop
-ManualControl,Manual_Active,DB1.DBX278.3,Bool,ReadOnly,Manual mode active
-ManualControl,Auto_Active,DB1.DBX278.4,Bool,ReadOnly,Auto mode active
-ManualControl,Manual_q_f_Set,DB1.DBD280,Real,ReadWrite,Manual fertilizer flow set
-ManualControl,Manual_q_a_Set,DB1.DBD284,Real,ReadWrite,Manual acid flow set
-ManualControl,Manual_q_n_Set,DB1.DBD288,Real,ReadWrite,Manual N pump set
-ManualControl,Manual_q_p_Set,DB1.DBD292,Real,ReadWrite,Manual P pump set
-ManualControl,Manual_q_k_Set,DB1.DBD296,Real,ReadWrite,Manual K pump set
-ManualControl,Comm_Normal,DB1.DBX300.0,Bool,ReadOnly,Communication normal after LAD interlock
-ManualControl,Manual_PumpValve_Enable,DB1.DBX300.1,Bool,ReadOnly,Manual pump valve enable
-ManualControl,Manual_q_f_Selected,DB1.DBD304,Real,ReadOnly,Manual fertilizer flow selected by LAD
-ManualControl,Manual_q_a_Selected,DB1.DBD308,Real,ReadOnly,Manual acid flow selected by LAD
-ManualControl,q_f_cmd,DB1.DBD24,Real,ReadOnly,Fertilizer flow command after limiter
-ManualControl,q_a_cmd,DB1.DBD28,Real,ReadOnly,Acid flow command after limiter
-PIDSettings,Kp_EC_Set,DB1.DBD126,Real,ReadWrite,EC proportional gain
-PIDSettings,Ki_EC_Set,DB1.DBD130,Real,ReadWrite,EC integral gain
-PIDSettings,Kd_EC_Set,DB1.DBD134,Real,ReadWrite,EC derivative gain
-PIDSettings,Kp_pH_Set,DB1.DBD138,Real,ReadWrite,pH proportional gain
-PIDSettings,Ki_pH_Set,DB1.DBD142,Real,ReadWrite,pH integral gain
-PIDSettings,Kd_pH_Set,DB1.DBD146,Real,ReadWrite,pH derivative gain
-PIDSettings,N_Enable,DB1.DBD150,Real,ReadWrite,N channel enable as 0.0 or 1.0
-PIDSettings,N_Ratio,DB1.DBD154,Real,ReadWrite,N ratio
-PIDSettings,N_Max,DB1.DBD178,Real,ReadWrite,N maximum flow
-PIDSettings,P_Enable,DB1.DBD190,Real,ReadWrite,P channel enable as 0.0 or 1.0
-PIDSettings,P_Ratio,DB1.DBD194,Real,ReadWrite,P ratio
-PIDSettings,P_Max,DB1.DBD218,Real,ReadWrite,P maximum flow
-PIDSettings,K_Enable,DB1.DBD230,Real,ReadWrite,K channel enable as 0.0 or 1.0
-PIDSettings,K_Ratio,DB1.DBD234,Real,ReadWrite,K ratio
-PIDSettings,K_Max,DB1.DBD258,Real,ReadWrite,K maximum flow
-PIDSettings,EC_Trim_Band,DB1.DBD270,Real,ReadWrite,EC trim band
-PIDSettings,pH_Trim_Band,DB1.DBD274,Real,ReadWrite,pH trim band
-PIDSettings,Stage_Auto_SP_Enable,DB1.DBX124.1,Bool,ReadWrite,Enable stage auto setpoint
-Diagnostics,System_Alarm_Light,DB1.DBX44.0,Bool,ReadOnly,System alarm lamp
-Diagnostics,Remote_Heartbeat,DB1.DBW18,Int,ReadOnly,Remote heartbeat value
-Diagnostics,Remote_Comms_OK,DB1.DBX20.0,Bool,ReadOnly,Remote communication status
-Diagnostics,Watchdog_Timer,DB1.DBW22,Int,ReadOnly,Watchdog timer
-Diagnostics,Last_Heartbeat,DB1.DBW46,Int,ReadOnly,Last heartbeat snapshot in PLC
-Diagnostics,Watchdog_Count,DB1.DBW48,Int,ReadOnly,Internal watchdog count
-Diagnostics,Emergency_Stop,DB1.DBX278.2,Bool,ReadOnly,Emergency stop state
-Diagnostics,Manual_Mode,DB1.DBX278.0,Bool,ReadOnly,Manual mode command
-Diagnostics,Auto_Mode,DB1.DBX278.1,Bool,ReadOnly,Auto mode command
-Diagnostics,Manual_Active,DB1.DBX278.3,Bool,ReadOnly,Manual mode active
-Diagnostics,Auto_Active,DB1.DBX278.4,Bool,ReadOnly,Auto mode active
-Diagnostics,Comm_Normal,DB1.DBX300.0,Bool,ReadOnly,Communication normal
-Diagnostics,Manual_PumpValve_Enable,DB1.DBX300.1,Bool,ReadOnly,Manual pump valve enable
-Diagnostics,Manual_q_f_Set,DB1.DBD280,Real,ReadOnly,Manual fertilizer flow set
-Diagnostics,Manual_q_f_Selected,DB1.DBD304,Real,ReadOnly,Manual fertilizer flow selected
-Diagnostics,Manual_q_a_Set,DB1.DBD284,Real,ReadOnly,Manual acid flow set
-Diagnostics,Manual_q_a_Selected,DB1.DBD308,Real,ReadOnly,Manual acid flow selected
+﻿Screen,TagName,Address,DataType,Access,Role
+MainOverview,EC_Set_SP,DB1.DBD0,real,ReadWrite,Operator
+MainOverview,pH_Set_SP,DB1.DBD4,real,ReadWrite,Operator
+MainOverview,EC_Actual,DB1.DBD8,real,ReadOnly,Operator
+MainOverview,pH_Actual,DB1.DBD12,real,ReadOnly,Operator
+MainOverview,Active_EC_SP,DB1.DBD116,real,ReadOnly,Operator
+MainOverview,Active_pH_SP,DB1.DBD120,real,ReadOnly,Operator
+MainOverview,Growth_Stage,DB1.DBW106,int,ReadOnly,Operator
+MainOverview,q_f_cmd,DB1.DBD24,real,ReadOnly,Operator
+MainOverview,q_a_cmd,DB1.DBD28,real,ReadOnly,Operator
+MainOverview,q_n_cmd,DB1.DBD182,real,ReadOnly,Operator
+MainOverview,q_p_cmd,DB1.DBD222,real,ReadOnly,Operator
+MainOverview,q_k_cmd,DB1.DBD262,real,ReadOnly,Operator
+MainOverview,Qw_Actual,DB1.DBD408,real,ReadOnly,Operator
+MainOverview,Pressure_Actual,DB1.DBD416,real,ReadOnly,Operator
+MainOverview,Water_Pump_Run_CMD,DB1.DBX436.0,bool,ReadOnly,Operator
+MainOverview,Water_Flow_OK,DB1.DBX436.4,bool,ReadOnly,Operator
+MainOverview,Water_Batch_Phase,DB1.DBW460,int,ReadOnly,Operator
+MainOverview,Batch_Fertigation_Active,DB1.DBX462.0,bool,ReadOnly,Operator
+MainOverview,Remote_Comms_OK,DB1.DBX20.0,bool,ReadOnly,Operator
+MainOverview,System_Alarm_Light,DB1.DBX44.0,bool,ReadOnly,Operator
+MainOverview,Deployment_Mode,DB1.DBW764,int,ReadWrite,Engineer
+MainOverview,Actuator_Enable_Permitted,DB1.DBX766.3,bool,ReadOnly,Operator
+ManualControl,Manual_Mode,DB1.DBX278.0,bool,ReadWrite,Operator
+ManualControl,Auto_Mode,DB1.DBX278.1,bool,ReadWrite,Operator
+ManualControl,Emergency_Stop,DB1.DBX278.2,bool,ReadOnly,Operator
+ManualControl,Soft_Stop_Request,DB1.DBX766.0,bool,ReadWrite,Operator
+ManualControl,Manual_Active,DB1.DBX278.3,bool,ReadOnly,Operator
+ManualControl,Auto_Active,DB1.DBX278.4,bool,ReadOnly,Operator
+ManualControl,Manual_PumpValve_Enable,DB1.DBX300.1,bool,ReadOnly,Operator
+ManualControl,Manual_q_f_Set,DB1.DBD280,real,ReadWrite,Operator
+ManualControl,Manual_q_a_Set,DB1.DBD284,real,ReadWrite,Operator
+ManualControl,Manual_q_n_Set,DB1.DBD288,real,ReadWrite,Operator
+ManualControl,Manual_q_p_Set,DB1.DBD292,real,ReadWrite,Operator
+ManualControl,Manual_q_k_Set,DB1.DBD296,real,ReadWrite,Operator
+ManualControl,Manual_q_f_Selected,DB1.DBD304,real,ReadOnly,Operator
+ManualControl,Manual_q_a_Selected,DB1.DBD308,real,ReadOnly,Operator
+ManualControl,Water_Enable,DB1.DBD400,real,ReadWrite,Operator
+ManualControl,Qw_Set,DB1.DBD404,real,ReadWrite,Operator
+ManualControl,Pressure_Set,DB1.DBD412,real,ReadWrite,Operator
+ManualControl,Water_Volume_SP,DB1.DBD420,real,ReadWrite,Operator
+ManualControl,Water_Pump_Reset,DB1.DBX442.5,bool,ReadWrite,Operator
+ManualControl,Actuator_Enable_Request,DB1.DBX766.1,bool,ReadWrite,Engineer
+ManualControl,Actuator_Enable_Permitted,DB1.DBX766.3,bool,ReadOnly,Operator
+AlarmDiagnostics,Remote_Heartbeat,DB1.DBW18,int,ReadOnly,Operator
+AlarmDiagnostics,Remote_Comms_OK,DB1.DBX20.0,bool,ReadOnly,Operator
+AlarmDiagnostics,Watchdog_Timer,DB1.DBW22,int,ReadOnly,Operator
+AlarmDiagnostics,System_Alarm_Light,DB1.DBX44.0,bool,ReadOnly,Operator
+AlarmDiagnostics,Emergency_Stop,DB1.DBX278.2,bool,ReadOnly,Operator
+AlarmDiagnostics,Soft_Stop_Request,DB1.DBX766.0,bool,ReadWrite,Operator
+AlarmDiagnostics,Deployment_Mode,DB1.DBW764,int,ReadWrite,Engineer
+AlarmDiagnostics,Field_IO_Ready,DB1.DBX766.2,bool,ReadOnly,Operator
+AlarmDiagnostics,Actuator_Enable_Permitted,DB1.DBX766.3,bool,ReadOnly,Operator
+AlarmDiagnostics,Physical_EStop_OK,DB1.DBX766.4,bool,ReadOnly,Operator
+AlarmDiagnostics,Sensor_Fault_Any,DB1.DBX766.5,bool,ReadOnly,Operator
+AlarmDiagnostics,Drive_Fault_Any,DB1.DBX766.6,bool,ReadOnly,Operator
+AlarmDiagnostics,Actuator_Execution_Enable,DB1.DBX529.0,bool,ReadOnly,Operator
+AlarmDiagnostics,Actuator_Any_Alarm,DB1.DBX529.1,bool,ReadOnly,Operator
+AlarmDiagnostics,Actuator_Any_Trip,DB1.DBX529.2,bool,ReadOnly,Operator
+AlarmDiagnostics,Water_Pump_Running,DB1.DBX436.1,bool,ReadOnly,Operator
+AlarmDiagnostics,Water_Pump_Ready,DB1.DBX436.2,bool,ReadOnly,Operator
+AlarmDiagnostics,Water_Pump_Fault,DB1.DBX436.3,bool,ReadOnly,Operator
+AlarmDiagnostics,Water_Pump_Alarm,DB1.DBX442.0,bool,ReadOnly,Operator
+AlarmDiagnostics,Water_Pump_Drive_Ready,DB1.DBX442.2,bool,ReadOnly,Operator
+AlarmDiagnostics,Water_Pump_Drive_Fault,DB1.DBX442.3,bool,ReadOnly,Operator
+AlarmDiagnostics,Water_Source_Low_Level,DB1.DBX442.4,bool,ReadOnly,Operator
+AlarmDiagnostics,Water_Volume_Actual,DB1.DBD424,real,ReadOnly,Operator
+AlarmDiagnostics,Water_Batch_Phase,DB1.DBW460,int,ReadOnly,Operator
+PIDSettings,Kp_EC_Set,DB1.DBD126,real,ReadWrite,Engineer
+PIDSettings,Ki_EC_Set,DB1.DBD130,real,ReadWrite,Engineer
+PIDSettings,Kd_EC_Set,DB1.DBD134,real,ReadWrite,Engineer
+PIDSettings,Kp_pH_Set,DB1.DBD138,real,ReadWrite,Engineer
+PIDSettings,Ki_pH_Set,DB1.DBD142,real,ReadWrite,Engineer
+PIDSettings,Kd_pH_Set,DB1.DBD146,real,ReadWrite,Engineer
+PIDSettings,N_Enable,DB1.DBD150,real,ReadWrite,Engineer
+PIDSettings,N_Ratio,DB1.DBD154,real,ReadWrite,Engineer
+PIDSettings,N_Max,DB1.DBD178,real,ReadWrite,Engineer
+PIDSettings,P_Enable,DB1.DBD190,real,ReadWrite,Engineer
+PIDSettings,P_Ratio,DB1.DBD194,real,ReadWrite,Engineer
+PIDSettings,P_Max,DB1.DBD218,real,ReadWrite,Engineer
+PIDSettings,K_Enable,DB1.DBD230,real,ReadWrite,Engineer
+PIDSettings,K_Ratio,DB1.DBD234,real,ReadWrite,Engineer
+PIDSettings,K_Max,DB1.DBD258,real,ReadWrite,Engineer
+PIDSettings,EC_Trim_Band,DB1.DBD270,real,ReadWrite,Engineer
+PIDSettings,pH_Trim_Band,DB1.DBD274,real,ReadWrite,Engineer
+PIDSettings,q_f_min,DB1.DBD496,real,ReadWrite,Engineer
+PIDSettings,q_f_max,DB1.DBD500,real,ReadWrite,Engineer
+PIDSettings,q_a_min,DB1.DBD504,real,ReadWrite,Engineer
+PIDSettings,q_a_max,DB1.DBD508,real,ReadWrite,Engineer
+PIDSettings,Pre_Flush_Ratio,DB1.DBD444,real,ReadWrite,Engineer
+PIDSettings,Post_Flush_Ratio,DB1.DBD448,real,ReadWrite,Engineer
+PIDSettings,Stage_Auto_SP_Enable,DB1.DBX124.1,bool,ReadWrite,Engineer
+PIDSettings,G_EC_F,DB1.DBD464,real,ReadWrite,Engineer
+PIDSettings,G_EC_A,DB1.DBD468,real,ReadWrite,Engineer
+PIDSettings,G_pH_F,DB1.DBD472,real,ReadWrite,Engineer
+PIDSettings,G_pH_A,DB1.DBD476,real,ReadWrite,Engineer
+PIDSettings,Decoupler_Weight,DB1.DBD480,real,ReadWrite,Engineer
+PIDSettings,Decoupler_Regularization,DB1.DBD484,real,ReadWrite,Engineer
+PIDSettings,Mixing_Delay_s,DB1.DBD488,real,ReadWrite,Engineer
+PIDSettings,Decoupler_Determinant_Min,DB1.DBD492,real,ReadWrite,Engineer
+PIDSettings,Decoupler_Enable,DB1.DBX512.0,bool,ReadWrite,Engineer

@@ -44,6 +44,21 @@ pip-wheel-metadata/
 *.tmp
 *.bak
 *.swp
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local secrets and machine-specific environment overrides
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
 
 # IDE / local tooling
 .idea/
@@ -55,11 +70,18 @@ pip-wheel-metadata/
 
 # Local weather / simulation cache
 .weather_cache/
+.uploads/
+tmp/
 results/
 rl_logs/
 rl_models/
 pic_output/
 experiments/images/
+
+# Local databases created by dashboard/backend experiments
+*.sqlite
+*.sqlite3
+*.db-journal
 
 # Local document render outputs
 docx_render_check/

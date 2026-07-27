@@ -18,8 +18,8 @@ PLC 主水泵执行层
 PLC FB_FertigationControl
   -> 目标保护
   -> 反馈滤波
-  -> EC 前馈 + 模糊自适应 PID
-  -> pH 连续前馈 + 模糊自适应 PID + 提前停酸
+  -> EC 前馈 + 非线性增益调度 PID（V2主模式将切换为IMC-PI/Smith）
+  -> pH 酸液脉冲安全带（5.8～6.5）
   -> 限幅和斜坡限速
   -> 输出 q_f_cmd、q_a_cmd
 

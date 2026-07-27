@@ -3,7 +3,7 @@ SAC 闭环评估脚本 — eval_sac.py
 ================================
 
 加载训练好的 SAC 模型，在全生育期（8 次灌溉事件）上做确定性推演，
-录制 EC_set/pH_set、执行层 q_f/q_a、土壤水盐状态和灌溉过程数据。
+录制水倍率/EC残差、执行层 q_f/q_a、土壤水盐状态和灌溉过程数据。
 """
 
 import argparse
@@ -100,25 +100,31 @@ class SACSeasonRunner:
             self._auto_discover()
 
     def _auto_discover(self):
+        residual_model = os.path.join(self.model_dir, "sac_residual_all_final")
+        if os.path.exists(residual_model + ".zip"):
+            self.models = {tag: residual_model for tag in ["ini", "dev", "mid", "late"]}
+            return
         self.models.update(get_existing_stage_models())
         for tag in ["ini", "dev", "mid", "late"]:
             if tag in self.models:
                 continue
-            path = os.path.join(self.model_dir, f"sac_{tag}_final")
-            if os.path.exists(path + ".zip"):
-                self.models[tag] = path
+            for stem in (f"sac_residual_{tag}_final", f"sac_{tag}_final"):
+                path = os.path.join(self.model_dir, stem)
+                if os.path.exists(path + ".zip"):
+                    self.models[tag] = path
+                    break
         if not self.models:
             for tag in ["mid", "ini", "dev", "late"]:
-                path = os.path.join(self.model_dir, f"sac_{tag}_final")
+                path = os.path.join(self.model_dir, f"sac_residual_{tag}_final")
                 if os.path.exists(path + ".zip"):
                     self.models = {t: path for t in ["ini", "dev", "mid", "late"]}
                     logger.info(f"[INFO] 未找到全部阶段模型，使用单一模型: {path}")
                     break
 
     def get_action(self, obs: np.ndarray, stage_tag: str) -> np.ndarray:
-        """给定原始观测和阶段标签，返回确定性的 SAC 动作 [EC_set, pH_set]。"""
+        """返回确定性的 V2 残差动作 [water_multiplier, EC_residual]。"""
         if stage_tag not in self.models or self.models[stage_tag] is None:
-            fixed = load_config().action().get("fixed_strategy", [1.5, 6.0])
+            fixed = load_config().action().get("fixed_strategy", [1.0, 0.0])
             return np.array(fixed, dtype=np.float32)
 
         path = self.models[stage_tag]

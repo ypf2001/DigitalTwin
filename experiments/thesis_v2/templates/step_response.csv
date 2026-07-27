@@ -1,0 +1,2 @@
+experiment_id,run_id,stage,operating_point,batch_volume_l,step_name,replicate,time_s,q_water_l_min,q_f_cmd_l_min,q_a_cmd_l_min,ec_ds_m,ph,temperature_c,flow_ok,alarm,data_status
+E3,,,,5,fertilizer_pos,1,0,,,,,,,0,0,measured

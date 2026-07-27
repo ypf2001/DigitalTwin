@@ -29,6 +29,11 @@ def test_gym_env_step_accepts_fixed_strategy_action():
     assert "ph_set" in step_info
     assert "q_f" in step_info
     assert "q_a" in step_info
+    assert step_info["water_multiplier"] == 1.0
+    assert step_info["ec_residual"] == 0.0
+    assert step_info["ph_band_low"] == 5.8
+    assert step_info["ph_band_high"] == 6.5
+    assert step_info["ph_band_violation"] >= 0.0
     assert isinstance(terminated, bool)
 
 

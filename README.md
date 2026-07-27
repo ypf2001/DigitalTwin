@@ -33,7 +33,7 @@ SAC 只输出 EC/pH 目标，不直接控制泵。PLC 负责 PID、前馈、限�
 
 当前未通过：
 
-- pH 阶跃方向的交叉耦合没有稳定降低。
+- pH 阶跃方向的交叉耦合仅降低约 3.2%~5.2%，未达到 10% 验收门槛。
 - 部分权重增加 EC 误差或泵限幅。
 - `Decoupler_Enable` 不能打开。
 - 真实设备测试不能开始。
@@ -212,6 +212,10 @@ python experiments\run_plc_decoupler_ab.py `
 - 报警、通信故障和目标保护不增加。
 
 当前结果位于 `results/plc_decoupler_ab/20260718_163434/`，其中 `Weight=0.1/0.25/0.5` 均未通过。
+交叉耦合峰值采用阶跃前最后 120 s 实际稳态均值作为基线，不再把设定值跟踪偏差计入耦合量。
+重分析结果保存在 `summary_reanalyzed.json` 和 `ab_verdict_reanalyzed.json`：EC 阶跃方向降低约
+17.0%~21.8%，pH 阶跃方向降低约 3.2%~5.2%；同时 EC 阶跃的 EC MAE 增加约
+0.039~0.043，因此当前仍不允许启用解耦。
 
 离线重新评估：
 
@@ -220,24 +224,16 @@ python experiments\evaluate_plc_decoupler_ab.py `
   results\plc_decoupler_ab\20260718_163434\summary.json
 ```
 
-## Openness 编译和下载
+## TIA Portal 编译和下载
 
-导入 SCL、导入 LAD、编译和保存：
+工程导入、编译、保存和下载统一通过 `tia_portal` MCP 完成，不再由 Python 直接调用 Openness。使用 `$tia-portal-openness`，按以下顺序执行：
 
-```powershell
-cd "D:\Digital Twin"
-& .\plc_openness_v21\run_import_xiaweiji.ps1 `
-  -PlcRepoPath "D:\dw_plc\xiaweiji"
+```text
+Bootstrap -> Connect -> AttachToOpenProject/OpenProject -> GetProjectTree
+-> 导入或修改 -> CompileAndDiagnosePlc -> SaveProject
 ```
 
-下载到 PLCSIM：
-
-```powershell
-python .\plc_openness_v21\examples\download_plcsim_software.py `
-  --project "D:\dw_plc\xiaweiji\xiaweiji.ap21" --plc PLC_1
-```
-
-当前项目文件为 `D:\dw_plc\xiaweiji\xiaweiji.ap21`。下载前确认 `config/deployment.yaml` 使用 `simulation_plc`，并确认 TIA/PLCSIM 处于可操作状态。
+下载前确认 `config/deployment.yaml` 使用正确的部署配置，并依次调用 `CheckDownloadReadiness` 和 `DownloadToPlc`。Snap7 的 `plc_client.py` 仍只负责 PLC/PLCSIM 运行时数据通信。
 
 ## 手动模式烟测
 

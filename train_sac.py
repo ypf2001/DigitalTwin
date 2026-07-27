@@ -68,6 +68,7 @@ def make_env(stage_name: str, obs_noise: float = None, reward_scale: float = Non
             reward_scale=reward_scale if reward_scale is not None else sac_cfg.get("reward_scale", 0.1),
             soil_model=soil_model,
             domain_randomization=domain_randomization,
+            stage_aware=(stage_name.upper() == "ALL"),
         )
         return env
     return _init
@@ -90,8 +91,11 @@ def _configuration_fingerprint(soil_model: str) -> tuple[str, dict]:
 def _check_model_metadata(model_path: str, fingerprint: str, allow_mismatch: bool) -> None:
     metadata_path = model_path + ".metadata.json"
     if not os.path.exists(metadata_path):
-        logger.warning("Model metadata is missing; calibration version cannot be checked: %s", model_path)
-        return
+        message = f"Model metadata is missing; legacy action semantics cannot be excluded: {model_path}"
+        if allow_mismatch:
+            logger.warning(message)
+            return
+        raise RuntimeError(message)
     with open(metadata_path, "r", encoding="utf-8") as f:
         metadata = json.load(f)
     previous = metadata.get("configuration_fingerprint")
@@ -110,8 +114,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SAC 训练")
     parser.add_argument("--timesteps", type=int, default=sac_cfg["total_timesteps"],
                         help="总训练步数")
-    parser.add_argument("--stage", type=str, default="MID",
-                         choices=["INI", "DEV", "MID", "LATE"])
+    parser.add_argument("--stage", type=str, default="ALL",
+                         choices=["ALL", "INI", "DEV", "MID", "LATE"],
+                         help="ALL trains the single stage-aware V2 policy")
     parser.add_argument("--save-dir", type=str, default="./rl_models")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--resume", action="store_true",
@@ -163,7 +168,7 @@ if __name__ == "__main__":
 
     # 阶段名简写
     stage_short = args.stage.upper()
-    model_tag = stage_short.lower()
+    model_tag = "residual_all" if stage_short == "ALL" else f"residual_{stage_short.lower()}"
     stage_eval_log_dir = os.path.join(rl_logs_dir, model_tag)
     stage_best_model_dir = os.path.join(args.save_dir, f"best_{model_tag}")
     os.makedirs(stage_eval_log_dir, exist_ok=True)

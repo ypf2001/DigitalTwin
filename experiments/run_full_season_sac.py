@@ -139,9 +139,13 @@ class StageModelBank:
             for tag in ("ini", "dev", "mid", "late"):
                 if tag in self.model_paths:
                     continue
-                candidate = model_dir / f"sac_{tag}_final"
-                if candidate.with_suffix(".zip").exists():
-                    self.model_paths[tag] = candidate
+                for candidate in (
+                    model_dir / f"sac_residual_{tag}_final",
+                    model_dir / f"sac_{tag}_final",
+                ):
+                    if candidate.with_suffix(".zip").exists():
+                        self.model_paths[tag] = candidate
+                        break
 
     @staticmethod
     def _strip_zip(path: Path) -> Path:

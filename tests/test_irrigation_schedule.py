@@ -25,3 +25,10 @@ def test_normalize_obs_range():
     assert norm.shape == (23,)
     assert np.all(norm >= -1.0)
     assert np.all(norm <= 1.0)
+
+
+def test_day65_dual_stage_rule():
+    schedule = get_irrigation_schedule()
+    assert schedule[-1].day == 65.0
+    assert schedule[-1].growth_stage.value == "bulking"
+    assert schedule[-1].control_stage == "LATE"

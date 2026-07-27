@@ -1,0 +1,93 @@
+﻿{
+    S7_BlockTitle := "MLC_4iB";
+    S7_Optimized := "TRUE";
+    S7_PreferredLanguage := "LAD";
+    S7_Version := "0.1"
+}
+ORGANIZATION_BLOCK "Main"
+    VAR_TEMP
+        Temp_Target_F : Real;
+        Temp_Target_A : Real;
+        { S7_MLC := "MLC_Nw" }
+        hbRead : Int;
+    END_VAR
+
+    { S7_Language := "SCL" }
+    NETWORK
+        // Scale and diagnose logical field inputs, then resolve the current-scan permit in LAD.
+        "FC_FieldIO"();
+        "FC_FieldSafety_LAD"();
+    END_NETWORK
+    { S7_Language := "SCL" }
+    NETWORK
+        // ============================================================
+        // 1. 心跳检测
+        // ============================================================
+        // 用TON定时器替代计数器
+        #hbRead := "DB1".Remote_Heartbeat;
+        IF #hbRead <> "DB1".Last_Heartbeat THEN
+            "DB1".Remote_Comms_OK := TRUE;
+            "DB1".Last_Heartbeat := #hbRead;
+            "DB1".Watchdog_Timer := 0;
+            "DB1".tWatchdog(IN := FALSE,
+                       PT := T#3s); // 复位定时器
+        ELSE
+            "DB1".tWatchdog(IN := TRUE,
+                       PT := T#3s);  // 开始计时
+        IF  "DB1".tWatchdog.Q THEN
+                "DB1".Remote_Comms_OK := FALSE;
+            END_IF;
+        END_IF;
+        
+        // ============================================================
+        // 3. 通信
+        // ============================================================
+        IF "DB1".Remote_Comms_OK THEN
+            "DB1".Ramp_Target_F := "DB1".Valve_F_Opt_SP;
+            "DB1".Ramp_Target_A := "DB1".Valve_A_Opt_SP;
+            "DB1".System_Alarm_Light := FALSE;
+        ELSE
+            "DB1".Ramp_Target_F := 0.3;
+            "DB1".Ramp_Target_A := 0.1;
+            "DB1".System_Alarm_Light := TRUE;
+        END_IF;
+        
+        
+        
+        
+        // ============================================================
+        // 3. 防震荡护盾
+        // ============================================================
+        "inst_RL_F"(target := "DB1".Ramp_Target_F,
+                    maxRateUp := 5.0,
+                    maxRateDown := 10.0,
+                    cycleTime := 0.01,
+                    enable := TRUE,
+                    reset := "FirstScan");
+        "DB1".Actual_Valve_F := "inst_RL_F".output;
+        
+        "inst_RL_A"(target := "DB1".Ramp_Target_A,
+                    maxRateUp := 5.0,
+                    maxRateDown := 10.0,
+                    cycleTime := 0.01,
+                    enable := TRUE,
+                    reset := "FirstScan");
+        "DB1".Actual_Valve_A := "inst_RL_A".output;
+        // ============================================================
+        // 4. 模拟量输出
+        // ============================================================
+        "DB1".AQ_Valve_F_Raw := REAL_TO_INT("DB1".Actual_Valve_F * 27648.0);
+        "DB1".AQ_Valve_A_Raw := REAL_TO_INT("DB1".Actual_Valve_A * 27648.0);
+        
+        
+    END_NETWORK
+    { S7_Language := "SCL" }
+    NETWORK
+        "FC_CallFertigationControl"();
+    END_NETWORK
+    { S7_Language := "SCL" }
+    NETWORK
+        // All future physical AO/DO values are gated inside this LAD block.
+        "FC_FieldOutput_LAD"();
+    END_NETWORK
+END_ORGANIZATION_BLOCK

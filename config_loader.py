@@ -67,6 +67,10 @@ class _Config:
     def action(self) -> dict:
         return self._data.get("action", {})
 
+    def thesis_experiment_v2(self) -> dict:
+        """Return the preregistered V2 thesis experiment contract."""
+        return self._data.get("thesis_experiment_v2", {})
+
     def obs(self) -> dict:
         return self._data.get("obs", {})
 

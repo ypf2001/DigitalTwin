@@ -111,9 +111,9 @@ def run_event_response(
         except Exception as exc:
             logger.warning("Weather lookup failed, using config defaults: %s", exc)
 
-    # 固定策略动作来自 YAML。B 方案中含义是 [EC_set, pH_set]，
-    # 环境内部再通过执行层模型转换为 q_f/q_a。
-    action = np.array(cfg.action().get("fixed_strategy", [1.5, 6.0]), dtype=np.float32)
+    # 固定策略动作来自 YAML，V2 含义为 [water_multiplier, EC_residual]。
+    # 环境内部叠加阶段 EC 基线并执行 pH 安全带。
+    action = np.array(cfg.action().get("fixed_strategy", [1.0, 0.0]), dtype=np.float32)
     env = DigitalTwinEnv(
         growth_stage=stage,
         area_ha=env_cfg.get("area_ha", 0.1),

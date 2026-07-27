@@ -255,7 +255,7 @@ def _train_stage(stage_name: str, timesteps: int | None) -> tuple[str, str]:
     if timesteps is not None:
         train_command.extend(["--timesteps", str(timesteps)])
     _run_step(f"从头训练 SAC ({stage_name})", train_command)
-    model_path = ROOT / "rl_models" / f"sac_{stage_name.lower()}_final"
+    model_path = ROOT / "rl_models" / f"sac_residual_{stage_name.lower()}_final"
     return stage_name, str(model_path) + ".zip"
 
 
@@ -464,7 +464,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         )
 
         primary_stage = args.stage if args.single_stage else "MID"
-        model_path = ROOT / "rl_models" / f"sac_{primary_stage.lower()}_final"
+        model_path = ROOT / "rl_models" / f"sac_residual_{primary_stage.lower()}_final"
         model_files_exist = {stage: Path(path).exists() for stage, path in trained_models.items()}
         if args.acceptance_smoke:
             training_mode = "four_stage_smoke"

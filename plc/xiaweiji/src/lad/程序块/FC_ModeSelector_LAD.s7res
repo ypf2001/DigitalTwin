@@ -1,0 +1,19 @@
+﻿MultiLingualTexts:
+  - id: MLC_hR
+    zh-CN: Emergency stop mode
+    en-US: Emergency stop mode
+  - id: MLC_546
+    zh-CN: Manual mode
+    en-US: Manual mode
+  - id: MLC_4qu
+    zh-CN: Remote automatic mode
+    en-US: Remote automatic mode
+  - id: MLC_4cz
+    zh-CN: Stage automatic mode
+    en-US: Stage automatic mode
+  - id: MLC_4TZ
+    zh-CN: Local setpoint automatic mode
+    en-US: Local setpoint automatic mode
+  - id: MLC_32X
+    zh-CN: Standby mode
+    en-US: Standby mode
