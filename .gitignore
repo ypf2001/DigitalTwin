@@ -1,35 +1,125 @@
-# 虚拟环境
+# Python virtual environments
 venv/
+.venv/
 env/
+.python-version
 
-# IDE 配置
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+.hypothesis/
+.nox/
+.tox/
+
+# Coverage and test outputs
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Packaging / build artifacts
+build/
+dist/
+site/
+.eggs/
+*.egg
+*.egg-info/
+pip-wheel-metadata/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Logs and local runtime files
+*.log
+*.pid
+*.seed
+*.out
+*.err
+*.tmp
+*.bak
+*.swp
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local secrets and machine-specific environment overrides
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE / local tooling
 .idea/
 .vscode/
-
-# 缓存和日志
-.weather_cache/
-rl_logs/
-__pycache__/
-*.pyc
-*.log
-
-# 模型和输出
-rl_models/
-pic_output/
-
-# Web 前端
-node_modules/
-dist/
-.vite/
-
-# Web 运行时输出
-web_app/backend/static/images/
-
-# 工具配置
 .claude/
-.ruff_cache/
+.agents/
+.qwen/
 .junie/
 
-# Experiment outputs
+# Local weather / simulation cache
+.weather_cache/
+.uploads/
+tmp/
 results/
+rl_logs/
+rl_models/
+pic_output/
 experiments/images/
+
+# Local databases created by dashboard/backend experiments
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Local document render outputs
+docx_render_check/
+docx_render_check_italic/
+
+# TIA Openness generated artifacts (debug / intermediate)
+plc_openness_v21/generated_hmi/
+plc_openness_v21/generated_lad/
+plc_openness_v21/live_export_after_nav/
+plc_openness_v21/redesigned_hmi_screens*/
+plc_openness_v21/exported_hmi_screens/
+plc_openness_v21/**/event_probe/
+plc_openness_v21/**/format_live*/
+plc_openness_v21/**/format_probe*/
+plc_openness_v21/**/restore_live/
+plc_openness_v21/**/verify_after_import/
+plc_openness_v21/**/probe_restore_dir/
+plc_openness_v21/**/screen02_redesign/
+
+# Frontend build outputs
+node_modules/
+.vite/
+
+# Web runtime generated files
+web_app/backend/static/images/
+
+# Large auto-dump text files (keep curated docs, ignore page dumps)
+docs/tia_page_*.txt
+docs/tia_openness_pages_*.txt
+/docs/开题报告PPT_数字孪生SAC_PLC.pptx
+/docs/tia_export_FC_ModeInterlock_LAD_local_manual.xml
+/docs/tia_export_FC_ModeSelector_LAD.xml
+/docs/tia_export_FC_CallFertigationControl_mode_selector.xml
+/docs/开题报告PPT_数字孪生SAC_PLC.md
+/docs/田间数据免改代码标定与重训练流程.md
+/docs/土壤数字孪生V2参数替换说明.md
+/docs/TIA_Portal_Openness_学习笔记.md
+/docs/tia_openness_outline.txt
+/docs/KTP900_HMI手工搭建步骤.md
+/docs/PLC模式判定_LAD设计说明.md
+/docs/PLC模式真值表.md

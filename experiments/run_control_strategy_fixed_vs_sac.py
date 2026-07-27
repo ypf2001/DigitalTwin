@@ -28,6 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config_loader import load_config
+from sac_model_registry import get_stage_model_path
 from crop_model import GrowthStage
 from digital_twin_env import DigitalTwinEnv
 from irrigation_schedule import normalize_obs
@@ -76,7 +77,14 @@ def _load_sac_model(model_path: Path):
     return SAC.load(str(load_path))
 
 
-def _make_env(stage: GrowthStage, dt_min: float, duration_days: float, et0_mm_day: float, seed: int | None):
+def _make_env(
+    stage: GrowthStage,
+    dt_min: float,
+    duration_days: float,
+    et0_mm_day: float,
+    seed: int | None,
+    soil_model: str,
+):
     cfg = load_config()
     env_cfg = cfg.env()
     return DigitalTwinEnv(
@@ -86,6 +94,7 @@ def _make_env(stage: GrowthStage, dt_min: float, duration_days: float, et0_mm_da
         ep_len_days=duration_days,
         et0_mm_day=et0_mm_day,
         seed=seed,
+        soil_model=soil_model,
     )
 
 
@@ -98,14 +107,15 @@ def run_policy(
     event_hours: float,
     et0_mm_day: float,
     seed: int | None,
+    soil_model: str = "lumped_v1",
     continuous_control: bool = False,
     model=None,
 ) -> tuple[dict[str, list[float]], dict[str, Any]]:
     """运行单个策略并返回时序数据与统计指标。"""
     cfg = load_config()
     irr_cfg = cfg.irrigation()
-    fixed_action = np.array(cfg.action().get("fixed_strategy", [1.5, 6.0]), dtype=np.float32)
-    env = _make_env(stage, dt_min, duration_days, et0_mm_day, seed)
+    fixed_action = np.array(cfg.action().get("fixed_strategy", [1.0, 0.0]), dtype=np.float32)
+    env = _make_env(stage, dt_min, duration_days, et0_mm_day, seed, soil_model)
     obs = env.reset()
     dt_hours = dt_min / 60.0
     total_steps = int(round(duration_days * 24.0 / dt_hours))
@@ -133,14 +143,15 @@ def run_policy(
     stopped_by_safety = False
     for step in range(total_steps):
         in_event = continuous_control or event_start_step <= step < event_end_step
+        action_for_record = fixed_action.copy()
         if in_event:
             if model is None:
-                action = fixed_action.copy()
+                action_for_record = fixed_action.copy()
             else:
                 # SAC 训练时使用归一化观测，这里必须先归一化再 predict。
-                action, _ = model.predict(normalize_obs(obs), deterministic=True)
+                action_for_record, _ = model.predict(normalize_obs(obs), deterministic=True)
 
-            obs, _reward, done, info = env.step(action)
+            obs, _reward, done, info = env.step(action_for_record)
             if done and info.get("burn"):
                 # 安全评估模式：记录 burn，但不让整段 5 天评估提前结束。
                 # 后续改为 dry_step，观察系统恢复过程。
@@ -157,8 +168,8 @@ def run_policy(
         series["target_ec"].append(float(info["target_ec"]))
         series["ec_drip"].append(float(info["ec_drip"]))
         series["ph_drip"].append(float(info["ph_drip"]))
-        series["ec_set"].append(float(info.get("ec_set", action[0])))
-        series["ph_set"].append(float(info.get("ph_set", action[1])))
+        series["ec_set"].append(float(info.get("ec_set", action_for_record[0])))
+        series["ph_set"].append(float(info.get("ph_set", action_for_record[1])))
         series["irrigation_mm_h"].append(float(info["irrigation_mm_h"]))
         series["etc_mm_h"].append(float(info["etc_mm_h"]))
         series["q_f"].append(float(info["q_f"]))
@@ -181,6 +192,8 @@ def run_policy(
     q_a = np.array(series["q_a"], dtype=float)
     stats = {
         "policy": name,
+        "soil_model": env.soil_model,
+        "parameter_status": info.get("parameter_status", "unknown"),
         "steps": len(series["time_hours"]),
         "duration_hours": float(series["time_hours"][-1]) if series["time_hours"] else 0.0,
         "event_start_hour": event_start_hour,
@@ -396,7 +409,7 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description="Run fixed-policy vs SAC offline simulation.")
     parser.add_argument("--stage", default="MID", choices=list(STAGE_MAP.keys()))
-    parser.add_argument("--model", default=str(ROOT / "rl_models" / "sac_mid_final"))
+    parser.add_argument("--model", default=str(get_stage_model_path("mid")))
     parser.add_argument("--duration-days", type=float, default=float(env_cfg.get("ep_len_days", 5.0)))
     parser.add_argument("--event-start-hour", type=float, default=8.0)
     parser.add_argument("--event-hours", type=float, default=2.0)
@@ -408,6 +421,12 @@ def main() -> int:
     parser.add_argument("--dt-min", type=float, default=float(env_cfg.get("dt_min", 60.0)))
     parser.add_argument("--et0", type=float, default=float(env_cfg.get("et0_mm_day", 5.0)))
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--soil-model",
+        choices=["lumped_v1", "layered_v2"],
+        default="lumped_v1",
+        help="固定策略与 SAC 必须使用同一个土壤模型进行公平对比。",
+    )
     args = parser.parse_args()
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -421,11 +440,13 @@ def main() -> int:
 
     fixed_series, fixed_stats = run_policy(
         "fixed", stage, args.dt_min, args.duration_days, args.event_start_hour,
-        args.event_hours, args.et0, args.seed, args.continuous_control, model=None
+        args.event_hours, args.et0, args.seed, args.soil_model,
+        args.continuous_control, model=None
     )
     sac_series, sac_stats = run_policy(
         "sac", stage, args.dt_min, args.duration_days, args.event_start_hour,
-        args.event_hours, args.et0, args.seed, args.continuous_control, model=model
+        args.event_hours, args.et0, args.seed, args.soil_model,
+        args.continuous_control, model=model
     )
 
     _write_csv(out_dir / "fixed_timeseries.csv", fixed_series)
@@ -440,6 +461,7 @@ def main() -> int:
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "stage": args.stage,
         "model": str(Path(args.model)),
+        "soil_model": args.soil_model,
         "dt_min": args.dt_min,
         "duration_days": args.duration_days,
         "event_start_hour": args.event_start_hour,

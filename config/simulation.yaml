@@ -1,6 +1,6 @@
 env:
   area_ha: 0.1
-  dt_min: 60.0
+  dt_min: 5.0
   ep_len_days: 5.0
   et0_mm_day: 5.0
   obs_noise_std: 0.01
@@ -8,6 +8,25 @@ env:
   seed: null
   theta_fc: 0.32
   theta_wp: 0.04
+water_pump:
+  # SAC supplies a bounded water multiplier. Irrigation scheduling owns the
+  # baseline batch volume and the safety guard projects the final request.
+  mode: flow                 # flow | pressure
+  enabled_on_reset: true
+  q_set_l_min: 136.0
+  q_min_l_min: 0.0
+  q_max_l_min: 180.0
+  safe_flow_min_l_min: 20.0
+  pressure_set_bar: 1.8
+  rated_pressure_bar: 2.5
+  response_tau_min: 0.5
+  ramp_up_l_min_min: 300.0
+  ramp_down_l_min_min: 400.0
+  target_volume_l: 0.0       # 0 disables automatic volume completion
+  # A nonzero Water_Volume_SP is a complete irrigation batch. These two
+  # clean-water sections are included in the event total, not added on top.
+  pre_flush_ratio: 0.10
+  post_flush_ratio: 0.20
 experiment:
   short_dt_min: 5.0      # 短期仿真实验步长 (分钟)。用于解析 pipe.tau=8 min 的管道延迟，不影响 SAC 默认训练步长
   season_dt_min: 5.0     # 季节对比实验步长 (分钟)。用于 T1/T2 仿真导出更平滑的曲线，不作为训练默认步长
@@ -28,6 +47,8 @@ soil:
   K_sat: 15.3
   beta: 2.0
   root_depth_default: 300
+  dispersivity_cm: 5.0          # 河套灌区耕地/盐荒地初始弥散度，用于水盐运移或 Fluent 物质输运初值
+  molecular_diffusion_cm2_d: 0.7 # 河套灌区耕地/盐荒地分子扩散系数，Fluent 中需换算为 m2/s
 mixing_tank:
   volume: 100.0
   ec_conc: 35.0          # 肥料母液 EC (dS/m)，当前作为高浓度复配肥液的等效参数
@@ -37,11 +58,23 @@ pipe:
   tau: 8.0
   T: 3.5
 action:
-  # B 方案 SAC 动作空间：上层水肥目标值，不直接输出泵阀流量
-  ec_set_min: 0.8        # SAC 输出滴灌/混肥出口目标 EC 下限 (dS/m)
-  ec_set_max: 2.5        # SAC 输出滴灌/混肥出口目标 EC 上限 (dS/m)
-  ph_set_min: 5.8        # SAC 输出滴灌/混肥出口目标 pH 下限
-  ph_set_max: 6.8        # SAC 输出滴灌/混肥出口目标 pH 上限
+  # V2 residual SAC action: [water_multiplier, ec_residual_ds_m].
+  # pH is no longer learned; PLC owns the acid-only 5.8-6.5 safety band.
+  mode: residual_water_ec
+  water_multiplier_min: 0.8
+  water_multiplier_max: 1.2
+  ec_residual_min: -0.15
+  ec_residual_max: 0.15
+
+  # Absolute EC limits still protect the residual setpoint after it is added
+  # to the stage baseline. Legacy pH limits remain for commissioning scripts.
+  ec_set_min: 0.7
+  ec_set_max: 1.7
+  ph_set_min: 5.8
+  ph_set_max: 6.5
+  ph_band_low: 5.8
+  ph_band_high: 6.5
+  ph_nominal: 6.2
 
   # 执行层限幅：纯仿真由 SetpointToFlowController 使用；真实部署由 PLC-PID 使用
   q_f_min: 0.0
@@ -49,10 +82,15 @@ action:
   q_a_min: 0.0
   q_a_max: 4.0
 
-  # 固定目标策略 [EC_set, pH_set]，用于无 SAC 对比或模型缺失回退
+  # Fixed residual policy [water_multiplier, EC residual].
   fixed_strategy:
-  - 1.5                  # 固定策略目标 EC_set (dS/m)，接近块茎膨大期目标
-  - 6.0                  # 固定策略目标 pH_set
+  - 1.0
+  - 0.0
+
+  # Explicit legacy target for manual setpoint/controllability scripts.
+  legacy_fixed_setpoint:
+  - 1.5
+  - 6.2
 obs:
   history_len: 5
   etc_norm: 10.0
@@ -324,6 +362,588 @@ plc:
       offset: 274
       type: real
       bytes: 4
+
+    Manual_Mode:
+      offset: 278
+      bit: 0
+      type: bool
+      bytes: 1
+    Auto_Mode:
+      offset: 278
+      bit: 1
+      type: bool
+      bytes: 1
+    Emergency_Stop:
+      offset: 278
+      bit: 2
+      type: bool
+      bytes: 1
+    Manual_Active:
+      offset: 278
+      bit: 3
+      type: bool
+      bytes: 1
+    Auto_Active:
+      offset: 278
+      bit: 4
+      type: bool
+      bytes: 1
+    Manual_q_f_Set:
+      offset: 280
+      type: real
+      bytes: 4
+    Manual_q_a_Set:
+      offset: 284
+      type: real
+      bytes: 4
+    Manual_q_n_Set:
+      offset: 288
+      type: real
+      bytes: 4
+    Manual_q_p_Set:
+      offset: 292
+      type: real
+      bytes: 4
+    Manual_q_k_Set:
+      offset: 296
+      type: real
+      bytes: 4
+    Comm_Normal:
+      offset: 300
+      bit: 0
+      type: bool
+      bytes: 1
+    Manual_PumpValve_Enable:
+      offset: 300
+      bit: 1
+      type: bool
+      bytes: 1
+    Manual_q_f_Selected:
+      offset: 304
+      type: real
+      bytes: 4
+    Manual_q_a_Selected:
+      offset: 308
+      type: real
+      bytes: 4
+
+    # 既有内部输出诊断（固定偏移，不移动）。
+    q_f_raw:
+      offset: 50
+      type: real
+      bytes: 4
+    q_a_raw:
+      offset: 54
+      type: real
+      bytes: 4
+    q_f_limited:
+      offset: 58
+      bit: 0
+      type: bool
+      bytes: 1
+    q_a_limited:
+      offset: 58
+      bit: 1
+      type: bool
+      bytes: 1
+
+    # DB1 末尾追加的自适应 PID / NPK 协调控制诊断。
+    Kp_EC_Effective:
+      offset: 312
+      type: real
+      bytes: 4
+    Ki_EC_Effective:
+      offset: 316
+      type: real
+      bytes: 4
+    Kd_EC_Effective:
+      offset: 320
+      type: real
+      bytes: 4
+    Kp_pH_Effective:
+      offset: 324
+      type: real
+      bytes: 4
+    Ki_pH_Effective:
+      offset: 328
+      type: real
+      bytes: 4
+    Kd_pH_Effective:
+      offset: 332
+      type: real
+      bytes: 4
+    EC_PID_Error:
+      offset: 336
+      type: real
+      bytes: 4
+    pH_PID_Error:
+      offset: 340
+      type: real
+      bytes: 4
+    EC_PID_Integral:
+      offset: 344
+      type: real
+      bytes: 4
+    pH_PID_Integral:
+      offset: 348
+      type: real
+      bytes: 4
+    q_f_Feedforward:
+      offset: 352
+      type: real
+      bytes: 4
+    q_f_PID_Correction:
+      offset: 356
+      type: real
+      bytes: 4
+    q_a_Feedforward:
+      offset: 360
+      type: real
+      bytes: 4
+    q_a_PID_Correction:
+      offset: 364
+      type: real
+      bytes: 4
+    N_Error:
+      offset: 368
+      type: real
+      bytes: 4
+    P_Error:
+      offset: 372
+      type: real
+      bytes: 4
+    K_Error:
+      offset: 376
+      type: real
+      bytes: 4
+    N_PID_Correction:
+      offset: 380
+      type: real
+      bytes: 4
+    P_PID_Correction:
+      offset: 384
+      type: real
+      bytes: 4
+    K_PID_Correction:
+      offset: 388
+      type: real
+      bytes: 4
+    NPK_Optimization_Weight:
+      offset: 392
+      type: real
+      bytes: 4
+    NPK_Feedback_Valid:
+      offset: 396
+      bit: 0
+      type: bool
+      bytes: 1
+    NPK_Capacity_Limited:
+      offset: 396
+      bit: 1
+      type: bool
+      bytes: 1
+    Compressed_HIL_Enable:
+      offset: 396
+      bit: 2
+      type: bool
+      bytes: 1
+    Feedforward_Hold_Active:
+      offset: 396
+      bit: 3
+      type: bool
+      bytes: 1
+    Adaptive_PID_Active:
+      offset: 396
+      bit: 4
+      type: bool
+      bytes: 1
+    Fixed_PID_Test_Enable:
+      offset: 396
+      bit: 5
+      type: bool
+      bytes: 1
+
+    # Main irrigation-water pump channel. Bytes 397-399 are reserved in DB1
+    # so this deployment contract starts on a stable REAL boundary.
+    Water_Enable:
+      offset: 400
+      type: real
+      bytes: 4
+    Qw_Set:
+      offset: 404
+      type: real
+      bytes: 4
+    Qw_Actual:
+      offset: 408
+      type: real
+      bytes: 4
+    Pressure_Set:
+      offset: 412
+      type: real
+      bytes: 4
+    Pressure_Actual:
+      offset: 416
+      type: real
+      bytes: 4
+    Water_Volume_SP:
+      offset: 420
+      type: real
+      bytes: 4
+    Water_Volume_Actual:
+      offset: 424
+      type: real
+      bytes: 4
+    Water_Pump_Speed_CMD:
+      offset: 428
+      type: real
+      bytes: 4
+    Water_Pump_Speed_Actual:
+      offset: 432
+      type: real
+      bytes: 4
+    Water_Pump_Run_CMD:
+      offset: 436
+      bit: 0
+      type: bool
+      bytes: 1
+    Water_Pump_Running:
+      offset: 436
+      bit: 1
+      type: bool
+      bytes: 1
+    Water_Pump_Ready:
+      offset: 436
+      bit: 2
+      type: bool
+      bytes: 1
+    Water_Pump_Fault:
+      offset: 436
+      bit: 3
+      type: bool
+      bytes: 1
+    Water_Flow_OK:
+      offset: 436
+      bit: 4
+      type: bool
+      bytes: 1
+    Water_Volume_Complete:
+      offset: 436
+      bit: 5
+      type: bool
+      bytes: 1
+    AQ_Water_Pump_Raw:
+      offset: 438
+      type: int
+      bytes: 2
+    Water_Control_Mode:
+      offset: 440
+      type: int
+      bytes: 2
+    Water_Pump_Alarm:
+      offset: 442
+      bit: 0
+      type: bool
+      bytes: 1
+    Water_Pump_Run_Feedback:
+      offset: 442
+      bit: 1
+      type: bool
+      bytes: 1
+    Water_Pump_Drive_Ready:
+      offset: 442
+      bit: 2
+      type: bool
+      bytes: 1
+    Water_Pump_Drive_Fault:
+      offset: 442
+      bit: 3
+      type: bool
+      bytes: 1
+    Water_Source_Low_Level:
+      offset: 442
+      bit: 4
+      type: bool
+      bytes: 1
+    Water_Pump_Reset:
+      offset: 442
+      bit: 5
+      type: bool
+      bytes: 1
+    # Irrigation batch contract. Batch phase: 0=idle, 1=pre-flush,
+    # 2=fertigate, 3=post-flush, 4=complete.
+    Pre_Flush_Ratio:
+      offset: 444
+      type: real
+      bytes: 4
+    Post_Flush_Ratio:
+      offset: 448
+      type: real
+      bytes: 4
+    Pre_Flush_Volume:
+      offset: 452
+      type: real
+      bytes: 4
+    Fertigation_End_Volume:
+      offset: 456
+      type: real
+      bytes: 4
+    Water_Batch_Phase:
+      offset: 460
+      type: int
+      bytes: 2
+    Batch_Fertigation_Active:
+      offset: 462
+      bit: 0
+      type: bool
+      bytes: 1
+    # DB1末尾追加的EC/pH解耦参数。旧字段偏移保持不变。
+    Water_Batch_Active:
+      offset: 462
+      bit: 1
+      type: bool
+      bytes: 1
+    G_EC_F:
+      offset: 464
+      type: real
+      bytes: 4
+    G_EC_A:
+      offset: 468
+      type: real
+      bytes: 4
+    G_pH_F:
+      offset: 472
+      type: real
+      bytes: 4
+    G_pH_A:
+      offset: 476
+      type: real
+      bytes: 4
+    Decoupler_Weight:
+      offset: 480
+      type: real
+      bytes: 4
+    Decoupler_Regularization:
+      offset: 484
+      type: real
+      bytes: 4
+    Mixing_Delay_s:
+      offset: 488
+      type: real
+      bytes: 4
+    Decoupler_Determinant_Min:
+      offset: 492
+      type: real
+      bytes: 4
+    q_f_min:
+      offset: 496
+      type: real
+      bytes: 4
+    q_f_max:
+      offset: 500
+      type: real
+      bytes: 4
+    q_a_min:
+      offset: 504
+      type: real
+      bytes: 4
+    q_a_max:
+      offset: 508
+      type: real
+      bytes: 4
+    Decoupler_Enable:
+      offset: 512
+      bit: 0
+      type: bool
+      bytes: 1
+    Decoupler_Valid:
+      offset: 512
+      bit: 1
+      type: bool
+      bytes: 1
+    Decoupler_Determinant:
+      offset: 516
+      type: real
+      bytes: 4
+    Delta_q_f:
+      offset: 520
+      type: real
+      bytes: 4
+    Delta_q_a:
+      offset: 524
+      type: real
+      bytes: 4
+    System_Alarm_Reset:
+      offset: 528
+      bit: 0
+      type: bool
+      bytes: 1
+    Actuator_Execution_Enable:
+      offset: 529
+      bit: 0
+      type: bool
+      bytes: 1
+    Actuator_Any_Alarm:
+      offset: 529
+      bit: 1
+      type: bool
+      bytes: 1
+    Actuator_Any_Trip:
+      offset: 529
+      bit: 2
+      type: bool
+      bytes: 1
+
+    # Thesis V2 residual-policy and controller contract. Existing addresses
+    # above DBD0..529 are frozen; this extension starts on DBD532.
+    Water_Multiplier_SP:
+      offset: 532
+      type: real
+      bytes: 4
+    EC_Residual_SP:
+      offset: 536
+      type: real
+      bytes: 4
+    pH_Band_Low:
+      offset: 540
+      type: real
+      bytes: 4
+    pH_Band_High:
+      offset: 544
+      type: real
+      bytes: 4
+    Recipe_ID:
+      offset: 548
+      type: int
+      bytes: 2
+    Controller_Mode:
+      offset: 550
+      type: int
+      bytes: 2
+    Batch_Water_Target_L:
+      offset: 552
+      type: real
+      bytes: 4
+    Water_Accumulated_L:
+      offset: 556
+      type: real
+      bytes: 4
+    Fertilizer_Accumulated_L:
+      offset: 560
+      type: real
+      bytes: 4
+    Acid_Accumulated_L:
+      offset: 564
+      type: real
+      bytes: 4
+    IMC_Lambda_EC_s:
+      offset: 568
+      type: real
+      bytes: 4
+    IMC_Lambda_pH_s:
+      offset: 572
+      type: real
+      bytes: 4
+    IMC_Tau_EC_s:
+      offset: 576
+      type: real
+      bytes: 4
+    IMC_Tau_pH_s:
+      offset: 580
+      type: real
+      bytes: 4
+    IMC_Delay_s:
+      offset: 584
+      type: real
+      bytes: 4
+    pH_Pulse_On_s:
+      offset: 588
+      type: real
+      bytes: 4
+    pH_Pulse_Off_s:
+      offset: 592
+      type: real
+      bytes: 4
+    pH_Safety_Active:
+      offset: 596
+      bit: 0
+      type: bool
+      bytes: 1
+    pH_Flush_Request:
+      offset: 596
+      bit: 1
+      type: bool
+      bytes: 1
+    Batch_Reject:
+      offset: 596
+      bit: 2
+      type: bool
+      bytes: 1
+    IMC_Smith_Active:
+      offset: 596
+      bit: 3
+      type: bool
+      bytes: 1
+    Smith_EC_Predicted:
+      offset: 600
+      type: real
+      bytes: 4
+    Gain_Low_G_EC_F: {offset: 604, type: real, bytes: 4}
+    Gain_Low_G_EC_A: {offset: 608, type: real, bytes: 4}
+    Gain_Low_G_pH_F: {offset: 612, type: real, bytes: 4}
+    Gain_Low_G_pH_A: {offset: 616, type: real, bytes: 4}
+    Gain_Low_Tau_s: {offset: 620, type: real, bytes: 4}
+    Gain_Low_Delay_s: {offset: 624, type: real, bytes: 4}
+    Gain_Low_q_f: {offset: 628, type: real, bytes: 4}
+    Gain_Low_Valid: {offset: 632, bit: 0, type: bool, bytes: 1}
+    Gain_Mid_G_EC_F: {offset: 636, type: real, bytes: 4}
+    Gain_Mid_G_EC_A: {offset: 640, type: real, bytes: 4}
+    Gain_Mid_G_pH_F: {offset: 644, type: real, bytes: 4}
+    Gain_Mid_G_pH_A: {offset: 648, type: real, bytes: 4}
+    Gain_Mid_Tau_s: {offset: 652, type: real, bytes: 4}
+    Gain_Mid_Delay_s: {offset: 656, type: real, bytes: 4}
+    Gain_Mid_q_f: {offset: 660, type: real, bytes: 4}
+    Gain_Mid_Valid: {offset: 664, bit: 0, type: bool, bytes: 1}
+    Gain_High_G_EC_F: {offset: 668, type: real, bytes: 4}
+    Gain_High_G_EC_A: {offset: 672, type: real, bytes: 4}
+    Gain_High_G_pH_F: {offset: 676, type: real, bytes: 4}
+    Gain_High_G_pH_A: {offset: 680, type: real, bytes: 4}
+    Gain_High_Tau_s: {offset: 684, type: real, bytes: 4}
+    Gain_High_Delay_s: {offset: 688, type: real, bytes: 4}
+    Gain_High_q_f: {offset: 692, type: real, bytes: 4}
+    Gain_High_Valid: {offset: 696, bit: 0, type: bool, bytes: 1}
+    Gain_LM_Threshold: {offset: 700, type: real, bytes: 4}
+    Gain_MH_Threshold: {offset: 704, type: real, bytes: 4}
+    Gain_Schedule_Hysteresis: {offset: 708, type: real, bytes: 4}
+    Gain_Min_Hold_s: {offset: 712, type: real, bytes: 4}
+    pH_Pulse_Flow: {offset: 716, type: real, bytes: 4}
+    E3_Parameter_Version: {offset: 720, type: int, bytes: 2}
+    Active_Gain_Point: {offset: 722, type: int, bytes: 2}
+    E4_Approved: {offset: 724, bit: 0, type: bool, bytes: 1}
+    Gain_Schedule_Enable: {offset: 724, bit: 1, type: bool, bytes: 1}
+    Gain_Schedule_Valid: {offset: 724, bit: 2, type: bool, bytes: 1}
+    Decoupling_Limited: {offset: 724, bit: 3, type: bool, bytes: 1}
+    E4_Test_Enable: {offset: 724, bit: 4, type: bool, bytes: 1}
+    Gain_Switch_Pending: {offset: 724, bit: 5, type: bool, bytes: 1}
+    Decoupler_Active_Diag: {offset: 724, bit: 6, type: bool, bytes: 1}
+    E4_Compressed_Time_Enable: {offset: 724, bit: 7, type: bool, bytes: 1}
+    Decoupler_Weight_Applied: {offset: 728, type: real, bytes: 4}
+    Gain_Hold_Elapsed_s: {offset: 732, type: real, bytes: 4}
+    Gain_Point_Override: {offset: 736, type: int, bytes: 2}
+    Gain_Low_EC_SP: {offset: 740, type: real, bytes: 4}
+    Gain_Mid_EC_SP: {offset: 744, type: real, bytes: 4}
+    Gain_High_EC_SP: {offset: 748, type: real, bytes: 4}
+    Active_Gain_EC_SP: {offset: 752, type: real, bytes: 4}
+    Active_Gain_q_f: {offset: 756, type: real, bytes: 4}
+    E4_Sim_Step_s: {offset: 760, type: real, bytes: 4}
+    # Field deployment extension. DBD0..763 are frozen.
+    Deployment_Mode: {offset: 764, type: int, bytes: 2}
+    Soft_Stop_Request: {offset: 766, bit: 0, type: bool, bytes: 1}
+    Actuator_Enable_Request: {offset: 766, bit: 1, type: bool, bytes: 1}
+    Field_IO_Ready: {offset: 766, bit: 2, type: bool, bytes: 1}
+    Actuator_Enable_Permitted: {offset: 766, bit: 3, type: bool, bytes: 1}
+    Physical_EStop_OK: {offset: 766, bit: 4, type: bool, bytes: 1}
+    Sensor_Fault_Any: {offset: 766, bit: 5, type: bool, bytes: 1}
+    Drive_Fault_Any: {offset: 766, bit: 6, type: bool, bytes: 1}
 
     # PLC/PLCSIM 写回 Python 的执行结果与状态
     Remote_Comms_OK:

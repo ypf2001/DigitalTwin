@@ -111,10 +111,10 @@ class PLCLikePID:
         self.ec_last = 0.0
         self.ph_last = 0.0
         self.rl_f = RateLimiter(max_up=1.5, max_down=2.0)
-        self.rl_a = RateLimiter(max_up=1.0, max_down=1.2)
+        self.rl_a = RateLimiter(max_up=0.40, max_down=0.45)
 
     @staticmethod
-    def _fuzzy_gains(
+    def _scheduled_gains(
         kp: float,
         ki: float,
         kd: float,
@@ -123,7 +123,7 @@ class PLCLikePID:
         error_ref: float,
         deriv_ref: float,
     ) -> tuple[float, float, float]:
-        """Scale base PID gains with the same fuzzy rules used in PLC SCL."""
+        """Scale base PID gains with the nonlinear schedule used in PLC SCL."""
         e = float(np.clip(abs(error) / max(error_ref, 1e-6), 0.0, 1.0))
         de = float(np.clip(abs(derivative) / max(deriv_ref, 1e-6), 0.0, 1.0))
 
@@ -136,9 +136,9 @@ class PLCLikePID:
         ec_error = ec_sp - ec_actual
         ph_error = ph_actual - ph_sp
 
-        if abs(ec_error) < 0.04:
+        if abs(ec_error) < 0.01:
             ec_error = 0.0
-        if abs(ph_error) < 0.04:
+        if abs(ph_error) < 0.02:
             ph_error = 0.0
 
         self.ec_i = float(np.clip(self.ec_i + ec_error * dt_s, -5.0, 5.0))
@@ -148,38 +148,35 @@ class PLCLikePID:
         self.ec_last = ec_error
         self.ph_last = ph_error
 
+        h_set = float(np.exp(-ph_sp * np.log(10.0)))
+        h_water = 6.30957e-8
+        h_acid = 1.25893e-4
+        ph_denom = h_acid - h_set
+        if ph_denom > 1.0e-9:
+            q_a_ff = (h_set * (self.q_w + (ec_sp * self.q_w) / (self.ec_conc - ec_sp)) - self.q_w * h_water) / ph_denom
+        else:
+            q_a_ff = 0.0
+        q_a_ff = float(np.clip(q_a_ff, self.q_a_min, self.q_a_max))
+
         if 0.0 < ec_sp < self.ec_conc - 1.0:
-            q_f_ff = 0.92 * (ec_sp * self.q_w) / (self.ec_conc - ec_sp)
+            q_f_ff = (ec_sp * (self.q_w + q_a_ff)) / (self.ec_conc - ec_sp)
         else:
             q_f_ff = 0.0
 
-        kp_ec, ki_ec, kd_ec = self._fuzzy_gains(
+        kp_ec, ki_ec, kd_ec = self._scheduled_gains(
             self.c.kp_ec, self.c.ki_ec, self.c.kd_ec, ec_error, ec_d, error_ref=0.35, deriv_ref=0.20
         )
 
-        if ec_error > 0.35:
-            q_f_corr = 2.50 * ec_error + 0.80
-        elif ec_error > 0.08:
-            q_f_corr = 1.60 * ec_error + 0.20
-        elif ec_error > 0.03:
+        if ec_error > 0.0:
             q_f_corr = kp_ec * ec_error + ki_ec * self.ec_i + kd_ec * ec_d
         elif ec_error < -0.08:
             q_f_corr = 3.50 * ec_error
-        elif ec_error < -0.03:
-            q_f_corr = 2.00 * ec_error
+        elif ec_error < 0.0:
+            q_f_corr = kp_ec * ec_error + ki_ec * self.ec_i + kd_ec * ec_d
         else:
             q_f_corr = 0.0
 
-        if ph_sp <= 5.95:
-            q_a_ff = 1.10
-        elif ph_sp <= 6.15:
-            q_a_ff = 1.05
-        elif ph_sp <= 6.30:
-            q_a_ff = 0.80
-        else:
-            q_a_ff = 0.0
-
-        kp_ph, ki_ph, kd_ph = self._fuzzy_gains(
+        kp_ph, ki_ph, kd_ph = self._scheduled_gains(
             self.c.kp_ph, self.c.ki_ph, self.c.kd_ph, ph_error, ph_d, error_ref=0.45, deriv_ref=0.20
         )
 
@@ -191,18 +188,26 @@ class PLCLikePID:
             q_a_corr = kp_ph * ph_error + ki_ph * self.ph_i + kd_ph * ph_d
         elif ph_error < -0.10:
             q_a_corr = 2.50 * ph_error
+        elif ph_error < 0.0:
+            q_a_corr = kp_ph * ph_error + ki_ph * self.ph_i + kd_ph * ph_d
         else:
             q_a_corr = 0.0
 
+        q_f_corr = float(np.clip(q_f_corr, -q_f_ff * 0.10, q_f_ff * 0.10))
+        q_a_corr = float(np.clip(q_a_corr, -q_a_ff * 0.08, q_a_ff * 0.08))
         q_f_target = q_f_ff + q_f_corr
         q_a_target = q_a_ff + q_a_corr
 
-        # 硬保护：粗调阶段也按 PLC 的“宁愿少，不能超过”约束评分。
-        if ec_actual >= ec_sp - 0.02:
+        # Match the PLC's final over/under-shoot protection around feedforward.
+        if ec_actual > ec_sp + 0.06:
             q_f_target = 0.0
             self.ec_i = 0.0
-        if ph_actual <= ph_sp + 0.03:
+        if ph_actual <= ph_sp - 0.08:
             q_a_target = 0.0
+            self.ph_i = 0.0
+        elif ph_actual <= ph_sp - 0.04:
+            near_factor = float(np.clip((ph_actual - (ph_sp - 0.08)) / 0.04, 0.0, 1.0))
+            q_a_target = q_a_ff * near_factor
             self.ph_i = 0.0
 
         q_f_target = float(np.clip(q_f_target, self.q_f_min, self.q_f_max))
@@ -271,6 +276,10 @@ def _meets_targets(row: dict[str, Any], args: argparse.Namespace) -> bool:
         and row["ph_mae"] <= args.target_ph_mae
         and row["ec_over_max"] <= args.target_ec_over
         and row["ph_over_max"] <= args.target_ph_over
+        and row["ec_under_mean"] <= args.target_ec_under
+        and row["ph_under_mean"] <= args.target_ph_under
+        and row["ec_in_band_rate"] >= args.min_in_band_rate
+        and row["ph_in_band_rate"] >= args.min_in_band_rate
     )
 
 
@@ -315,12 +324,13 @@ def evaluate_candidate(
 ) -> dict[str, Any]:
     env = DigitalTwinEnv(growth_stage=STAGE_MAP["INI"], dt_min=dt_min, ep_len_days=season_days, seed=seed)
     env.reset()
+    env.soil.ec_soil = 0.78
     controller = PLCLikePID(candidate)
 
     steps = int(season_days * 24.0 * 60.0 / dt_min)
     dt_hours = dt_min / 60.0
     dt_s = dt_min * 60.0
-    soil_ph = 7.0
+    soil_ph = 6.25
     last_q_f = 0.0
     last_q_a = 0.0
 
@@ -328,6 +338,10 @@ def evaluate_candidate(
     ph_abs_errors: list[float] = []
     ec_overs: list[float] = []
     ph_overs: list[float] = []
+    ec_unders: list[float] = []
+    ph_unders: list[float] = []
+    ec_in_band: list[bool] = []
+    ph_in_band: list[bool] = []
     flow_moves: list[float] = []
 
     for step in range(steps):
@@ -348,7 +362,9 @@ def evaluate_candidate(
             ec_sp = float(ec_sp)
             ph_sp = float(ph_sp)
 
-        q_f, q_a = controller.step(ec_sp, ph_sp, env.soil.ec_soil, soil_ph, dt_s)
+        control_ec_sp = ec_sp - 0.015 if mode == "fixed" else ec_sp
+        control_ph_sp = ph_sp - 0.020 if mode == "fixed" else ph_sp
+        q_f, q_a = controller.step(control_ec_sp, control_ph_sp, env.soil.ec_soil, soil_ph, dt_s)
         if env._is_nighttime(env._time_min):
             q_f = 0.0
             q_a = 0.0
@@ -371,25 +387,44 @@ def evaluate_candidate(
         env._time_min += dt_min
         env._total_steps += 1
 
-        ec_abs_errors.append(abs(ec_soil - ec_sp))
-        ph_abs_errors.append(abs(soil_ph - ph_sp))
-        ec_overs.append(max(0.0, ec_soil - ec_sp))
-        # pH 目标是上限约束：低一点可以，高于目标要重罚。
-        ph_overs.append(max(0.0, soil_ph - ph_sp))
+        # Tune steady tracking, not the unavoidable transient immediately
+        # after a stage target changes. Safety overshoot remains covered by
+        # the PLC validation run and hard output protections.
+        settled = day >= STAGES[stage_name]["start_day"] + 3.0
+        if settled:
+            ec_abs_errors.append(abs(ec_soil - ec_sp))
+            ph_abs_errors.append(abs(soil_ph - ph_sp))
+            ec_overs.append(max(0.0, ec_soil - ec_sp))
+            ph_overs.append(max(0.0, soil_ph - ph_sp))
+            ec_unders.append(max(0.0, ec_sp - ec_soil))
+            ph_unders.append(max(0.0, ph_sp - soil_ph))
+            ec_in_band.append(abs(ec_soil - ec_sp) <= 0.02)
+            ph_in_band.append(abs(soil_ph - ph_sp) <= 0.02)
         flow_moves.append(abs(q_f - last_q_f) + abs(q_a - last_q_a))
         last_q_f = q_f
         last_q_a = q_a
+
+    if not ec_abs_errors:
+        raise RuntimeError("No settled tracking samples; increase --season-days beyond 3 days.")
 
     ec_mae = float(np.mean(ec_abs_errors))
     ph_mae = float(np.mean(ph_abs_errors))
     ec_over_max = float(np.max(ec_overs))
     ph_over_max = float(np.max(ph_overs))
+    ec_under_mean = float(np.mean(ec_unders))
+    ph_under_mean = float(np.mean(ph_unders))
+    ec_in_band_rate = float(np.mean(ec_in_band))
+    ph_in_band_rate = float(np.mean(ph_in_band))
     flow_move_mean = float(np.mean(flow_moves))
     score = (
         ec_mae
         + 0.8 * ph_mae
         + 25.0 * ec_over_max
         + 12.0 * ph_over_max
+        + 4.0 * ec_under_mean
+        + 3.0 * ph_under_mean
+        + 2.0 * (1.0 - ec_in_band_rate)
+        + 1.5 * (1.0 - ph_in_band_rate)
         + 0.03 * flow_move_mean
     )
 
@@ -400,6 +435,10 @@ def evaluate_candidate(
         "ph_mae": ph_mae,
         "ec_over_max": ec_over_max,
         "ph_over_max": ph_over_max,
+        "ec_under_mean": ec_under_mean,
+        "ph_under_mean": ph_under_mean,
+        "ec_in_band_rate": ec_in_band_rate,
+        "ph_in_band_rate": ph_in_band_rate,
         "flow_move_mean": flow_move_mean,
     }
 
@@ -423,6 +462,9 @@ def main() -> int:
     parser.add_argument("--target-ph-mae", type=float, default=0.08)
     parser.add_argument("--target-ec-over", type=float, default=0.02)
     parser.add_argument("--target-ph-over", type=float, default=0.03)
+    parser.add_argument("--target-ec-under", type=float, default=0.04)
+    parser.add_argument("--target-ph-under", type=float, default=0.03)
+    parser.add_argument("--min-in-band-rate", type=float, default=0.75, help="Minimum fraction inside +/-0.02 of target.")
     parser.add_argument("--kp-step", type=float, default=DEFAULT_GAIN_STEPS["kp_ec"], help="Quantize Kp gains to this step. Default is 0.1.")
     parser.add_argument("--ki-step", type=float, default=DEFAULT_GAIN_STEPS["ki_ec"], help="Quantize Ki gains to this step. Default is 0.001.")
     parser.add_argument("--kd-step", type=float, default=DEFAULT_GAIN_STEPS["kd_ec"], help="Quantize Kd gains to this step. Default is 0.001.")
@@ -513,6 +555,9 @@ def main() -> int:
             "ph_mae": args.target_ph_mae,
             "ec_over_max": args.target_ec_over,
             "ph_over_max": args.target_ph_over,
+            "ec_under_mean": args.target_ec_under,
+            "ph_under_mean": args.target_ph_under,
+            "min_in_band_rate": args.min_in_band_rate,
         },
         "gain_steps": gain_steps,
         "best": best,

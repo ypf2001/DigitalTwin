@@ -3,35 +3,41 @@ import os
 import time
 import pymysql
 
-# 从配置文件读取云端数据库配置
 _cloud_CONFIG = None
 
 
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return int(default)
+    return int(value)
+
+
+def _load_cloud_config_file() -> dict:
+    config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "config")
+    yaml_path = os.path.join(config_dir, "cloud.yaml")
+    if not os.path.exists(yaml_path):
+        return {}
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        import yaml
+        cfg = yaml.safe_load(f) or {}
+    return cfg.get("cloud", {}) or {}
+
+
 def _get_cloud_config():
-    """从配置文件读取云端数据库配置"""
+    """Load cloud database config from config/cloud.yaml plus DT_CLOUD_* env overrides."""
     global _cloud_CONFIG
     if _cloud_CONFIG is not None:
         return _cloud_CONFIG
-    try:
-        import sys
-        config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "config")
-        yaml_path = os.path.join(config_dir, "cloud.yaml")
-        if os.path.exists(yaml_path):
-            with open(yaml_path, "r", encoding="utf-8") as f:
-                import yaml
-                cfg = yaml.safe_load(f)
-                _cloud_CONFIG = cfg["cloud"]
-                return _cloud_CONFIG
-    except Exception:
-        pass
-    # 降级使用硬编码配置
+
+    file_cfg = _load_cloud_config_file()
     _cloud_CONFIG = {
-        "host": "154.44.26.212",
-        "port": 61762,
-        "user": "root",
-        "password": "mysql_dDPsQR",
-        "database": "digital_twin",
-        "connect_timeout": 10,
+        "host": os.getenv("DT_CLOUD_HOST", str(file_cfg.get("host", ""))).strip(),
+        "port": _env_int("DT_CLOUD_PORT", file_cfg.get("port", 3306)),
+        "user": os.getenv("DT_CLOUD_USER", str(file_cfg.get("user", ""))).strip(),
+        "password": os.getenv("DT_CLOUD_PASSWORD", str(file_cfg.get("password", ""))).strip(),
+        "database": os.getenv("DT_CLOUD_DATABASE", str(file_cfg.get("database", "digital_twin"))).strip(),
+        "connect_timeout": _env_int("DT_CLOUD_CONNECT_TIMEOUT", file_cfg.get("connect_timeout", 10)),
     }
     return _cloud_CONFIG
 
@@ -39,7 +45,21 @@ def _get_cloud_config():
 CLOUD_CONFIG = _get_cloud_config()
 
 
+def _require_cloud_config():
+    missing = [
+        name for name in ("host", "user", "password", "database")
+        if not str(CLOUD_CONFIG.get(name, "")).strip()
+    ]
+    if missing:
+        raise RuntimeError(
+            "Cloud MySQL config missing: "
+            + ", ".join(missing)
+            + ". Set DT_CLOUD_* environment variables or config/cloud.yaml."
+        )
+
+
 def _get_conn():
+    _require_cloud_config()
     return pymysql.connect(
         host=CLOUD_CONFIG["host"], port=CLOUD_CONFIG["port"],
         user=CLOUD_CONFIG["user"], password=CLOUD_CONFIG["password"],
@@ -48,6 +68,7 @@ def _get_conn():
 
 
 def _get_db_conn():
+    _require_cloud_config()
     return pymysql.connect(
         host=CLOUD_CONFIG["host"], port=CLOUD_CONFIG["port"],
         user=CLOUD_CONFIG["user"], password=CLOUD_CONFIG["password"],

@@ -1,0 +1,46 @@
+hetao_soil:
+  region: "Inner Mongolia Hetao Irrigation District"
+  profile: "cultivated_or_saline_wasteland"
+  purpose: "initial_literature_parameters_for_python_and_fluent"
+  references:
+  - title: "内蒙古河套灌区荒地水盐运移规律模拟_李亮.pdf"
+    file: "D:/Backup/Downloads/内蒙古河套灌区荒地水盐运移规律模拟_李亮.pdf"
+  - title: "河套灌区水盐运移数值模拟相关文献"
+    url: "https://www.aed.org.cn/nyzyyhjxb/html/2018/6/20180608.htm"
+
+  python:
+    # Python 土壤模型当前使用 mm、day、体积含水率和 dS/m。
+    theta_sat: 0.42
+    theta_fc: 0.334
+    theta_wp: 0.09
+    theta_init: 0.20
+    ec_soil_init: 0.15
+    K_sat_mm_d: 15.3
+    beta: 2.0
+    root_depth_default_mm: 300.0
+    dispersivity_cm: 5.0
+    molecular_diffusion_cm2_d: 0.7
+
+  fluent:
+    # Fluent 使用 SI 单位。下面参数可直接填入 3D 土柱多孔介质模型。
+    geometry:
+      height_mm: 500.0
+      radius_mm: 50.0
+      diameter_mm: 100.0
+      porous_zone_name: "soil"
+      inlet_boundary_name: "inlet"
+      outlet_boundary_name: "outlet"
+      wall_boundary_name: "wall"
+    porous_media:
+      porosity: 0.42
+      hydraulic_conductivity_m_s: 1.7708333333333331e-7
+      intrinsic_permeability_m2: 1.8138110712772625e-14
+      viscous_resistance_1_m2: 5.513253369303854e13
+      inertial_resistance_1_m: 0.0
+    salt_transport:
+      dispersivity_m: 0.05
+      molecular_diffusion_m2_s: 8.101851851851851e-10
+      effective_diffusion_start_m2_s: 8.101851851851851e-10
+    alternative_sand_dune:
+      dispersivity_m: 0.10
+      molecular_diffusion_m2_s: 1.1574074074074074e-9

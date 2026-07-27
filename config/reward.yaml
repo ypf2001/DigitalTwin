@@ -3,25 +3,25 @@
 #
 # B 方案奖励函数：
 # r = -w1 * |EC_soil - target_ec|^2          根区 EC 接近马铃薯适宜 EC 参考的惩罚（二次型）
-#     -w2 * |pH_drip - pH_set|^2            配液出口 pH 跟踪 SAC 给定 pH 目标的惩罚
+#     -w2 * pH_band_violation^2              配液出口 pH 越过安全带的惩罚
 #     -w_setpoint * |EC_drip - EC_set|^2    配液出口 EC 跟踪 SAC 给定 EC 目标的惩罚
 #     -w3 * actuator_flow * flow_penalty_scale  执行流量/肥酸耗量惩罚
 #     +w4 * max(0, 1 - actuator_flow / wue_norm) 执行效率奖励
 #     +hard_penalty                         烧苗硬惩罚
 #
-# SAC 输出 EC_set/pH_set；q_f/q_a 由仿真执行层或 PLC-PID 计算。
+# SAC 输出水量倍率/EC残差；pH由PLC安全带控制，q_f/q_a由执行层计算。
 # ============================================================
 
 reward:
   w1: 4.0                  # 根区 EC 跟踪误差权重，算法调参值
-  w2: 4.0                  # 配液出口 pH 目标跟踪误差权重，算法调参值
+  w2: 4.0                  # 配液出口 pH 安全带越界权重，算法调参值
   w_setpoint: 1.0          # 配液出口 EC 跟踪 SAC 输出 EC_set 的权重，算法调参值
   w3: 0.1                  # 执行流量惩罚权重，算法调参值
   w4: 0.5                  # WUE/执行效率奖励权重，算法调参值
   flow_penalty_scale: 0.01 # 执行流量惩罚缩放系数，算法调参值
   wue_norm: 14.0           # 执行层 q_f+q_a 归一化基准流量 (L/min)，约等于 q_f_max+q_a_max
 
-  pH_target: 6.0           # 固定策略/回退策略默认 pH 目标；B 方案训练时主要使用 SAC 输出 pH_set
+  pH_target: 6.2           # PLC pH安全带控制的名义记录值；SAC不再输出pH目标
                            # 来源: Westermann D.T. (2005) "Nutritional requirements of
                            #        potatoes." American Journal of Potato Research 82:301-307.
                            #        马铃薯养分吸收最适 pH 范围 5.5~6.5，取中值 6.0

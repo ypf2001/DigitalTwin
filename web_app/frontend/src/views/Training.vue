@@ -50,6 +50,36 @@
     <div v-if="training.error" class="error-box">{{ training.error }}</div>
     <div v-if="message" class="success-box" style="margin-bottom: 20px;">{{ message }}</div>
 
+    <div class="card calibration-card">
+      <div class="card-title">田间数据标定与免改代码重训</div>
+      <div class="form-row">
+        <div class="form-group" style="flex:2">
+          <label>田间 CSV 数据</label>
+          <input type="file" accept=".csv,text/csv" class="form-input" @change="onCalibrationFile" :disabled="calibrating || training.running" />
+          <small class="hint">支持分层 theta/EC/pH 或根区标量；第一行作为初始状态。</small>
+        </div>
+        <div class="form-group">
+          <label>搜索次数</label>
+          <input type="number" v-model.number="calibrationTrials" min="10" max="5000" step="10" class="form-input" :disabled="calibrating" />
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-primary" @click="runCalibration" :disabled="!calibrationFile || calibrating || training.running">
+            {{ calibrating ? '标定中...' : '标定并激活' }}
+          </button>
+        </div>
+      </div>
+      <div v-if="calibrationError" class="error-box">{{ calibrationError }}</div>
+      <div class="calibration-status">
+        <strong>当前标定：</strong>
+        <span v-if="calibration && calibration.active">{{ calibration.calibration.id || calibration.parameter_version }}</span>
+        <span v-else>未激活（将使用基础参数）</span>
+        <template v-if="calibration && calibration.calibration && calibration.calibration.validation_metrics">
+          <span>验证 MAE: θ={{ formatMetric(calibration.calibration.validation_metrics.theta_mae, 4) }}, EC={{ formatMetric(calibration.calibration.validation_metrics.ec_mae, 3) }}, pH={{ formatMetric(calibration.calibration.validation_metrics.ph_mae, 3) }}</span>
+        </template>
+      </div>
+      <small class="hint">标定成功后，直接点击“开始新训练”；上位机会自动使用 layered_v2 和参数域随机化。</small>
+    </div>
+
     <div class="training-grid">
       <div class="training-col">
         <!-- 训练参数设置 -->
@@ -279,12 +309,17 @@
 
 <script>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import { getTrainingStatus, startTraining, stopTraining, getTrainingModels, uploadModels, uploadSelected, stopUpload, getUploadProgress, deleteModel, clearProgress } from '../api/index.js'
+import { getTrainingStatus, startTraining, stopTraining, getTrainingModels, uploadModels, uploadSelected, stopUpload, getUploadProgress, deleteModel, clearProgress, getActiveCalibration, runFieldCalibration } from '../api/index.js'
 
 export default {
   name: 'Training',
   setup() {
     const params = reactive({ stage: 'MID', timesteps: 120000 })
+    const calibrationFile = ref(null)
+    const calibrationTrials = ref(300)
+    const calibrating = ref(false)
+    const calibration = ref(null)
+    const calibrationError = ref('')
     const loading = ref(false)
     const error = ref('')
     const message = ref('')
@@ -319,6 +354,39 @@ export default {
       if (!cloudChecked.value) return '未检测，本页先显示本地模型，点击“检测云端”后再显示是否已上传'
       return '已检测，☁️ 表示云端已存在，未上传表示仅本地存在'
     })
+    function onCalibrationFile(event) {
+      calibrationFile.value = event.target.files && event.target.files[0] ? event.target.files[0] : null
+      calibrationError.value = ''
+    }
+
+    function formatMetric(value, digits = 3) {
+      return value === null || value === undefined ? '-' : Number(value).toFixed(digits)
+    }
+
+    async function loadCalibration() {
+      try {
+        calibration.value = await getActiveCalibration()
+      } catch (e) {
+        calibrationError.value = e.message || 'Failed to load calibration status'
+      }
+    }
+
+    async function runCalibration() {
+      if (!calibrationFile.value) return
+      calibrating.value = true
+      calibrationError.value = ''
+      try {
+        const res = await runFieldCalibration(calibrationFile.value, calibrationTrials.value, 0.20, true)
+        if (!res.success) throw new Error(res.error || 'Calibration failed')
+        await loadCalibration()
+        showToast('田间标定已激活，请从头训练 SAC 模型')
+      } catch (e) {
+        calibrationError.value = e.message || '标定失败'
+      } finally {
+        calibrating.value = false
+      }
+    }
+
     const training = reactive({
       running: false,
       stage: null,
@@ -433,6 +501,8 @@ export default {
           stage: params.stage,
           timesteps: params.timesteps,
           resume: false,
+          soil_model: 'layered_v2',
+          domain_randomization: true,
         })
         if (res.success) {
           message.value = res.message
@@ -460,6 +530,8 @@ export default {
           stage: training.stage || params.stage,
           timesteps: params.timesteps,
           resume: true,
+          soil_model: 'layered_v2',
+          domain_randomization: true,
         })
         if (res.success) {
           message.value = res.message
@@ -743,6 +815,7 @@ export default {
     }
 
     onMounted(async () => {
+      await loadCalibration()
       await refreshStatus()
       await loadModels()
       if (training.running) {
@@ -764,6 +837,14 @@ export default {
 
     return {
       params,
+      calibrationFile,
+      calibrationTrials,
+      calibrating,
+      calibration,
+      calibrationError,
+      onCalibrationFile,
+      runCalibration,
+      formatMetric,
       loading,
       error,
       message,
@@ -1220,4 +1301,7 @@ export default {
 .toast.success { background: #e8f5e9; color: #2e7d32; }
 .toast.error { background: #fdecea; color: #c62828; }
 @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-12px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+.calibration-card { margin-bottom: 20px; border-left: 4px solid var(--primary, #1976d2); }
+.calibration-status { display: flex; flex-wrap: wrap; gap: 16px; margin: 10px 0; font-size: 13px; color: var(--text-secondary); }
 </style>

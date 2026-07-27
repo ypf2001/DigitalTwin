@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config_loader import load_config
+from sac_model_registry import get_existing_stage_models
 from digital_twin_env import DigitalTwinEnv
 from irrigation_schedule import (
     event_duration_hours,
@@ -44,6 +45,13 @@ STAGE_TAGS = {
     "maturation": "late",
 }
 
+NPK_TARGETS = {
+    "ini": {"N": 0.75, "P": 0.55, "K": 0.65},
+    "dev": {"N": 0.95, "P": 0.75, "K": 0.90},
+    "mid": {"N": 1.10, "P": 0.85, "K": 1.25},
+    "late": {"N": 0.85, "P": 0.65, "K": 1.05},
+}
+
 
 def _json_default(value: Any):
     if isinstance(value, np.ndarray):
@@ -60,6 +68,49 @@ def _write_csv(path: Path, columns: dict[str, list[float] | list[str]]) -> None:
         writer = csv.writer(f)
         writer.writerow(keys)
         writer.writerows(rows)
+
+
+def _error_metrics(actual: np.ndarray, target: np.ndarray) -> dict[str, float]:
+    if len(actual) == 0:
+        return {"mae": 0.0, "rmse": 0.0, "max_error": 0.0}
+    error = actual - target
+    abs_error = np.abs(error)
+    return {
+        "mae": float(np.mean(abs_error)),
+        "rmse": float(np.sqrt(np.mean(error * error))),
+        "max_error": float(np.max(abs_error)),
+    }
+
+
+def _npk_targets_for_tag(stage_tag: str) -> dict[str, float]:
+    return NPK_TARGETS.get(stage_tag.lower(), NPK_TARGETS["late"]).copy()
+
+
+def _split_offline_npk_flow(q_f: float, targets: dict[str, float]) -> dict[str, float]:
+    total = max(sum(float(targets[key]) for key in ("N", "P", "K")), 1e-6)
+    return {key: max(0.0, float(q_f)) * float(targets[key]) / total for key in ("N", "P", "K")}
+
+
+def _estimate_offline_npk(
+    current: dict[str, float],
+    targets: dict[str, float],
+    flows: dict[str, float],
+    irrigation_mm_h: float,
+    dt_hours: float,
+) -> dict[str, float]:
+    wetting = float(np.clip(irrigation_mm_h / 6.0, 0.0, 1.5))
+    updated: dict[str, float] = {}
+    for key in ("N", "P", "K"):
+        value = float(current.get(key, targets[key]))
+        uptake = 0.0045 * dt_hours * (0.6 + 0.4 * targets[key])
+        leaching = 0.0060 * dt_hours * wetting * max(value - 0.25, 0.0)
+        dosing = 0.0042 * float(flows[key]) * dt_hours
+        buffer_pull = 0.030 * dt_hours * (targets[key] - value)
+        raw_next = value + dosing + buffer_pull - uptake - leaching
+        max_delta = 0.030 + 0.006 * min(dt_hours, 12.0)
+        raw_next = float(np.clip(raw_next, value - max_delta, value + max_delta))
+        updated[key] = float(np.clip(raw_next, 0.0, 2.0))
+    return updated
 
 
 def _load_sac_class():
@@ -83,10 +134,18 @@ class StageModelBank:
             for tag in ("ini", "dev", "mid", "late"):
                 self.model_paths[tag] = base
         else:
+            for tag, model_path in get_existing_stage_models().items():
+                self.model_paths[tag] = Path(model_path)
             for tag in ("ini", "dev", "mid", "late"):
-                candidate = model_dir / f"sac_{tag}_final"
-                if candidate.with_suffix(".zip").exists():
-                    self.model_paths[tag] = candidate
+                if tag in self.model_paths:
+                    continue
+                for candidate in (
+                    model_dir / f"sac_residual_{tag}_final",
+                    model_dir / f"sac_{tag}_final",
+                ):
+                    if candidate.with_suffix(".zip").exists():
+                        self.model_paths[tag] = candidate
+                        break
 
     @staticmethod
     def _strip_zip(path: Path) -> Path:
@@ -114,7 +173,14 @@ class StageModelBank:
         return np.asarray(action, dtype=np.float32)
 
 
-def _make_env(area_ha: float, dt_min: float, season_days: float, et0: float, seed: int | None) -> DigitalTwinEnv:
+def _make_env(
+    area_ha: float,
+    dt_min: float,
+    season_days: float,
+    et0: float,
+    seed: int | None,
+    soil_model: str,
+) -> DigitalTwinEnv:
     schedule = get_irrigation_schedule()
     return DigitalTwinEnv(
         growth_stage=schedule[0].growth_stage,
@@ -123,10 +189,47 @@ def _make_env(area_ha: float, dt_min: float, season_days: float, et0: float, see
         ep_len_days=season_days,
         et0_mm_day=et0,
         seed=seed,
+        soil_model=soil_model,
     )
 
 
-def _record(series: dict[str, list[Any]], info: dict[str, Any], action: np.ndarray, stage_tag: str, event_idx: int, is_event: bool) -> None:
+def _profile_value(info: dict[str, Any], key: str, index: int) -> float:
+    values = info.get(key) or []
+    if index >= len(values):
+        return float("nan")
+    return float(values[index])
+
+
+def _record(
+    series: dict[str, list[Any]],
+    info: dict[str, Any],
+    action: np.ndarray,
+    stage_tag: str,
+    event_idx: int,
+    is_event: bool,
+    npk_targets: dict[str, float],
+    npk_actual: dict[str, float],
+    npk_flows: dict[str, float],
+) -> None:
+    use_layered_npk = info.get("soil_model") == "layered_v2"
+    if use_layered_npk:
+        recorded_targets = {
+            key: float(info[f"{key.lower()}_target"])
+            for key in ("N", "P", "K")
+        }
+        recorded_actual = {
+            key: float(info[f"{key.lower()}_actual"])
+            for key in ("N", "P", "K")
+        }
+        recorded_flows = {
+            key: float(info[f"q_{key.lower()}_cmd"])
+            for key in ("N", "P", "K")
+        }
+    else:
+        recorded_targets = npk_targets
+        recorded_actual = npk_actual
+        recorded_flows = npk_flows
+
     series["time_day"].append(float(info["time_day"]))
     series["theta"].append(float(info["theta"]))
     series["ec_soil"].append(float(info["ec_soil"]))
@@ -139,6 +242,30 @@ def _record(series: dict[str, list[Any]], info: dict[str, Any], action: np.ndarr
     series["ph_set"].append(float(info.get("ph_set", action[1] if len(action) > 1 else 7.0)))
     series["q_f"].append(float(info.get("q_f", 0.0)))
     series["q_a"].append(float(info.get("q_a", 0.0)))
+    series["n_target"].append(float(recorded_targets["N"]))
+    series["p_target"].append(float(recorded_targets["P"]))
+    series["k_target"].append(float(recorded_targets["K"]))
+    series["n_actual"].append(float(recorded_actual["N"]))
+    series["p_actual"].append(float(recorded_actual["P"]))
+    series["k_actual"].append(float(recorded_actual["K"]))
+    series["q_n_cmd"].append(float(recorded_flows["N"]))
+    series["q_p_cmd"].append(float(recorded_flows["P"]))
+    series["q_k_cmd"].append(float(recorded_flows["K"]))
+    series["soil_ph"].append(float(info.get("soil_ph") if info.get("soil_ph") is not None else np.nan))
+    series["drainage_mm"].append(float(info.get("drainage_mm") if info.get("drainage_mm") is not None else np.nan))
+    series["water_balance_error_mm"].append(float(info.get("water_balance_error_mm") if info.get("water_balance_error_mm") is not None else np.nan))
+    series["salt_balance_error"].append(float(info.get("salt_balance_error") if info.get("salt_balance_error") is not None else np.nan))
+    nutrient_balance = info.get("nutrient_balance_error_mg_m2") or {}
+    for nutrient in ("n", "p", "k"):
+        series[f"{nutrient}_balance_error_mg_m2"].append(float(nutrient_balance.get(nutrient, np.nan)))
+    for profile_name in ("theta", "ec", "ph", "n", "p", "k"):
+        for layer in range(4):
+            series[f"{profile_name}_layer_{layer + 1}"].append(
+                _profile_value(info, f"{profile_name}_profile", layer)
+            )
+    series["soil_model"].append(str(info.get("soil_model", "lumped_v1")))
+    series["parameter_status"].append(str(info.get("parameter_status", "unknown")))
+    series["parameter_version"].append(str(info.get("parameter_version", "unknown")))
     series["stage_tag"].append(stage_tag)
     series["event_idx"].append(int(event_idx))
     series["event_marker"].append(1.0 if is_event else 0.0)
@@ -151,15 +278,18 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
     model_bank = StageModelBank(Path(args.model_dir), Path(args.model) if args.model else None)
     model_bank.require_available()
 
-    env = _make_env(args.area_ha, args.dt_min, args.season_days, args.et0, args.seed)
+    env = _make_env(
+        args.area_ha, args.dt_min, args.season_days, args.et0, args.seed, args.soil_model
+    )
     obs = env.reset()
-    env.soil.theta = irr_cfg.get("initial_theta") or env.soil.theta_fc
-    env.soil.ec_soil = float(irr_cfg.get("initial_ec", 0.1))
-    env._theta_history.clear()
-    env._ec_soil_history.clear()
-    for _ in range(env.history_len):
-        env._theta_history.append(env.soil.theta)
-        env._ec_soil_history.append(env.soil.ec_soil)
+    if env.soil_model == "lumped_v1":
+        env.soil.theta = irr_cfg.get("initial_theta") or env.soil.theta_fc
+        env.soil.ec_soil = float(irr_cfg.get("initial_ec", 0.1))
+        env._theta_history.clear()
+        env._ec_soil_history.clear()
+        for _ in range(env.history_len):
+            env._theta_history.append(env.soil.theta)
+            env._ec_soil_history.append(env.soil.ec_soil)
 
     dt_hours = args.dt_min / 60.0
     rain_mm_h = float(irr_cfg.get("rain_mm_day", 0.0)) / 24.0
@@ -176,14 +306,37 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
         "etc_mm_h": [],
         "q_f": [],
         "q_a": [],
+        "n_target": [],
+        "p_target": [],
+        "k_target": [],
+        "n_actual": [],
+        "p_actual": [],
+        "k_actual": [],
+        "q_n_cmd": [],
+        "q_p_cmd": [],
+        "q_k_cmd": [],
         "stage_tag": [],
         "event_idx": [],
         "event_marker": [],
+        "soil_ph": [],
+        "drainage_mm": [],
+        "water_balance_error_mm": [],
+        "salt_balance_error": [],
+        "n_balance_error_mg_m2": [],
+        "p_balance_error_mg_m2": [],
+        "k_balance_error_mg_m2": [],
+        "soil_model": [],
+        "parameter_status": [],
+        "parameter_version": [],
     }
+    for profile_name in ("theta", "ec", "ph", "n", "p", "k"):
+        for layer in range(4):
+            series[f"{profile_name}_layer_{layer + 1}"] = []
 
     total_irrigation_mm = 0.0
     total_etc_mm = 0.0
     prev_day = 0.0
+    npk_actual = _npk_targets_for_tag("ini")
 
     for event_idx, event in enumerate(schedule):
         env.set_growth_stage(event.growth_stage)
@@ -194,7 +347,16 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
         for _ in range(dry_steps):
             obs, _reward, _done, info = env.dry_step(rain_mm_h=rain_mm_h)
             total_etc_mm += info["etc_mm_h"] * dt_hours
-            _record(series, info, np.array([0.0, 0.0], dtype=np.float32), tag, event_idx, False)
+            npk_targets = _npk_targets_for_tag(tag)
+            npk_flows = _split_offline_npk_flow(float(info.get("q_f", 0.0)), npk_targets)
+            npk_actual = _estimate_offline_npk(
+                npk_actual,
+                npk_targets,
+                npk_flows,
+                float(info.get("irrigation_mm_h", 0.0)),
+                dt_hours,
+            )
+            _record(series, info, np.array([0.0, 0.0], dtype=np.float32), tag, event_idx, False, npk_targets, npk_actual, npk_flows)
 
         amount_m3ha = event.t2_amount_m3ha if args.irrigation_regime == "T2" else event.t1_amount_m3ha
         event_steps = max(1, int(event_duration_hours(amount_m3ha, args.area_ha) / dt_hours))
@@ -208,7 +370,16 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
             total_irrigation_mm += applied
             event_irrigation_mm += applied
             total_etc_mm += info["etc_mm_h"] * dt_hours
-            _record(series, info, action, tag, event_idx, True)
+            npk_targets = _npk_targets_for_tag(tag)
+            npk_flows = _split_offline_npk_flow(float(info.get("q_f", 0.0)), npk_targets)
+            npk_actual = _estimate_offline_npk(
+                npk_actual,
+                npk_targets,
+                npk_flows,
+                float(info.get("irrigation_mm_h", 0.0)),
+                dt_hours,
+            )
+            _record(series, info, action, tag, event_idx, True, npk_targets, npk_actual, npk_flows)
 
         logger.info(
             "事件 %d/%d day %.0f stage=%s tag=%s irrigation=%.2f mm theta=%.3f root_EC=%.3f",
@@ -233,7 +404,16 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
     for _ in range(tail_steps):
         obs, _reward, _done, info = env.dry_step(rain_mm_h=rain_mm_h)
         total_etc_mm += info["etc_mm_h"] * dt_hours
-        _record(series, info, np.array([0.0, 0.0], dtype=np.float32), tail_tag, len(schedule), False)
+        npk_targets = _npk_targets_for_tag(tail_tag)
+        npk_flows = _split_offline_npk_flow(float(info.get("q_f", 0.0)), npk_targets)
+        npk_actual = _estimate_offline_npk(
+            npk_actual,
+            npk_targets,
+            npk_flows,
+            float(info.get("irrigation_mm_h", 0.0)),
+            dt_hours,
+        )
+        _record(series, info, np.array([0.0, 0.0], dtype=np.float32), tail_tag, len(schedule), False, npk_targets, npk_actual, npk_flows)
 
     root_ec = np.array(series["ec_soil"], dtype=float)
     target_ec = np.array(series["target_ec"], dtype=float)
@@ -242,7 +422,27 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
     ph_drip = np.array(series["ph_drip"], dtype=float)
     ec_set = np.array(series["ec_set"], dtype=float)
     ph_set = np.array(series["ph_set"], dtype=float)
+    n_metrics = _error_metrics(np.array(series["n_actual"], dtype=float), np.array(series["n_target"], dtype=float))
+    p_metrics = _error_metrics(np.array(series["p_actual"], dtype=float), np.array(series["p_target"], dtype=float))
+    k_metrics = _error_metrics(np.array(series["k_actual"], dtype=float), np.array(series["k_target"], dtype=float))
+    layered_npk = env.soil_model == "layered_v2"
+    npk_metrics = {
+        "npk_metrics_status": "layered_mass_balance_available" if layered_npk else "offline_available",
+        "npk_source": "layered_v2_root_zone_mg_kg" if layered_npk else "offline_root_zone_estimator",
+        "N_MAE": n_metrics["mae"],
+        "P_MAE": p_metrics["mae"],
+        "K_MAE": k_metrics["mae"],
+        "N_RMSE": n_metrics["rmse"],
+        "P_RMSE": p_metrics["rmse"],
+        "K_RMSE": k_metrics["rmse"],
+        "N_Max_Error": n_metrics["max_error"],
+        "P_Max_Error": p_metrics["max_error"],
+        "K_Max_Error": k_metrics["max_error"],
+    }
     stats = {
+        "soil_model": env.soil_model,
+        "parameter_status": series["parameter_status"][-1] if series["parameter_status"] else "unknown",
+        "parameter_version": series["parameter_version"][-1] if series["parameter_version"] else "unknown",
         "irrigation_regime": args.irrigation_regime,
         "season_days": args.season_days,
         "dt_min": args.dt_min,
@@ -258,6 +458,15 @@ def run_full_season_sac(args: argparse.Namespace) -> tuple[dict[str, list[Any]],
         "ph_set_mean_during_events": float(np.mean(ph_set[event_mask])) if event_mask.any() else 0.0,
         "q_f_mean_during_events": float(np.mean(np.array(series["q_f"], dtype=float)[event_mask])) if event_mask.any() else 0.0,
         "q_a_mean_during_events": float(np.mean(np.array(series["q_a"], dtype=float)[event_mask])) if event_mask.any() else 0.0,
+        "npk_metrics": npk_metrics,
+        "npk_metric_definitions": {
+            "npk_source": (
+                "Layered soil V2 root-zone N/P/K mass-balance states in mg/kg; parameters are placeholders until field calibration."
+                if env.soil_model == "layered_v2"
+                else "Offline root-zone estimator driven by simulated q_f and stage nutrient targets; not PLC HIL and not real nutrient sensor feedback."
+            ),
+            "NPK_errors": "actual minus target over all recorded full-season SAC steps.",
+        },
     }
     return series, stats
 
@@ -385,6 +594,12 @@ def main() -> int:
     parser.add_argument("--season-days", type=float, default=float(season_cfg.get("ep_len_days", 90.0)))
     parser.add_argument("--et0", type=float, default=float(season_cfg.get("et0_mm_day", 4.0)))
     parser.add_argument("--seed", type=int, default=int(season_cfg.get("seed", 42)))
+    parser.add_argument(
+        "--soil-model",
+        choices=["lumped_v1", "layered_v2"],
+        default="lumped_v1",
+        help="土壤模型。layered_v2 使用四层水盐、pH 与 N/P/K 质量平衡模型。",
+    )
     args = parser.parse_args()
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -427,3 +642,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

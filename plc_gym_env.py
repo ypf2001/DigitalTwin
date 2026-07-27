@@ -1,21 +1,6 @@
-"""
-PLC 在环 Gymnasium 环境 — PLCGymEnv
-=====================================
-
-B 方案 HIL/PLCSIM 闭环：
-
-    Agent action [EC_set, pH_set]
-        ↓
-    Python 写入 PLC/PLCSIM：EC_Set_SP、pH_Set_SP、EC_Actual、pH_Actual
-        ↓
-    PLC/PLCSIM 内部 EC-PID、pH-PID 计算 q_f_cmd、q_a_cmd
-        ↓
-    Python 回读 q_f_cmd、q_a_cmd，并驱动数字孪生模型推进田间状态
-
-说明
+""" 
 ----
-DigitalTwinGymEnv 纯仿真模式仍使用内部 SetpointToFlowController；
-PLCGymEnv 则用 PLC/PLCSIM 作为执行层，更接近真实系统。
+PLCGymEnv 用 PLC/PLCSIM 作为执行层，更接近真实系统。
 """
 
 import logging
@@ -27,6 +12,7 @@ import numpy as np
 from config_loader import load_config
 from digital_twin_gym_env import DigitalTwinGymEnv, STAGE_MAP
 from plc_client import PLCClient
+from plc_control.gain_schedule import load_gain_schedule, select_gain_point
 
 logger = logging.getLogger(__name__)
 
@@ -46,31 +32,29 @@ class PLCGymEnv(gym.Env):
                  obs_noise_std: float = None,
                  reward_scale: float = 1.0,
                  seed: int = None,
-                 plc_enabled: bool = True):
+                 plc_enabled: bool = True,
+                 gain_schedule_path: str = None,
+                 use_gain_schedule: bool = False):
         super().__init__()
 
         self.plc = plc_client
         self.plc_enabled = plc_enabled and (self.plc is not None)
+        self.use_gain_schedule = bool(use_gain_schedule and self.plc_enabled)
+        self.gain_schedule_path = gain_schedule_path
+        self._gain_schedule = None
+        self._active_gain_id = None
+        if self.use_gain_schedule:
+            if not gain_schedule_path:
+                raise ValueError("gain_schedule_path is required when use_gain_schedule=True")
+            self._gain_schedule = load_gain_schedule(gain_schedule_path)
         plc_cfg = load_config().plc()
         action_cfg = load_config().action()
         feedback_filter_cfg = plc_cfg.get("feedback_filter", {})
+        deployment_cfg = load_config().deployment()
+        self._simulate_water_feedback = deployment_cfg.get("profile", "simulation_plc") != "field_plc"
         self.feedback_filter_enabled = bool(feedback_filter_cfg.get("enabled", True))
         self.feedback_filter_alpha = float(feedback_filter_cfg.get("alpha", 0.8))
         self.feedback_filter_alpha = float(np.clip(self.feedback_filter_alpha, 0.0, 0.99))
-        self.plc_action_low = np.array(
-            [
-                float(action_cfg.get("plc_ec_set_min", 0.5)),
-                float(action_cfg.get("plc_ph_set_min", 5.5)),
-            ],
-            dtype=np.float32,
-        )
-        self.plc_action_high = np.array(
-            [
-                float(action_cfg.get("ec_set_max", 2.5)),
-                float(action_cfg.get("ph_set_max", 6.8)),
-            ],
-            dtype=np.float32,
-        )
         self._ec_actual_filtered = None
         self._ph_actual_filtered = None
         self._soil_ph_est = 7.0
@@ -109,31 +93,48 @@ class PLCGymEnv(gym.Env):
             "N_Actual": 0.0,
             "P_Actual": 0.0,
             "K_Actual": 0.0,
+            "Qw_Set": self._sim_env.unwrapped_env.water_pump.q_set_l_min,
+            "Qw_Actual": 0.0,
+            "Pressure_Set": self._sim_env.unwrapped_env.water_pump.pressure_set_bar,
+            "Pressure_Actual": 0.0,
+            "Water_Pump_Run_CMD": False,
+            "Water_Pump_Running": False,
+            "Water_Flow_OK": False,
             "System_Alarm_Light": False,
         }
 
     def reset(self, seed=None, options=None):
         """重置仿真环境，并向 PLC 写入安全默认目标。"""
+        self._active_gain_id = None
         obs, _ = self._sim_env.reset(seed=seed, options=options)
         base = self._sim_env.unwrapped_env
         base.soil.ec_soil = 0.78
+        # reset() populated the observation history before the PLC/HIL-specific
+        # EC override. Rebuild that history so the returned first observation
+        # and the PLC feedback both start from the same physical state.
+        base._ec_soil_history.clear()
+        for _ in range(base.history_len):
+            base._ec_soil_history.append(float(base.soil.ec_soil))
+        obs = self._sim_env._normalize_obs(base._get_obs())
         self._root_ec_est = float(base.soil.ec_soil)
         self._soil_ph_est = 6.25
         self._npk_actual = self._npk_targets_for_stage("INI").copy()
         self._reset_feedback_filter(ec_actual=self._root_ec_est, ph_actual=self._soil_ph_est)
 
         if self.plc_enabled:
-            self._safe_write_setpoints(
+            self._sync_water_pump(base, reset_volume=True)
+            self._sync_plc_inputs(
                 ec_set=0.8,
                 ph_set=7.0,
                 ec_actual=self._root_ec_est,
                 ph_actual=self._soil_ph_est,
-                sac_enable=False,
+                automatic_enable=False,
             )
             time.sleep(self.plc.cycle_s)
             plc_state = self.plc.read_state()
             if plc_state is not None:
                 self._last_plc_state = plc_state
+                self._maybe_update_gain_schedule("INI", plc_state)
 
         return obs, self._build_info({
             "theta": base.soil.theta,
@@ -146,34 +147,42 @@ class PLCGymEnv(gym.Env):
     def step(self, action):
         """执行一个 PLC 在环控制步。
 
-        action 为 SAC 输出的 [EC_set, pH_set]。如果启用 PLC，则 PLC 执行层计算 q_f/q_a；
+        action 为 SAC 输出的 [water_multiplier, EC_residual]。如果启用 PLC，
+        PLC 执行层计算 q_f/q_a；
         如果未启用 PLC，则退化为 DigitalTwinGymEnv 的纯仿真执行层。
         """
         action = np.asarray(action, dtype=np.float32).flatten()
-        clip_low = self.plc_action_low if self.plc_enabled else self.action_space.low
-        clip_high = self.plc_action_high if self.plc_enabled else self.action_space.high
-        action_clipped = np.clip(action, clip_low, clip_high)
-        ec_set = float(action_clipped[0])
-        ph_set = float(action_clipped[1])
+        action_clipped = np.clip(action, self.action_space.low, self.action_space.high)
 
         if not self.plc_enabled:
             obs, reward, terminated, truncated, sim_info = self._sim_env.step(action_clipped)
             return obs, reward, terminated, truncated, self._build_info(sim_info)
 
         base = self._sim_env.unwrapped_env
+        projected = base.action_projector.project(
+            action_clipped,
+            stage_ec=base.crop.get_target_ec(base.current_stage),
+        )
+        ec_set = projected.ec_set
+        ph_set = projected.ph_nominal
+        base.water_pump.q_set_l_min = base._base_q_w * projected.water_multiplier
 
         # 1. 写入目标值和当前虚拟传感器值，供 PLC-PID 使用
         # EC target tracking is evaluated on root-zone soil EC, so feed the PLC
         # the same controlled variable instead of the pipe outlet EC.
         ec_actual = float(self._root_ec_est)
-        # In compressed full-season simulation, raw root-zone EC can jump much
-        # faster than a real sensor/soil volume. Keep the PLC feedback close to
-        # the controlled setpoint so the PLC trims around feedforward instead of
-        # repeatedly entering the hard fertilizer-cut protection branch.
-        ec_actual = min(ec_actual, ec_set + 0.025)
         ph_actual = float(self._soil_ph_est)
         ec_actual, ph_actual = self._filter_feedback(ec_actual, ph_actual)
-        self._safe_write_setpoints(ec_set, ph_set, ec_actual, ph_actual, sac_enable=True)
+        self._sync_water_pump(base)
+        self._sync_plc_inputs(
+            ec_set,
+            ph_set,
+            ec_actual,
+            ph_actual,
+            water_multiplier=projected.water_multiplier,
+            ec_residual=projected.ec_residual_ds_m,
+        )
+        self._maybe_update_gain_schedule(self._stage_name(base.current_stage), self._last_plc_state)
         npk_targets_for_plc = self._npk_targets_for_stage(base.current_stage)
         self.plc.write_fertilizer_feedback(
             npk_targets_for_plc["N"],
@@ -182,6 +191,7 @@ class PLCGymEnv(gym.Env):
             self._npk_actual["N"],
             self._npk_actual["P"],
             self._npk_actual["K"],
+            feedback_valid=True,
         )
 
         # 2. 等待 PLC/PLCSIM 扫描周期和 PID 执行
@@ -206,29 +216,55 @@ class PLCGymEnv(gym.Env):
         q_p = float(plc_state.get("q_p_cmd", q_f / 3.0))
         q_k = float(plc_state.get("q_k_cmd", q_f / 3.0))
 
+        configured_water_enable = bool(base.water_pump.enabled)
+        water_enabled = bool(plc_state.get("Water_Pump_Run_CMD", configured_water_enable))
+        default_water_mode = 1 if base.water_pump.mode == "pressure" else 0
+        base.set_irrigation_command(
+            enabled=water_enabled,
+            q_set_l_min=float(plc_state.get("Qw_Set", base.water_pump.q_set_l_min)),
+            pressure_set_bar=float(plc_state.get("Pressure_Set", base.water_pump.pressure_set_bar)),
+            mode="pressure" if int(plc_state.get("Water_Control_Mode", default_water_mode)) == 1 else "flow",
+        )
+        pump_state = base.water_pump.step(base.dt_min)
+        q_w = pump_state.q_actual_l_min
+        if not pump_state.flow_ok:
+            q_f = q_a = q_n = q_p = q_k = 0.0
+
         # 4. 用 PLC 输出 q_f/q_a 驱动底层数字孪生模型。
         obs, reward, terminated, truncated, sim_info = self._step_with_plc_flows(
             ec_set=ec_set,
             ph_set=ph_set,
+            water_multiplier=projected.water_multiplier,
+            ec_residual=projected.ec_residual_ds_m,
+            action_was_clipped=projected.clipped,
             q_f=q_f,
             q_a=q_a,
             q_n=q_n,
             q_p=q_p,
             q_k=q_k,
+            q_w=q_w,
+            pump_state=pump_state,
         )
         info = self._build_info(sim_info)
         return obs, reward, terminated, truncated, info
 
     def _step_with_plc_flows(self, ec_set: float, ph_set: float, q_f: float, q_a: float,
-                             q_n: float = 0.0, q_p: float = 0.0, q_k: float = 0.0):
+                             water_multiplier: float = 1.0, ec_residual: float = 0.0,
+                             action_was_clipped: bool = False,
+                             q_n: float = 0.0, q_p: float = 0.0, q_k: float = 0.0,
+                             q_w: float = None, pump_state=None):
         """绕过内部 SetpointToFlowController，直接使用 PLC 输出 q_f/q_a 推进模型。"""
         base = self._sim_env.unwrapped_env
 
-        q_w = base.q_w
+        if pump_state is None:
+            pump_state = base.water_pump.step(base.dt_min)
+        if q_w is None:
+            q_w = pump_state.q_actual_l_min
         if base._is_nighttime(base._time_min):
             q_f = 0.0
             q_a = 0.0
-            q_w = 0.0
+        if not pump_state.flow_ok:
+            q_f = q_a = q_n = q_p = q_k = 0.0
 
         total_flow_with_water = q_f + q_a + q_w
         irrigation_mm_h = total_flow_with_water * 60.0 / (base.area_ha * 10000.0)
@@ -303,6 +339,16 @@ class PLCGymEnv(gym.Env):
             "soil_ph_est": self._soil_ph_est,
             "ec_set": ec_set,
             "ph_set": ph_set,
+            "water_multiplier": float(water_multiplier),
+            "ec_residual": float(ec_residual),
+            "action_clipped": bool(action_was_clipped),
+            "ph_band_low": base.ph_band_controller.lower,
+            "ph_band_high": base.ph_band_controller.upper,
+            "ph_band_violation": max(
+                base.ph_band_controller.lower - ph_drip,
+                ph_drip - base.ph_band_controller.upper,
+                0.0,
+            ),
             "etc_mm_h": et_mm_h,
             "target_ec": base.crop.get_target_ec(base.current_stage),
             "irrigation_mm_h": irrigation_mm_h,
@@ -311,13 +357,22 @@ class PLCGymEnv(gym.Env):
             "q_n": q_n,
             "q_p": q_p,
             "q_k": q_k,
+            "q_w_set": pump_state.q_set_l_min,
+            "q_w_actual": q_w,
+            "water_pressure_set_bar": pump_state.pressure_set_bar,
+            "water_pressure_actual_bar": pump_state.pressure_actual_bar,
+            "water_pump_speed_percent": pump_state.speed_percent,
+            "water_volume_l": pump_state.volume_l,
+            "water_flow_ok": pump_state.flow_ok,
+            "water_volume_complete": pump_state.volume_complete,
             "n_actual": self._npk_actual["N"],
             "p_actual": self._npk_actual["P"],
             "k_actual": self._npk_actual["K"],
             "n_target": npk_targets["N"],
             "p_target": npk_targets["P"],
             "k_target": npk_targets["K"],
-            "total_flow_Lmin": actuator_flow_Lmin,
+            "dosing_flow_Lmin": actuator_flow_Lmin,
+            "total_flow_Lmin": q_w + actuator_flow_Lmin,
             "is_night": base._is_nighttime(base._time_min),
             "ec_reward": ec_reward_component,
             "ph_reward": ph_reward_component,
@@ -411,7 +466,12 @@ class PLCGymEnv(gym.Env):
             uptake = 0.0045 * dt_hours * (0.6 + 0.4 * targets[key])
             leaching = 0.0060 * dt_hours * wetting * max(value - 0.25, 0.0)
             dosing = 0.0042 * flows[key] * dt_hours
-            buffer_pull = 0.030 * dt_hours * (targets[key] - value)
+            # The compressed HIL model advances several physical hours per PLC
+            # scan. Use a stronger root-zone buffering term so the normalized
+            # stage recipe represents a maintainable concentration instead of
+            # letting uptake/leaching create a permanent common-mode deficit
+            # that cannot be corrected inside the fixed EC fertilizer budget.
+            buffer_pull = 0.070 * dt_hours * (targets[key] - value)
             raw_next = value + dosing + buffer_pull - uptake - leaching
             max_delta = 0.030 + 0.006 * min(dt_hours, 12.0)
             raw_next = float(np.clip(raw_next, value - max_delta, value + max_delta))
@@ -423,7 +483,21 @@ class PLCGymEnv(gym.Env):
 
     def close(self):
         if self.plc_enabled:
-            self._safe_write_setpoints(0.8, 7.0, 0.0, 7.0, sac_enable=False)
+            write_water_command = getattr(self.plc, "write_water_command", None)
+            if callable(write_water_command):
+                base = self._sim_env.unwrapped_env
+                write_water_command(
+                    enabled=False,
+                    q_w_set=base.water_pump.q_set_l_min,
+                    pressure_set=base.water_pump.pressure_set_bar,
+                    volume_set=0.0,
+                    control_mode=1 if base.water_pump.mode == "pressure" else 0,
+                    reset_volume=False,
+                )
+            self._sync_plc_inputs(0.8, 7.0, 0.0, 7.0, automatic_enable=False)
+            # Restore real-device defaults even after an interrupted compressed test.
+            self.plc.write_fertilizer_feedback(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, feedback_valid=False)
+            self.plc.write_compressed_hil_mode(False)
             self.plc.disconnect()
         self._sim_env.close()
 
@@ -456,6 +530,70 @@ class PLCGymEnv(gym.Env):
             logger.error(f"[HIL] PLC 目标值写入异常: {e}")
             return False
 
+    def _safe_write_feedback(self,
+                             ec_actual: float,
+                             ph_actual: float,
+                             sac_enable: bool) -> bool:
+        if not self.plc_enabled:
+            return True
+        try:
+            return self.plc.write_feedback(ec_actual, ph_actual, sac_enable=sac_enable)
+        except Exception as e:
+            logger.error(f"[HIL] PLC feedback write failed: {e}")
+            return False
+
+    def _sync_plc_inputs(self,
+                         ec_set: float,
+                         ph_set: float,
+                         ec_actual: float,
+                         ph_actual: float,
+                         water_multiplier: float | None = None,
+                         ec_residual: float | None = None,
+                         automatic_enable: bool = True) -> bool:
+        """Synchronize one cycle without fighting PLC local manual mode."""
+        mode_state = self.plc.read_control_mode()
+        if mode_state is not None:
+            self._last_plc_state.update(mode_state)
+
+        if bool(self._last_plc_state.get("Manual_Active", False)):
+            logger.info("[HIL] local manual active: automatic targets paused")
+            return self._safe_write_feedback(
+                ec_actual=ec_actual,
+                ph_actual=ph_actual,
+                sac_enable=False,
+            )
+
+        write_residual = getattr(self.plc, "write_residual_command", None)
+        if water_multiplier is not None and ec_residual is not None and callable(write_residual):
+            experiment = load_config().thesis_experiment_v2()
+            ph_band = experiment.get("ph_band", {})
+            controller = experiment.get("controller", {})
+            stage_name = self._stage_name(self._sim_env.unwrapped_env.current_stage)
+            recipe_ids = {"INI": 0, "DEV": 1, "MID": 2, "LATE": 3}
+            return write_residual(
+                water_multiplier=water_multiplier,
+                ec_residual=ec_residual,
+                stage_ec=ec_set - ec_residual,
+                ec_actual=ec_actual,
+                ph_actual=ph_actual,
+                ph_band_low=float(ph_band.get("lower", 5.8)),
+                ph_band_high=float(ph_band.get("upper", 6.5)),
+                recipe_id=recipe_ids.get(stage_name, 0),
+                controller_mode=int(controller.get("modes", {}).get(
+                    controller.get("default_mode", "imc_pi_smith"), 2
+                )),
+                batch_water_target_l=self._sim_env.unwrapped_env.water_pump.target_volume_l,
+                sac_enable=automatic_enable,
+            )
+
+        return self._safe_write_setpoints(
+            ec_set=ec_set,
+            ph_set=ph_set,
+            ec_actual=ec_actual,
+            ph_actual=ph_actual,
+            sac_enable=automatic_enable,
+        )
+
     def _reset_feedback_filter(self, ec_actual: float, ph_actual: float):
         """Initialize the EC/pH feedback filter at the start of an HIL episode."""
         self._ec_actual_filtered = float(ec_actual)
@@ -485,7 +623,66 @@ class PLCGymEnv(gym.Env):
         info = dict(sim_info)
         info["plc"] = dict(self._last_plc_state)
         info["plc_enabled"] = self.plc_enabled
+        info["gain_schedule_enabled"] = self.use_gain_schedule
+        info["active_gain_id"] = self._active_gain_id
         return info
+
+    @staticmethod
+    def _stage_name(stage) -> str:
+        for name, value in STAGE_MAP.items():
+            if value == stage:
+                return name
+        return str(stage).upper()
+
+    def _maybe_update_gain_schedule(self, stage: str, state: dict) -> None:
+        """Write one local matrix only when the selected point changes."""
+        if not self.use_gain_schedule or self._gain_schedule is None:
+            return
+        point = select_gain_point(
+            self._gain_schedule,
+            stage,
+            float(state.get("EC_Actual", self._root_ec_est)),
+            float(state.get("pH_Actual", self._soil_ph_est)),
+            float(state.get("q_f_cmd", 0.0)),
+            float(state.get("q_a_cmd", 0.0)),
+        )
+        if point is None or point.get("id") == self._active_gain_id:
+            return
+        if self.plc.write_active_gain_matrix(point, verify=True):
+            self._active_gain_id = point.get("id")
+            logger.info(
+                "[HIL] active gain point=%s stage=%s; decoupler remains disabled",
+                self._active_gain_id,
+                stage,
+            )
+        else:
+            logger.warning("[HIL] failed to write active gain point=%s", point.get("id"))
+
+    def _sync_water_pump(self, base, reset_volume: bool = False) -> None:
+        """Write the slow pump command and simulated feedback when supported."""
+        if not self.plc_enabled:
+            return
+        state = base.water_pump.state()
+        write_command = getattr(self.plc, "write_water_command", None)
+        if callable(write_command):
+            write_command(
+                enabled=state.enabled,
+                q_w_set=state.q_set_l_min,
+                pressure_set=state.pressure_set_bar,
+                volume_set=base.water_pump.target_volume_l,
+                control_mode=1 if state.mode == "pressure" else 0,
+                pre_flush_ratio=base.water_pump.pre_flush_ratio,
+                post_flush_ratio=base.water_pump.post_flush_ratio,
+                reset_volume=reset_volume,
+            )
+        write_feedback = getattr(self.plc, "write_water_feedback", None)
+        if self._simulate_water_feedback and callable(write_feedback):
+            write_feedback(
+                q_w_actual=state.q_actual_l_min,
+                pressure_actual=state.pressure_actual_bar,
+                speed_actual=state.speed_percent,
+                running=state.running,
+            )
 
     def get_plc_state(self) -> dict:
         return dict(self._last_plc_state)

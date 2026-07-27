@@ -1,0 +1,22 @@
+﻿MultiLingualTexts:
+  - id: MLC_54k
+    zh-CN: Communication normal
+    en-US: Communication normal
+  - id: MLC_4dX
+    zh-CN: Manual active interlock
+    en-US: Manual active interlock
+  - id: MLC_XZ
+    zh-CN: Auto active interlock
+    en-US: Auto active interlock
+  - id: MLC_3wy
+    zh-CN: Manual pump valve enable
+    en-US: Manual pump valve enable
+  - id: MLC_kX
+    zh-CN: Alarm light
+    en-US: Alarm light
+  - id: MLC_4kQ
+    zh-CN: Select manual q_f
+    en-US: Select manual q_f
+  - id: MLC_4Ec
+    zh-CN: Select manual q_a
+    en-US: Select manual q_a

@@ -3,7 +3,7 @@
 This script bypasses the field/root-zone lifecycle model. It only closes the
 loop around the PLC controller with a simple outlet process:
 
-    fixed EC/pH setpoint -> PLC fuzzy adaptive PID -> q_f/q_a
+    fixed EC/pH setpoint -> PLC nonlinear gain-scheduled PID -> q_f/q_a
     -> mixing tank + pipe dynamics -> EC_Actual/pH_Actual feedback
 
 Use it before full-season runs to tune the PLC execution layer until the outlet
@@ -38,6 +38,15 @@ STAGE_INDEX = {
     "MID": 2,
     "LATE": 3,
 }
+
+
+def _settling_time(rows: list[dict[str, float]], name: str, band: float) -> float | None:
+    actual_key = f"{name}_actual"
+    set_key = f"{name}_set"
+    for i, _ in enumerate(rows):
+        if all(abs(r[actual_key] - r[set_key]) <= band for r in rows[i:]):
+            return float(rows[i]["time_s"])
+    return None
 
 
 def _plot(out_dir: Path, rows: list[dict[str, float]]) -> Path:
@@ -113,6 +122,40 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
     if not plc.connect():
         raise RuntimeError("PLC connection failed.")
 
+    # 先建立远程通信握手，再写入 A/B 测试选择位。PLC 在通信未健康时会
+    # 自动清除 Fixed_PID_Test_Enable，若连接后立即写入会造成固定 PID
+    # 测试实际仍运行自适应 PID。
+    if not plc.write_setpoints(
+        ec_set=args.ec_set,
+        ph_set=args.ph_set,
+        ec_actual=float(args.ec_initial),
+        ph_actual=float(args.ph_initial),
+        sac_enable=True,
+    ):
+        raise RuntimeError("PLC remote handshake write failed.")
+    time.sleep(args.plc_wait_s)
+    plc.read_state()
+    if not plc.write_fixed_pid_test_mode(bool(args.fixed_pid_test)):
+        raise RuntimeError("PLC fixed/adaptive PID test selection failed.")
+    time.sleep(args.plc_wait_s)
+    pid_mode_state = plc.read_state() or {}
+    if bool(pid_mode_state.get("Fixed_PID_Test_Enable", False)) != bool(args.fixed_pid_test):
+        raise RuntimeError("PLC did not retain the requested fixed/adaptive PID test mode.")
+
+    pid_args = [args.kp_ec, args.ki_ec, args.kd_ec, args.kp_ph, args.ki_ph, args.kd_ph]
+    if any(v is not None for v in pid_args) or args.ec_trim_band is not None or args.ph_trim_band is not None:
+        state = plc.read_state() or {}
+        plc.write_pid_params(
+            kp_ec=float(args.kp_ec if args.kp_ec is not None else state.get("Kp_EC_Set", 1.2)),
+            ki_ec=float(args.ki_ec if args.ki_ec is not None else state.get("Ki_EC_Set", 0.0)),
+            kd_ec=float(args.kd_ec if args.kd_ec is not None else state.get("Kd_EC_Set", 0.0)),
+            kp_ph=float(args.kp_ph if args.kp_ph is not None else state.get("Kp_pH_Set", 1.2)),
+            ki_ph=float(args.ki_ph if args.ki_ph is not None else state.get("Ki_pH_Set", 0.01)),
+            kd_ph=float(args.kd_ph if args.kd_ph is not None else state.get("Kd_pH_Set", 0.0)),
+            ec_trim_band=args.ec_trim_band,
+            ph_trim_band=args.ph_trim_band,
+        )
+
     out_dir = ROOT / "results" / "plc_setpoint_step" / datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / "plc_setpoint_step.csv"
@@ -139,6 +182,14 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
         "active_ec_sp",
         "active_ph_sp",
         "setpoint_protection",
+        "fixed_pid_test_enable",
+        "adaptive_pid_active",
+        "kp_ec_effective",
+        "ki_ec_effective",
+        "kd_ec_effective",
+        "kp_ph_effective",
+        "ki_ph_effective",
+        "kd_ph_effective",
     ]
 
     csv_file = csv_path.open("w", newline="", encoding="utf-8-sig")
@@ -193,6 +244,14 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
                 "active_ec_sp": float(state.get("Active_EC_SP", args.ec_set)),
                 "active_ph_sp": float(state.get("Active_pH_SP", args.ph_set)),
                 "setpoint_protection": bool(state.get("Setpoint_Protection_Active", False)),
+                "fixed_pid_test_enable": bool(state.get("Fixed_PID_Test_Enable", False)),
+                "adaptive_pid_active": bool(state.get("Adaptive_PID_Active", False)),
+                "kp_ec_effective": float(state.get("Kp_EC_Effective", 0.0)),
+                "ki_ec_effective": float(state.get("Ki_EC_Effective", 0.0)),
+                "kd_ec_effective": float(state.get("Kd_EC_Effective", 0.0)),
+                "kp_ph_effective": float(state.get("Kp_pH_Effective", 0.0)),
+                "ki_ph_effective": float(state.get("Ki_pH_Effective", 0.0)),
+                "kd_ph_effective": float(state.get("Kd_pH_Effective", 0.0)),
             }
             rows.append(row)
             writer.writerow(row)
@@ -209,6 +268,7 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
     finally:
         csv_file.close()
         try:
+            plc.write_fixed_pid_test_mode(False)
             plc.write_setpoints(args.ec_set, args.ph_set, ec_actual, ph_actual, sac_enable=False)
         finally:
             plc.disconnect()
@@ -216,14 +276,31 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
     plot_path = _plot(out_dir, rows)
 
     tail = rows[max(0, len(rows) - max(3, int(round(30.0 / sim_step_s)))) :]
+    ec_errors = [r["ec_actual"] - r["ec_set"] for r in rows]
+    ph_errors = [r["ph_actual"] - r["ph_set"] for r in rows]
+    ph_tail_drop = float(tail[0]["ph_actual"] - tail[-1]["ph_actual"])
     metrics = {
         "ec_final": rows[-1]["ec_actual"],
         "ph_final": rows[-1]["ph_actual"],
         "ec_tail_mae": float(np.mean([abs(r["ec_actual"] - r["ec_set"]) for r in tail])),
         "ph_tail_mae": float(np.mean([abs(r["ph_actual"] - r["ph_set"]) for r in tail])),
+        "ec_max_overshoot": float(max(ec_errors)),
+        "ec_max_undershoot": float(min(ec_errors)),
+        "ph_max_overshoot": float(max(ph_errors)),
+        "ph_max_undershoot": float(min(ph_errors)),
+        "ec_settle_s": _settling_time(rows, "ec", args.ec_settle_band),
+        "ph_settle_s": _settling_time(rows, "ph", args.ph_settle_band),
+        "ph_tail_drop": ph_tail_drop,
         "q_f_final": rows[-1]["q_f_cmd"],
         "q_a_final": rows[-1]["q_a_cmd"],
     }
+    passed = (
+        metrics["ec_tail_mae"] <= args.ec_mae_max
+        and metrics["ph_tail_mae"] <= args.ph_mae_max
+        and abs(rows[-1]["ec_actual"] - rows[-1]["ec_set"]) <= args.ec_final_band
+        and abs(rows[-1]["ph_actual"] - rows[-1]["ph_set"]) <= args.ph_final_band
+        and metrics["ph_tail_drop"] <= args.ph_tail_drop_max
+    )
     print(f"Saved CSV: {csv_path}", flush=True)
     print(f"Saved plot: {plot_path}", flush=True)
     print(
@@ -231,6 +308,26 @@ def run(args: argparse.Namespace) -> tuple[Path, dict[str, float]]:
         f"EC={metrics['ec_tail_mae']:.4f}, pH={metrics['ph_tail_mae']:.4f}",
         flush=True,
     )
+    print(
+        "Final error: "
+        f"EC={rows[-1]['ec_actual'] - rows[-1]['ec_set']:+.4f}, "
+        f"pH={rows[-1]['ph_actual'] - rows[-1]['ph_set']:+.4f}",
+        flush=True,
+    )
+    print(
+        "Settling time: "
+        f"EC={metrics['ec_settle_s'] if metrics['ec_settle_s'] is not None else 'not settled'}s, "
+        f"pH={metrics['ph_settle_s'] if metrics['ph_settle_s'] is not None else 'not settled'}s",
+        flush=True,
+    )
+    print(f"pH tail drop: {metrics['ph_tail_drop']:+.4f}", flush=True)
+    (out_dir / "metrics.json").write_text(
+        __import__("json").dumps({"passed": passed, "metrics": metrics}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    print(f"Outlet control verdict: {'PASS' if passed else 'FAIL'}", flush=True)
+    if args.strict and not passed:
+        raise RuntimeError("Outlet control metrics did not meet thresholds.")
     return out_dir, metrics
 
 
@@ -253,6 +350,23 @@ def main() -> int:
     parser.add_argument("--log-every", type=int, default=5)
     parser.add_argument("--disable-ec-loop", action="store_true", help="Feed EC setpoint back to PLC to isolate pH loop.")
     parser.add_argument("--disable-ph-loop", action="store_true", help="Feed pH setpoint back to PLC to isolate EC loop.")
+    parser.add_argument("--kp-ec", type=float, default=None, help="Optional online EC Kp override.")
+    parser.add_argument("--ki-ec", type=float, default=None, help="Optional online EC Ki override.")
+    parser.add_argument("--kd-ec", type=float, default=None, help="Optional online EC Kd override.")
+    parser.add_argument("--kp-ph", type=float, default=None, help="Optional online pH Kp override.")
+    parser.add_argument("--ki-ph", type=float, default=None, help="Optional online pH Ki override.")
+    parser.add_argument("--kd-ph", type=float, default=None, help="Optional online pH Kd override.")
+    parser.add_argument("--ec-trim-band", type=float, default=None, help="Optional EC fine-trim band override, e.g. 0.08.")
+    parser.add_argument("--ph-trim-band", type=float, default=None, help="Optional pH fine-trim band override, e.g. 0.08.")
+    parser.add_argument("--ec-mae-max", type=float, default=0.03)
+    parser.add_argument("--ph-mae-max", type=float, default=0.05)
+    parser.add_argument("--ec-final-band", type=float, default=0.05)
+    parser.add_argument("--ph-final-band", type=float, default=0.08)
+    parser.add_argument("--ec-settle-band", type=float, default=0.05)
+    parser.add_argument("--ph-settle-band", type=float, default=0.08)
+    parser.add_argument("--ph-tail-drop-max", type=float, default=0.02, help="Max allowed pH decrease over the tail window.")
+    parser.add_argument("--fixed-pid-test", action="store_true", help="Use fixed base PID gains for PLC A/B comparison.")
+    parser.add_argument("--strict", action="store_true", help="Exit with error if outlet metrics fail thresholds.")
     args = parser.parse_args()
 
     run(args)

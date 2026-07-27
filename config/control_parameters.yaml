@@ -1,0 +1,39 @@
+schema_version: 1
+
+# This file contains parameters that may be deployed to DB1.
+# Keep simulation-only noise and soil parameters in simulation.yaml.
+pid:
+  ec:
+    kp: 1.10
+    ki: 0.030
+    kd: 0.013
+  ph:
+    kp: 1.20
+    ki: 0.010
+    kd: 0.008
+
+decoupling:
+  enabled: false
+  weight: 0.0
+  g_ec_f: 0.0
+  g_ec_a: 0.0
+  g_ph_f: 0.0
+  g_ph_a: 0.0
+  regularization: 0.001
+  mixing_delay_s: 60.0
+  determinant_min: 0.001
+
+limits:
+  q_f_min: 0.0
+  q_f_max: 10.0
+  q_a_min: 0.0
+  q_a_max: 4.0
+
+npk:
+  # Field default follows the base-fertilizer interpretation.
+  n_enable: true
+  p_enable: false
+  k_enable: false
+  n_ratio: 1.0
+  p_ratio: 0.0
+  k_ratio: 0.0

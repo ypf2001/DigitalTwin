@@ -1,0 +1,128 @@
+﻿{
+    S7_Optimized := "TRUE";
+    S7_PreferredLanguage := "LAD";
+    S7_Version := "0.1"
+}
+FUNCTION "FC_FieldSafety_LAD" : Void
+    VAR_TEMP
+        All_Sensors_OK : Bool;
+        No_Drive_Fault : Bool;
+        All_Drives_Ready : Bool;
+        All_Tanks_OK : Bool;
+    END_VAR
+
+    { S7_Language := "LAD" }
+    NETWORK
+        // Aggregate eight analog diagnostics and the HSC flow diagnostic.
+        RUNG wire#powerrail
+            I_Contact( "DB_FieldIO".Fault[1] )
+            I_Contact( "DB_FieldIO".Fault[2] )
+            I_Contact( "DB_FieldIO".Fault[3] )
+            I_Contact( "DB_FieldIO".Fault[4] )
+            I_Contact( "DB_FieldIO".Fault[5] )
+            I_Contact( "DB_FieldIO".Fault[6] )
+            I_Contact( "DB_FieldIO".Fault[7] )
+            I_Contact( "DB_FieldIO".Fault[8] )
+            I_Contact( "DB_FieldIO".HSC_Water_Fault )
+            Coil( #All_Sensors_OK )
+        END_RUNG
+        RUNG wire#powerrail
+            I_Contact( #All_Sensors_OK )
+            Coil( "DB1".Sensor_Fault_Any )
+        END_RUNG
+    END_NETWORK
+
+    { S7_Language := "LAD" }
+    NETWORK
+        // A drive trip is a field fault even if its ready contact remains high.
+        RUNG wire#powerrail
+            I_Contact( "DB_FieldIO".DI_Water_Drive_Fault )
+            I_Contact( "DB_FieldIO".DI_N_Drive_Fault )
+            I_Contact( "DB_FieldIO".DI_P_Drive_Fault )
+            I_Contact( "DB_FieldIO".DI_K_Drive_Fault )
+            I_Contact( "DB_FieldIO".DI_Acid_Drive_Fault )
+            I_Contact( "DB_Actuator".Any_Trip )
+            Coil( #No_Drive_Fault )
+        END_RUNG
+        RUNG wire#powerrail
+            I_Contact( #No_Drive_Fault )
+            Coil( "DB1".Drive_Fault_Any )
+        END_RUNG
+    END_NETWORK
+
+    { S7_Language := "LAD" }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "DB_FieldIO".DI_Water_Drive_Ready )
+            Contact( "DB_FieldIO".DI_N_Drive_Ready )
+            Contact( "DB_FieldIO".DI_P_Drive_Ready )
+            Contact( "DB_FieldIO".DI_K_Drive_Ready )
+            Contact( "DB_FieldIO".DI_Acid_Drive_Ready )
+            Coil( #All_Drives_Ready )
+        END_RUNG
+        RUNG wire#powerrail
+            I_Contact( "DB_FieldIO".DI_Water_Source_Low_Level )
+            I_Contact( "DB_FieldIO".DI_N_Tank_Low_Level )
+            I_Contact( "DB_FieldIO".DI_P_Tank_Low_Level )
+            I_Contact( "DB_FieldIO".DI_K_Tank_Low_Level )
+            I_Contact( "DB_FieldIO".DI_Acid_Tank_Low_Level )
+            Coil( #All_Tanks_OK )
+        END_RUNG
+    END_NETWORK
+
+    { S7_Language := "LAD" }
+    NETWORK
+        // Physical E-stop is hardwired to contactor/STO; PLC only reads feedback.
+        RUNG wire#powerrail
+            Contact( "DB_FieldIO".DI_Physical_EStop_OK )
+            Coil( "DB1".Physical_EStop_OK )
+        END_RUNG
+    END_NETWORK
+
+    { S7_Language := "LAD" }
+    NETWORK
+        // Field I/O ready is meaningful only in deployment mode 1.
+        RUNG wire#powerrail
+            { S7_Templates := "SrcType := Int" }
+            EQ_Contact(
+                in1 := "DB1".Deployment_Mode,
+                in2 := 1
+            )
+            Contact( #All_Sensors_OK )
+            Contact( #No_Drive_Fault )
+            Contact( #All_Drives_Ready )
+            Contact( #All_Tanks_OK )
+            Contact( "DB1".Physical_EStop_OK )
+            Coil( "DB1".Field_IO_Ready )
+        END_RUNG
+    END_NETWORK
+
+    { S7_Language := "LAD" }
+    NETWORK
+        // Final execution permission. Any missing condition drops the coil in this scan.
+        RUNG wire#powerrail
+            { S7_Templates := "SrcType := Int" }
+            EQ_Contact(
+                in1 := "DB1".Deployment_Mode,
+                in2 := 1
+            )
+            Contact( "DB1".Actuator_Enable_Request )
+            Contact( "DB_FieldIO".DI_Commissioning_Key_Active )
+            Contact( "DB1".Physical_EStop_OK )
+            Contact( "DB1".Field_IO_Ready )
+            I_Contact( "DB1".Sensor_Fault_Any )
+            I_Contact( "DB1".Drive_Fault_Any )
+            I_Contact( "DB1".Soft_Stop_Request )
+            I_Contact( "DB1".Emergency_Stop )
+            Coil( "DB1".Actuator_Enable_Permitted )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( "DB1".Actuator_Enable_Permitted )
+            Coil( "DB_Actuator".Execution_Enable )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( "DB1".Actuator_Enable_Permitted )
+            Coil( "DB1".Actuator_Execution_Enable )
+        END_RUNG
+    END_NETWORK
+END_FUNCTION

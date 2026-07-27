@@ -1,0 +1,97 @@
+﻿{
+    S7_Optimized := "TRUE";
+    S7_PreferredLanguage := "LAD";
+    S7_Version := "0.1"
+}
+FUNCTION "FC_ModeSelector_LAD" : Void
+    VAR_INPUT
+        Emergency_Stop : Bool;
+        Manual_Mode : Bool;
+        Auto_Mode : Bool;
+        SAC_Enable : Bool;
+        Stage_Auto_SP_Enable : Bool;
+    END_VAR
+    VAR_OUTPUT
+        Mode_EStop : Bool;
+        Mode_Manual : Bool;
+        Mode_Remote_Auto : Bool;
+        Mode_Stage_Auto : Bool;
+        Mode_Local_Auto : Bool;
+        Mode_Standby : Bool;
+    END_VAR
+
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_hR"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Emergency_Stop )
+            Coil( #Mode_EStop )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_546"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            I_Contact( #Emergency_Stop )
+            Contact( #Manual_Mode )
+            Coil( #Mode_Manual )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_4qu"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            I_Contact( #Emergency_Stop )
+            I_Contact( #Manual_Mode )
+            Contact( #Auto_Mode )
+            Contact( #SAC_Enable )
+            Coil( #Mode_Remote_Auto )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_4cz"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            I_Contact( #Emergency_Stop )
+            I_Contact( #Manual_Mode )
+            Contact( #Auto_Mode )
+            I_Contact( #SAC_Enable )
+            Contact( #Stage_Auto_SP_Enable )
+            Coil( #Mode_Stage_Auto )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_4TZ"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            I_Contact( #Emergency_Stop )
+            I_Contact( #Manual_Mode )
+            Contact( #Auto_Mode )
+            I_Contact( #SAC_Enable )
+            I_Contact( #Stage_Auto_SP_Enable )
+            Coil( #Mode_Local_Auto )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_32X"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            I_Contact( #Emergency_Stop )
+            I_Contact( #Manual_Mode )
+            I_Contact( #Auto_Mode )
+            Coil( #Mode_Standby )
+        END_RUNG
+    END_NETWORK
+END_FUNCTION

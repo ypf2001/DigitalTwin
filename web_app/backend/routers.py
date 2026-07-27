@@ -1,17 +1,32 @@
 """路由 / 控制器层 — 对接 FastAPI 路由装饰器"""
 
+import logging
+import os
 import traceback
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from models import SimulateRequest, SeasonRequest, ConfigSaveRequest, TrainRequest, UploadSelectedRequest
 from services import (
     get_weather_data, get_config_data, run_simulation, run_season_compare,
     save_config_section, get_training_status, start_training, stop_training,
     get_model_info, upload_models_to_cloud, get_upload_progress, stop_upload, upload_selected_models, delete_model, clear_training_progress,
+    get_active_calibration, run_field_calibration,
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+_DEBUG_TRACEBACK = os.getenv("DT_API_DEBUG_TRACEBACK", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _error_response(exc: Exception, include_success: bool = True) -> dict:
+    logger.exception("API request failed")
+    response = {"error": str(exc)}
+    if include_success:
+        response["success"] = False
+    if _DEBUG_TRACEBACK:
+        response["traceback"] = traceback.format_exc()
+    return response
 
 
 @router.get("/api/weather")
@@ -31,7 +46,7 @@ def api_config():
     try:
         return get_config_data()
     except Exception as e:
-        return {"error": str(e)}
+        return _error_response(e, include_success=False)
 
 
 @router.post("/api/simulate")
@@ -39,8 +54,7 @@ def simulate(req: SimulateRequest):
     try:
         return run_simulation(req.mode, req.stage, req.weather)
     except Exception as e:
-        return {"success": False, "error": str(e),
-                "traceback": traceback.format_exc()}
+        return _error_response(e)
 
 
 @router.post("/api/season-compare")
@@ -48,8 +62,7 @@ def season_compare(req: SeasonRequest):
     try:
         return run_season_compare(req.weather)
     except Exception as e:
-        return {"success": False, "error": str(e),
-                "traceback": traceback.format_exc()}
+        return _error_response(e)
 
 
 @router.put("/api/config/save")
@@ -57,8 +70,33 @@ def save_config(req: ConfigSaveRequest):
     try:
         return save_config_section(req.section, req.updates)
     except Exception as e:
-        return {"success": False, "error": str(e),
-                "traceback": traceback.format_exc()}
+        return _error_response(e)
+
+
+
+@router.get("/api/calibration/active")
+def calibration_active():
+    try:
+        return get_active_calibration()
+    except Exception as e:
+        return _error_response(e)
+
+
+@router.post("/api/calibration/run")
+async def calibration_run(
+    request: Request,
+    filename: str = "field.csv",
+    trials: int = 300,
+    validation_fraction: float = 0.20,
+    activate: bool = True,
+):
+    try:
+        payload = await request.body()
+        return run_field_calibration(
+            payload, filename, trials, validation_fraction, activate
+        )
+    except Exception as e:
+        return _error_response(e)
 
 
 # ============ 训练相关 API ============
@@ -69,17 +107,19 @@ def training_status():
     try:
         return get_training_status()
     except Exception as e:
-        return {"error": str(e)}
+        return _error_response(e, include_success=False)
 
 
 @router.post("/api/training/start")
 def training_start(req: TrainRequest):
     """启动训练"""
     try:
-        return start_training(req.stage, req.timesteps, req.resume, req.load_model)
+        return start_training(
+            req.stage, req.timesteps, req.resume, req.load_model,
+            req.soil_model, req.domain_randomization,
+        )
     except Exception as e:
-        return {"success": False, "error": str(e),
-                "traceback": traceback.format_exc()}
+        return _error_response(e)
 
 
 @router.post("/api/training/stop")
@@ -88,8 +128,7 @@ def training_stop():
     try:
         return stop_training()
     except Exception as e:
-        return {"success": False, "error": str(e),
-                "traceback": traceback.format_exc()}
+        return _error_response(e)
 
 
 @router.get("/api/training/models")
@@ -98,7 +137,7 @@ def training_models(query_cloud: bool = False):
     try:
         return get_model_info(query_cloud=query_cloud)
     except Exception as e:
-        return {"error": str(e)}
+        return _error_response(e, include_success=False)
 
 
 @router.post("/api/training/upload")
@@ -108,8 +147,7 @@ def upload_models():
         result = upload_models_to_cloud()
         return result
     except Exception as e:
-        return {"success": False, "error": str(e),
-                "traceback": traceback.format_exc()}
+        return _error_response(e)
 
 
 @router.get("/api/training/upload/progress")
@@ -118,7 +156,7 @@ def upload_progress():
     try:
         return get_upload_progress()
     except Exception as e:
-        return {"error": str(e)}
+        return _error_response(e, include_success=False)
 
 
 @router.post("/api/training/upload/selected")
@@ -130,7 +168,7 @@ def upload_selected(req: UploadSelectedRequest):
             return {"success": False, "error": "未指定模型名称"}
         return upload_selected_models(names)
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return _error_response(e)
 
 
 @router.post("/api/training/upload/stop")
@@ -139,7 +177,7 @@ def upload_stop():
     try:
         return stop_upload()
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return _error_response(e)
 
 
 @router.delete("/api/training/models/{name}")
@@ -148,7 +186,7 @@ def delete_model_route(name: str):
     try:
         return delete_model(name)
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return _error_response(e)
 
 
 @router.post("/api/training/progress/clear")
@@ -157,4 +195,4 @@ def clear_progress():
     try:
         return clear_training_progress()
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return _error_response(e)

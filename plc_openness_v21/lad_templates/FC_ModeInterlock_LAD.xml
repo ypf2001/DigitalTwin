@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V21" />
+  <DocumentInfo>
+    <Created>2026-07-07T08:27:32.6446113Z</Created>
+    <ExportSetting>WithReadOnly</ExportSetting>
+    <InstalledProducts>
+      <Product>
+        <DisplayName>Totally Integrated Automation Portal</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <Product>
+        <DisplayName>SINAMICS Startdrive Advanced</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>SINAMICS Startdrive G110M, G120, G120C, G120D, G120P, G115D</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <OptionPackage>
+        <DisplayName>SINAMICS Startdrive G130, G150, S120, S150, G200, G220, S200, S210, S220, Innomotics MVD</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>STEP 7 Professional</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>STEP 7 Safety</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <OptionPackage>
+        <DisplayName>Tech WebApplication</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>WinCC Basic/Comfort/Advanced</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <Product>
+        <DisplayName>WinCC Professional</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+      <Product>
+        <DisplayName>WinCC Unified</DisplayName>
+        <DisplayVersion>V21</DisplayVersion>
+      </Product>
+    </InstalledProducts>
+  </DocumentInfo>
+  <SW.Blocks.FC ID="0">
+    <AttributeList>
+      <CodeModifiedDate ReadOnly="true">2026-07-07T08:27:04.0853797Z</CodeModifiedDate>
+      <CompileDate ReadOnly="true">2026-07-07T08:27:05.4592799Z</CompileDate>
+      <CreationDate ReadOnly="true">2026-07-07T08:27:04.0611103Z</CreationDate>
+      <DownloadDate ReadOnly="true">0001-01-01T00:00:00Z</DownloadDate>
+      <Interface>
+        <Sections xmlns="http://www.siemens.com/automation/Openness/SW/Interface/v5">
+          <Section Name="Input" /><Section Name="Output" /><Section Name="InOut" /><Section Name="Temp" /><Section Name="Constant" /><Section Name="Return"><Member Name="Ret_Val" Datatype="Void" /></Section></Sections>
+      </Interface>
+      <InterfaceModifiedDate ReadOnly="true">2026-07-07T08:27:04.0611103Z</InterfaceModifiedDate>
+      <IsConsistent ReadOnly="true">true</IsConsistent>
+      <LibraryConformanceStatus ReadOnly="true">警告： 该对象包含对全局数据块的访问。
+</LibraryConformanceStatus>
+      <LoadMemoryLength ReadOnly="true">10131</LoadMemoryLength>
+      <MemoryLayout>Optimized</MemoryLayout>
+      <ModifiedDate ReadOnly="true">2026-07-07T08:27:04.2019708Z</ModifiedDate>
+      <Name>FC_ModeInterlock_LAD</Name>
+      <Namespace />
+      <Number>2</Number>
+      <PLCSimAdvancedSupport ReadOnly="true">true</PLCSimAdvancedSupport>
+      <ParameterModified ReadOnly="true">2026-07-07T08:27:04.0611103Z</ParameterModified>
+      <ProgrammingLanguage>LAD</ProgrammingLanguage>
+      <SetENOAutomatically>false</SetENOAutomatically>
+      <StructureModified ReadOnly="true">2026-07-07T08:27:04.0611103Z</StructureModified>
+      <WorkMemoryLength ReadOnly="true">158</WorkMemoryLength>
+    </AttributeList>
+    <ObjectList>
+      <MultilingualText ID="1" CompositionName="Comment">
+        <ObjectList>
+          <MultilingualTextItem ID="2" CompositionName="Items">
+            <AttributeList>
+              <Culture>zh-CN</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+      <SW.Blocks.CompileUnit ID="100" CompositionName="CompileUnits"><AttributeList><NetworkSource><FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v4"><Parts><Access Scope="GlobalVariable" UId="21"><Symbol><Component Name="DB1" /><Component Name="Remote_Comms_OK" /></Symbol></Access><Access Scope="GlobalVariable" UId="22"><Symbol><Component Name="DB1" /><Component Name="Emergency_Stop" /></Symbol></Access><Access Scope="GlobalVariable" UId="23"><Symbol><Component Name="DB1" /><Component Name="Comm_Normal" /></Symbol></Access><Part Name="Contact" UId="24" /><Part Name="Contact" UId="25"><Negated Name="operand" /></Part><Part Name="Coil" UId="26" /></Parts><Wires><Wire UId="27"><Powerrail /><NameCon UId="24" Name="in" /></Wire><Wire UId="28"><IdentCon UId="21" /><NameCon UId="24" Name="operand" /></Wire><Wire UId="29"><NameCon UId="24" Name="out" /><NameCon UId="25" Name="in" /></Wire><Wire UId="30"><IdentCon UId="22" /><NameCon UId="25" Name="operand" /></Wire><Wire UId="31"><NameCon UId="25" Name="out" /><NameCon UId="26" Name="in" /></Wire><Wire UId="32"><IdentCon UId="23" /><NameCon UId="26" Name="operand" /></Wire></Wires></FlgNet></NetworkSource><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList><MultilingualText ID="101C" CompositionName="Comment"><ObjectList><MultilingualTextItem ID="102C" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text /></AttributeList></MultilingualTextItem></ObjectList></MultilingualText><MultilingualText ID="101" CompositionName="Title"><ObjectList><MultilingualTextItem ID="102" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text>Communication normal</Text></AttributeList></MultilingualTextItem></ObjectList></MultilingualText></ObjectList></SW.Blocks.CompileUnit><SW.Blocks.CompileUnit ID="110" CompositionName="CompileUnits"><AttributeList><NetworkSource><FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v4"><Parts><Access Scope="GlobalVariable" UId="21"><Symbol><Component Name="DB1" /><Component Name="Emergency_Stop" /></Symbol></Access><Access Scope="GlobalVariable" UId="22"><Symbol><Component Name="DB1" /><Component Name="Manual_Mode" /></Symbol></Access><Access Scope="GlobalVariable" UId="23"><Symbol><Component Name="DB1" /><Component Name="Manual_Active" /></Symbol></Access><Part Name="Contact" UId="24"><Negated Name="operand" /></Part><Part Name="Contact" UId="25" /><Part Name="Coil" UId="26" /></Parts><Wires><Wire UId="27"><Powerrail /><NameCon UId="24" Name="in" /></Wire><Wire UId="28"><IdentCon UId="21" /><NameCon UId="24" Name="operand" /></Wire><Wire UId="29"><NameCon UId="24" Name="out" /><NameCon UId="25" Name="in" /></Wire><Wire UId="30"><IdentCon UId="22" /><NameCon UId="25" Name="operand" /></Wire><Wire UId="31"><NameCon UId="25" Name="out" /><NameCon UId="26" Name="in" /></Wire><Wire UId="32"><IdentCon UId="23" /><NameCon UId="26" Name="operand" /></Wire></Wires></FlgNet></NetworkSource><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList><MultilingualText ID="111C" CompositionName="Comment"><ObjectList><MultilingualTextItem ID="112C" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text /></AttributeList></MultilingualTextItem></ObjectList></MultilingualText><MultilingualText ID="111" CompositionName="Title"><ObjectList><MultilingualTextItem ID="112" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text>Manual active interlock</Text></AttributeList></MultilingualTextItem></ObjectList></MultilingualText></ObjectList></SW.Blocks.CompileUnit><SW.Blocks.CompileUnit ID="120" CompositionName="CompileUnits"><AttributeList><NetworkSource><FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v4"><Parts><Access Scope="GlobalVariable" UId="21"><Symbol><Component Name="DB1" /><Component Name="Emergency_Stop" /></Symbol></Access><Access Scope="GlobalVariable" UId="22"><Symbol><Component Name="DB1" /><Component Name="Manual_Mode" /></Symbol></Access><Access Scope="GlobalVariable" UId="23"><Symbol><Component Name="DB1" /><Component Name="Auto_Mode" /></Symbol></Access><Access Scope="GlobalVariable" UId="26"><Symbol><Component Name="DB1" /><Component Name="Auto_Active" /></Symbol></Access><Part Name="Contact" UId="24"><Negated Name="operand" /></Part><Part Name="Contact" UId="25"><Negated Name="operand" /></Part><Part Name="Contact" UId="27" /><Part Name="Coil" UId="28" /></Parts><Wires><Wire UId="29"><Powerrail /><NameCon UId="24" Name="in" /></Wire><Wire UId="30"><IdentCon UId="21" /><NameCon UId="24" Name="operand" /></Wire><Wire UId="31"><NameCon UId="24" Name="out" /><NameCon UId="25" Name="in" /></Wire><Wire UId="32"><IdentCon UId="22" /><NameCon UId="25" Name="operand" /></Wire><Wire UId="33"><NameCon UId="25" Name="out" /><NameCon UId="27" Name="in" /></Wire><Wire UId="34"><IdentCon UId="23" /><NameCon UId="27" Name="operand" /></Wire><Wire UId="35"><NameCon UId="27" Name="out" /><NameCon UId="28" Name="in" /></Wire><Wire UId="36"><IdentCon UId="26" /><NameCon UId="28" Name="operand" /></Wire></Wires></FlgNet></NetworkSource><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList><MultilingualText ID="121C" CompositionName="Comment"><ObjectList><MultilingualTextItem ID="122C" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text /></AttributeList></MultilingualTextItem></ObjectList></MultilingualText><MultilingualText ID="121" CompositionName="Title"><ObjectList><MultilingualTextItem ID="122" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text>Auto active interlock</Text></AttributeList></MultilingualTextItem></ObjectList></MultilingualText></ObjectList></SW.Blocks.CompileUnit><SW.Blocks.CompileUnit ID="130" CompositionName="CompileUnits"><AttributeList><NetworkSource><FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v4"><Parts><Access Scope="GlobalVariable" UId="21"><Symbol><Component Name="DB1" /><Component Name="Manual_Active" /></Symbol></Access><Access Scope="GlobalVariable" UId="22"><Symbol><Component Name="DB1" /><Component Name="Manual_PumpValve_Enable" /></Symbol></Access><Part Name="Contact" UId="23" /><Part Name="Coil" UId="24" /></Parts><Wires><Wire UId="25"><Powerrail /><NameCon UId="23" Name="in" /></Wire><Wire UId="26"><IdentCon UId="21" /><NameCon UId="23" Name="operand" /></Wire><Wire UId="27"><NameCon UId="23" Name="out" /><NameCon UId="24" Name="in" /></Wire><Wire UId="28"><IdentCon UId="22" /><NameCon UId="24" Name="operand" /></Wire></Wires></FlgNet></NetworkSource><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList><MultilingualText ID="131C" CompositionName="Comment"><ObjectList><MultilingualTextItem ID="132C" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text /></AttributeList></MultilingualTextItem></ObjectList></MultilingualText><MultilingualText ID="131" CompositionName="Title"><ObjectList><MultilingualTextItem ID="132" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text>Manual pump valve enable</Text></AttributeList></MultilingualTextItem></ObjectList></MultilingualText></ObjectList></SW.Blocks.CompileUnit><SW.Blocks.CompileUnit ID="140" CompositionName="CompileUnits"><AttributeList><NetworkSource><FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v4"><Parts><Access Scope="GlobalVariable" UId="21"><Symbol><Component Name="DB1" /><Component Name="Comm_Normal" /></Symbol></Access><Access Scope="GlobalVariable" UId="22"><Symbol><Component Name="DB1" /><Component Name="System_Alarm_Light" /></Symbol></Access><Part Name="Contact" UId="23"><Negated Name="operand" /></Part><Part Name="Coil" UId="24" /></Parts><Wires><Wire UId="25"><Powerrail /><NameCon UId="23" Name="in" /></Wire><Wire UId="26"><IdentCon UId="21" /><NameCon UId="23" Name="operand" /></Wire><Wire UId="27"><NameCon UId="23" Name="out" /><NameCon UId="24" Name="in" /></Wire><Wire UId="28"><IdentCon UId="22" /><NameCon UId="24" Name="operand" /></Wire></Wires></FlgNet></NetworkSource><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList><MultilingualText ID="141C" CompositionName="Comment"><ObjectList><MultilingualTextItem ID="142C" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text /></AttributeList></MultilingualTextItem></ObjectList></MultilingualText><MultilingualText ID="141" CompositionName="Title"><ObjectList><MultilingualTextItem ID="142" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text>Alarm light</Text></AttributeList></MultilingualTextItem></ObjectList></MultilingualText></ObjectList></SW.Blocks.CompileUnit><SW.Blocks.CompileUnit ID="150" CompositionName="CompileUnits"><AttributeList><NetworkSource><FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v4"><Parts><Access Scope="GlobalVariable" UId="21"><Symbol><Component Name="DB1" /><Component Name="Manual_PumpValve_Enable" /></Symbol></Access><Access Scope="GlobalVariable" UId="22"><Symbol><Component Name="DB1" /><Component Name="Manual_q_f_Set" /></Symbol></Access><Access Scope="GlobalVariable" UId="23"><Symbol><Component Name="DB1" /><Component Name="Manual_q_f_Selected" /></Symbol></Access><Part Name="Contact" UId="24" /><Part Name="Move" UId="25"><TemplateValue Name="Card" Type="Cardinality">1</TemplateValue></Part></Parts><Wires><Wire UId="26"><Powerrail /><NameCon UId="24" Name="in" /></Wire><Wire UId="27"><IdentCon UId="21" /><NameCon UId="24" Name="operand" /></Wire><Wire UId="28"><NameCon UId="24" Name="out" /><NameCon UId="25" Name="en" /></Wire><Wire UId="29"><IdentCon UId="22" /><NameCon UId="25" Name="in" /></Wire><Wire UId="30"><IdentCon UId="23" /><NameCon UId="25" Name="out" /></Wire></Wires></FlgNet></NetworkSource><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList><MultilingualText ID="151C" CompositionName="Comment"><ObjectList><MultilingualTextItem ID="152C" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text /></AttributeList></MultilingualTextItem></ObjectList></MultilingualText><MultilingualText ID="151" CompositionName="Title"><ObjectList><MultilingualTextItem ID="152" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text>Select manual q_f</Text></AttributeList></MultilingualTextItem></ObjectList></MultilingualText></ObjectList></SW.Blocks.CompileUnit><SW.Blocks.CompileUnit ID="160" CompositionName="CompileUnits"><AttributeList><NetworkSource><FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v4"><Parts><Access Scope="GlobalVariable" UId="21"><Symbol><Component Name="DB1" /><Component Name="Manual_PumpValve_Enable" /></Symbol></Access><Access Scope="GlobalVariable" UId="22"><Symbol><Component Name="DB1" /><Component Name="Manual_q_a_Set" /></Symbol></Access><Access Scope="GlobalVariable" UId="23"><Symbol><Component Name="DB1" /><Component Name="Manual_q_a_Selected" /></Symbol></Access><Part Name="Contact" UId="24" /><Part Name="Move" UId="25"><TemplateValue Name="Card" Type="Cardinality">1</TemplateValue></Part></Parts><Wires><Wire UId="26"><Powerrail /><NameCon UId="24" Name="in" /></Wire><Wire UId="27"><IdentCon UId="21" /><NameCon UId="24" Name="operand" /></Wire><Wire UId="28"><NameCon UId="24" Name="out" /><NameCon UId="25" Name="en" /></Wire><Wire UId="29"><IdentCon UId="22" /><NameCon UId="25" Name="in" /></Wire><Wire UId="30"><IdentCon UId="23" /><NameCon UId="25" Name="out" /></Wire></Wires></FlgNet></NetworkSource><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList><MultilingualText ID="161C" CompositionName="Comment"><ObjectList><MultilingualTextItem ID="162C" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text /></AttributeList></MultilingualTextItem></ObjectList></MultilingualText><MultilingualText ID="161" CompositionName="Title"><ObjectList><MultilingualTextItem ID="162" CompositionName="Items"><AttributeList><Culture>zh-CN</Culture><Text>Select manual q_a</Text></AttributeList></MultilingualTextItem></ObjectList></MultilingualText></ObjectList></SW.Blocks.CompileUnit><MultilingualText ID="26" CompositionName="Title">
+        <ObjectList>
+          <MultilingualTextItem ID="27" CompositionName="Items">
+            <AttributeList>
+              <Culture>zh-CN</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+    </ObjectList>
+  </SW.Blocks.FC>
+</Document>

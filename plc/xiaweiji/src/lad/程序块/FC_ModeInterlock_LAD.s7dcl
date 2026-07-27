@@ -1,0 +1,89 @@
+﻿{
+    S7_Optimized := "TRUE";
+    S7_PreferredLanguage := "LAD";
+    S7_Version := "0.1"
+}
+FUNCTION "FC_ModeInterlock_LAD" : Void
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_54k"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "DB1".Remote_Comms_OK )
+            I_Contact( "DB1".Emergency_Stop )
+            Coil( "DB1".Comm_Normal )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_4dX"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            I_Contact( "DB1".Emergency_Stop )
+            Contact( "DB1".Manual_Mode )
+            Coil( "DB1".Manual_Active )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_XZ"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            I_Contact( "DB1".Emergency_Stop )
+            I_Contact( "DB1".Manual_Mode )
+            Contact( "DB1".Auto_Mode )
+            Coil( "DB1".Auto_Active )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_3wy"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "DB1".Manual_Active )
+            Coil( "DB1".Manual_PumpValve_Enable )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_kX"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            I_Contact( "DB1".Comm_Normal )
+            Coil( "DB1".System_Alarm_Light )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_4kQ"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "DB1".Manual_PumpValve_Enable )
+            { S7_GenerateENO := "TRUE" }
+            Move(
+                in := "DB1".Manual_q_f_Set,
+                out1 => "DB1".Manual_q_f_Selected
+            )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_4Ec"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "DB1".Manual_PumpValve_Enable )
+            { S7_GenerateENO := "TRUE" }
+            Move(
+                in := "DB1".Manual_q_a_Set,
+                out1 => "DB1".Manual_q_a_Selected
+            )
+        END_RUNG
+    END_NETWORK
+END_FUNCTION

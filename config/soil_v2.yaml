@@ -1,0 +1,116 @@
+soil_v2:
+  # 当前先使用文献/工程占位参数。取得真实田间数据后只替换本文件，
+  # 不需要修改 SAC、PLC 或土壤模型代码。
+  parameter_status: literature_placeholder
+  parameter_version: v2.0-placeholder-2026-07-14
+  default_model: layered_v2
+  supported_models:
+    - lumped_v1
+    - layered_v2
+
+  profile:
+    area_ha: 1.0
+    bulk_density_kg_m3: 1350.0
+    layer_thickness_mm: [100.0, 100.0, 100.0, 100.0]
+    theta_sat: [0.42, 0.42, 0.41, 0.40]
+    theta_fc: [0.334, 0.334, 0.325, 0.315]
+    theta_wp: [0.09, 0.09, 0.095, 0.10]
+    # 河套灌区文献值 15.3 mm/d 已明确换算为 0.6375 mm/h。
+    k_sat_mm_h: [0.6375, 0.55, 0.45, 0.35]
+    drainage_beta: [2.0, 2.1, 2.2, 2.3]
+    field_capacity_drain_fraction: 0.65
+    unsaturated_drain_fraction: 0.015
+    theta_init: [0.20, 0.205, 0.21, 0.215]
+    ec_init_ds_m: [0.15, 0.16, 0.17, 0.18]
+    ph_init: [7.75, 7.80, 7.85, 7.90]
+
+  # 现场综合修正系数，用于吸收灌溉均匀度和蒸散估计误差。
+  forcing:
+    irrigation_efficiency: 1.0
+    et_scale: 1.0
+
+  salinity:
+    input_ec_scale: 1.0
+    transport_efficiency: 1.0
+
+  ph:
+    # buffer_water_equivalent_mm 越大，土壤 pH 对灌溉液变化越慢。
+    buffer_water_equivalent_mm: [70.0, 90.0, 120.0, 160.0]
+    irrigation_response_fraction: 0.18
+    percolation_response_fraction: 0.12
+    equilibrium_ph: [7.80, 7.85, 7.90, 7.95]
+    recovery_per_day: 0.002
+    min_ph: 4.0
+    max_ph: 9.5
+
+  nutrients:
+    # 内部状态统一使用 mg/kg；输入质量统一使用 mg/m2。
+    initial_mg_kg:
+      n: [42.0, 38.0, 34.0, 30.0]
+      p: [18.0, 16.0, 14.0, 12.0]
+      k: [125.0, 115.0, 105.0, 95.0]
+    # 母液有效养分浓度是占位值，后续必须用肥料化验/标定值替换。
+    stock_mg_l:
+      n: 8000.0
+      p: 2500.0
+      k: 7000.0
+    mobile_fraction:
+      n: 0.90
+      p: 0.08
+      k: 0.45
+    mineralization_mg_m2_day:
+      n: 35.0
+      p: 4.0
+      k: 8.0
+    uptake_mg_m2_day:
+      emergence: {n: 18.0, p: 4.0, k: 20.0}
+      vegetative: {n: 75.0, p: 16.0, k: 85.0}
+      tuber_init: {n: 105.0, p: 25.0, k: 145.0}
+      bulking: {n: 125.0, p: 28.0, k: 205.0}
+      starch_accumulation: {n: 75.0, p: 18.0, k: 155.0}
+      maturation: {n: 30.0, p: 8.0, k: 65.0}
+
+    # 根区有效养分目标（mg/kg）仅用于数字孪生评价与后续 SAC 奖励扩展。
+    # 当前为工程占位值；取得分层土样和作物诊断数据后，应按阶段标定。
+    target_mg_kg:
+      emergence: {n: 40.0, p: 17.0, k: 115.0}
+      vegetative: {n: 45.0, p: 18.0, k: 125.0}
+      tuber_init: {n: 50.0, p: 20.0, k: 140.0}
+      bulking: {n: 55.0, p: 22.0, k: 155.0}
+      starch_accumulation: {n: 45.0, p: 18.0, k: 145.0}
+      maturation: {n: 35.0, p: 15.0, k: 125.0}
+
+  stage_recipe:
+    # 配方会先归一化，再把 q_f 对应的母液养分质量分配给 N/P/K。
+    emergence: {n: 0.38, p: 0.28, k: 0.34}
+    vegetative: {n: 0.40, p: 0.25, k: 0.35}
+    tuber_init: {n: 0.36, p: 0.28, k: 0.36}
+    bulking: {n: 0.31, p: 0.24, k: 0.45}
+    starch_accumulation: {n: 0.29, p: 0.22, k: 0.49}
+    maturation: {n: 0.30, p: 0.23, k: 0.47}
+
+  root_distribution:
+    emergence: [0.82, 0.18, 0.00, 0.00]
+    vegetative: [0.62, 0.30, 0.08, 0.00]
+    tuber_init: [0.48, 0.32, 0.16, 0.04]
+    bulking: [0.38, 0.31, 0.21, 0.10]
+    starch_accumulation: [0.36, 0.31, 0.22, 0.11]
+    maturation: [0.40, 0.31, 0.20, 0.09]
+
+  diagnostics:
+    mass_balance_tolerance: 1.0e-6
+  # SAC 训练时按相对范围随机采样参数，避免策略过拟合单一土壤参数。
+  # 评估环境关闭随机化，使用当前激活的标定参数。
+  domain_randomization:
+    relative_range:
+      profile.k_sat_mm_h: 0.20
+      profile.drainage_beta: 0.12
+      profile.field_capacity_drain_fraction: 0.15
+      profile.unsaturated_drain_fraction: 0.30
+      forcing.irrigation_efficiency: 0.08
+      forcing.et_scale: 0.10
+      salinity.input_ec_scale: 0.10
+      salinity.transport_efficiency: 0.15
+      ph.buffer_water_equivalent_mm: 0.20
+      ph.irrigation_response_fraction: 0.15
+

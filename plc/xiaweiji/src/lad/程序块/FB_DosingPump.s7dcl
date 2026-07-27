@@ -1,0 +1,238 @@
+﻿{
+    S7_BlockNumber := "2";
+    S7_Optimized := "TRUE";
+    S7_PreferredLanguage := "LAD";
+    S7_Version := "0.1"
+}
+FUNCTION_BLOCK "FB_DosingPump"
+    VAR_INPUT
+        Enable : Bool;
+        Flow_SP : Real;
+        Flow_PV : Real;
+        Flow_Min : Real := 0.05;
+        Flow_Max : Real := 4.0;
+        AO_Off_Raw : Int := 0;
+        AO_Raw_Min : Int := 5530;
+        AO_Raw_Max : Int := 27648;
+        Kp_Flow : Real := 10.0;
+        Ki_Flow : Real := 2.0;
+        Cycle_Time_s : Real := 0.01;
+        Run_Feedback : Bool;
+        Drive_Ready : Bool;
+        Drive_Fault : Bool;
+        Tank_Low_Level : Bool;
+        Water_Flow_OK : Bool;
+        Reset : Bool;
+        Start_Fail_Delay_s : Real := 3.0;
+        No_Flow_Delay_s : Real := 5.0;
+        Flow_Deviation_Delay_s : Real := 5.0;
+        No_Flow_Threshold : Real := 0.05;
+        Flow_Deviation_Abs : Real := 0.2;
+        Flow_Deviation_Rel : Real := 0.2;
+    END_VAR
+    VAR_OUTPUT
+        Run_Command : Bool;
+        AO_Command_Raw : Int;
+        Flow_SP_Limited : Real;
+        Running : Bool;
+        Ready : Bool;
+        No_Flow_Alarm : Bool;
+        Flow_Deviation_Alarm : Bool;
+        Start_Fail_Alarm : Bool;
+        Saturated : Bool;
+        Interlocked : Bool;
+        Control_Percent : Real;
+    END_VAR
+    VAR
+        Integral_Percent : Real;
+        Start_Fail_Timer_s : Real;
+        No_Flow_Timer_s : Real;
+        Flow_Deviation_Timer_s : Real;
+        No_Flow_Latched : Bool;
+        Start_Fail_Latched : Bool;
+    END_VAR
+    VAR_TEMP
+        Tmp_Cycle_s : Real;
+        Tmp_Flow_Error : Real;
+        Tmp_Feedforward_Percent : Real;
+        Tmp_Integral_Candidate : Real;
+        Tmp_Output_Unclamped : Real;
+        Tmp_Deviation_Limit : Real;
+        Tmp_Raw_Real : Real;
+        Tmp_Desired_Run : Bool;
+        Tmp_Config_OK : Bool;
+    END_VAR
+
+    { S7_Language := "SCL" }
+    NETWORK
+        #Tmp_Cycle_s := #Cycle_Time_s;
+                IF #Tmp_Cycle_s <= 0.0 THEN
+                    #Tmp_Cycle_s := 0.01;
+                END_IF;
+        
+                IF #Reset THEN
+                    #Integral_Percent := 0.0;
+                    #Start_Fail_Timer_s := 0.0;
+                    #No_Flow_Timer_s := 0.0;
+                    #Flow_Deviation_Timer_s := 0.0;
+                    #No_Flow_Latched := FALSE;
+                    #Start_Fail_Latched := FALSE;
+                END_IF;
+        
+                #Tmp_Config_OK := (#Flow_Min >= 0.0) AND (#Flow_Max > #Flow_Min)
+                    AND (#AO_Raw_Max > #AO_Raw_Min);
+    END_NETWORK
+    { S7_Language := "LAD" }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Tmp_Config_OK )
+            Contact( #Drive_Ready )
+            I_Contact( #Drive_Fault )
+            I_Contact( #Tank_Low_Level )
+            Contact( #Water_Flow_OK )
+            Coil( #Ready )
+        END_RUNG
+        RUNG wire#powerrail
+            I_Contact( #Ready )
+            Coil( #Interlocked )
+        END_RUNG
+    END_NETWORK
+    { S7_Language := "SCL" }
+    NETWORK
+        IF (#Flow_SP <= 0.0) OR NOT #Tmp_Config_OK THEN
+                    #Flow_SP_Limited := 0.0;
+                ELSE
+                    #Flow_SP_Limited := #Flow_SP;
+                    IF #Flow_SP_Limited < #Flow_Min THEN
+                        #Flow_SP_Limited := #Flow_Min;
+                    END_IF;
+                    IF #Flow_SP_Limited > #Flow_Max THEN
+                        #Flow_SP_Limited := #Flow_Max;
+                    END_IF;
+                END_IF;
+    END_NETWORK
+    { S7_Language := "LAD" }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Enable )
+            { S7_Templates := "SrcType := Real" }
+            GT_Contact(
+                in1 := #Flow_SP_Limited,
+                in2 := 0.0
+            )
+            Contact( #Ready )
+            I_Contact( #Start_Fail_Latched )
+            I_Contact( #No_Flow_Latched )
+            Coil( #Tmp_Desired_Run )
+        END_RUNG
+    END_NETWORK
+    { S7_Language := "SCL" }
+    NETWORK
+        IF #Tmp_Desired_Run AND NOT #Run_Feedback THEN
+                    #Start_Fail_Timer_s := #Start_Fail_Timer_s + #Tmp_Cycle_s;
+                    IF #Start_Fail_Timer_s >= #Start_Fail_Delay_s THEN
+                        #Start_Fail_Latched := TRUE;
+                    END_IF;
+                ELSE
+                    #Start_Fail_Timer_s := 0.0;
+                END_IF;
+        
+                IF #Tmp_Desired_Run AND #Run_Feedback AND (#Flow_PV <= #No_Flow_Threshold) THEN
+                    #No_Flow_Timer_s := #No_Flow_Timer_s + #Tmp_Cycle_s;
+                    IF #No_Flow_Timer_s >= #No_Flow_Delay_s THEN
+                        #No_Flow_Latched := TRUE;
+                    END_IF;
+                ELSE
+                    #No_Flow_Timer_s := 0.0;
+                END_IF;
+    END_NETWORK
+    { S7_Language := "LAD" }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Start_Fail_Latched )
+            Coil( #Start_Fail_Alarm )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #No_Flow_Latched )
+            Coil( #No_Flow_Alarm )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #Enable )
+            { S7_Templates := "SrcType := Real" }
+            GT_Contact(
+                in1 := #Flow_SP_Limited,
+                in2 := 0.0
+            )
+            Contact( #Ready )
+            I_Contact( #Start_Fail_Alarm )
+            I_Contact( #No_Flow_Alarm )
+            Coil( #Run_Command )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #Run_Command )
+            Contact( #Run_Feedback )
+            Coil( #Running )
+        END_RUNG
+    END_NETWORK
+    { S7_Language := "SCL" }
+    NETWORK
+        #Tmp_Flow_Error := #Flow_SP_Limited - #Flow_PV;
+                #Tmp_Deviation_Limit := #Flow_Deviation_Abs;
+                IF (#Flow_Deviation_Rel * #Flow_SP_Limited) > #Tmp_Deviation_Limit THEN
+                    #Tmp_Deviation_Limit := #Flow_Deviation_Rel * #Flow_SP_Limited;
+                END_IF;
+        
+                #Flow_Deviation_Alarm := FALSE;
+                IF #Running AND (ABS(#Tmp_Flow_Error) > #Tmp_Deviation_Limit) THEN
+                    #Flow_Deviation_Timer_s := #Flow_Deviation_Timer_s + #Tmp_Cycle_s;
+                    IF #Flow_Deviation_Timer_s >= #Flow_Deviation_Delay_s THEN
+                        #Flow_Deviation_Alarm := TRUE;
+                    END_IF;
+                ELSE
+                    #Flow_Deviation_Timer_s := 0.0;
+                    #Flow_Deviation_Alarm := FALSE;
+                END_IF;
+        
+                IF #Run_Command THEN
+                    IF #Flow_Max > #Flow_Min THEN
+                        #Tmp_Feedforward_Percent := (#Flow_SP_Limited - #Flow_Min)
+                            / (#Flow_Max - #Flow_Min) * 100.0;
+                    ELSE
+                        #Tmp_Feedforward_Percent := 0.0;
+                    END_IF;
+                    IF #Tmp_Feedforward_Percent < 0.0 THEN #Tmp_Feedforward_Percent := 0.0; END_IF;
+                    IF #Tmp_Feedforward_Percent > 100.0 THEN #Tmp_Feedforward_Percent := 100.0; END_IF;
+        
+                    #Tmp_Integral_Candidate := #Integral_Percent
+                        + (#Ki_Flow * #Tmp_Flow_Error * #Tmp_Cycle_s);
+                    IF #Tmp_Integral_Candidate > 100.0 THEN #Tmp_Integral_Candidate := 100.0; END_IF;
+                    IF #Tmp_Integral_Candidate < -100.0 THEN #Tmp_Integral_Candidate := -100.0; END_IF;
+                    #Tmp_Output_Unclamped := #Tmp_Feedforward_Percent
+                        + (#Kp_Flow * #Tmp_Flow_Error) + #Tmp_Integral_Candidate;
+                    IF NOT (((#Tmp_Output_Unclamped > 100.0) AND (#Tmp_Flow_Error > 0.0))
+                        OR ((#Tmp_Output_Unclamped < 0.0) AND (#Tmp_Flow_Error < 0.0))) THEN
+                        #Integral_Percent := #Tmp_Integral_Candidate;
+                    END_IF;
+        
+                    #Tmp_Output_Unclamped := #Tmp_Feedforward_Percent
+                        + (#Kp_Flow * #Tmp_Flow_Error) + #Integral_Percent;
+                    #Control_Percent := #Tmp_Output_Unclamped;
+                    IF #Control_Percent > 100.0 THEN #Control_Percent := 100.0; END_IF;
+                    IF #Control_Percent < 0.0 THEN #Control_Percent := 0.0; END_IF;
+                    #Saturated := (#Tmp_Output_Unclamped <> #Control_Percent)
+                        OR (#Flow_SP_Limited <> #Flow_SP);
+        
+                    #Tmp_Raw_Real := INT_TO_REAL(#AO_Raw_Min)
+                        + (#Control_Percent / 100.0)
+                        * INT_TO_REAL(#AO_Raw_Max - #AO_Raw_Min);
+                    #AO_Command_Raw := REAL_TO_INT(#Tmp_Raw_Real);
+                    IF #AO_Command_Raw > #AO_Raw_Max THEN #AO_Command_Raw := #AO_Raw_Max; END_IF;
+                    IF #AO_Command_Raw < #AO_Raw_Min THEN #AO_Command_Raw := #AO_Raw_Min; END_IF;
+                ELSE
+                    #Integral_Percent := 0.0;
+                    #Control_Percent := 0.0;
+                    #AO_Command_Raw := #AO_Off_Raw;
+                    #Saturated := FALSE;
+                END_IF;
+    END_NETWORK
+END_FUNCTION_BLOCK

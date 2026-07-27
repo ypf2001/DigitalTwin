@@ -23,11 +23,19 @@ class TrainRequest(BaseModel):
     timesteps: int = Field(default=120000, ge=1000, le=1000000)
     resume: bool = False
     load_model: str = ""
+    soil_model: str = "layered_v2"
+    domain_randomization: bool = True
 
     @validator('stage')
     def validate_stage(cls, v):
         if v not in ["INI", "DEV", "MID", "LATE"]:
             raise ValueError('stage must be one of: INI, DEV, MID, LATE')
+        return v
+
+    @validator('soil_model')
+    def validate_soil_model(cls, v):
+        if v not in ["lumped_v1", "layered_v2"]:
+            raise ValueError('soil_model must be one of: lumped_v1, layered_v2')
         return v
 
 

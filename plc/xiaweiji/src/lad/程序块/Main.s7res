@@ -1,0 +1,7 @@
+﻿MultiLingualTexts:
+  - id: MLC_4iB
+    zh-CN: '"Main Program Sweep (Cycle)"'
+    en-US: '"Main Program Sweep (Cycle)"'
+  - id: MLC_Nw
+    zh-CN: 心跳快照（防异步刷新）
+    en-US: Heartbeat snapshot (prevents asynchronous refresh)
